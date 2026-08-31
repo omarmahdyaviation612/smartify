@@ -22,6 +22,7 @@ describe("TutorService", () => {
 
   function makeService(overrides: {
     subscription?: any;
+    freeTrial?: any;
     reserveResult?: { reserved: boolean; limit: number };
     providerGenerate?: jest.Mock;
     conversation?: any;
@@ -34,6 +35,12 @@ describe("TutorService", () => {
           findUnique: jest.fn().mockResolvedValue(
             overrides.subscription !== undefined ? overrides.subscription : { status: "active" },
           ),
+        },
+        freeTutorTrial: {
+          upsert: jest.fn().mockResolvedValue(overrides.freeTrial ?? { id: "trial-1", subjectId: "subject-1", questionsUsed: 0 }),
+          findUnique: jest.fn().mockResolvedValue(overrides.freeTrial ?? null),
+          create: jest.fn().mockResolvedValue({ id: "trial-1", subjectId: "subject-1", questionsUsed: 1 }),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         aIConversation: {
           findUnique: jest.fn().mockResolvedValue(overrides.conversation ?? null),
@@ -95,20 +102,39 @@ describe("TutorService", () => {
     expect(usageService.reserveDailySlot).not.toHaveBeenCalled();
   });
 
-  it("requires an active subscription — rejects when the student has none", async () => {
+  it("allows students without an active subscription to use their one-time free trial", async () => {
     const { service, usageService } = makeService({ subscription: null });
-    await expect(service.sendMessage("user-1", { subjectId: "subject-1", message: "hi" })).rejects.toThrow(ForbiddenException);
+    await expect(service.sendMessage("user-1", { subjectId: "subject-1", message: "hi" })).resolves.toMatchObject({ reply: "Here's a hint..." });
     expect(usageService.reserveDailySlot).not.toHaveBeenCalled();
   });
 
-  it("requires the subscription to be ACTIVE, not just present (e.g. rejects 'past_due')", async () => {
-    const { service, usageService } = makeService({ subscription: { status: "past_due" } });
-    await expect(service.sendMessage("user-1", { subjectId: "subject-1", message: "hi" })).rejects.toThrow(ForbiddenException);
-    expect(usageService.reserveDailySlot).not.toHaveBeenCalled();
+  it("allows an un subscribed student to use exactly two questions in one free lesson", async () => {
+    const { service, prisma } = makeService({ subscription: null });
+
+    await expect(service.sendMessage("user-1", { subjectId: "subject-1", message: "first" })).resolves.toMatchObject({
+      reply: "Here's a hint...",
+    });
+    prisma.client.freeTutorTrial.findUnique.mockResolvedValueOnce({ id: "trial-1", subjectId: "subject-1", questionsUsed: 1 });
+
+    await expect(service.sendMessage("user-1", { subjectId: "subject-1", message: "second" })).resolves.toMatchObject({
+      reply: "Here's a hint...",
+    });
+    expect(prisma.client.freeTutorTrial.updateMany).toHaveBeenCalled();
+  });
+
+  it("rejects a free-trial student after two questions and prevents another subject", async () => {
+    const { service, prisma } = makeService({
+      subscription: null,
+      freeTrial: { id: "trial-1", subjectId: "subject-1", questionsUsed: 2, completedAt: new Date() },
+    });
+
+    await expect(service.sendMessage("user-1", { subjectId: "subject-1", message: "third" })).rejects.toThrow(ForbiddenException);
+    await expect(service.sendMessage("user-1", { subjectId: "subject-2", message: "other lesson" })).rejects.toThrow(ForbiddenException);
+    expect(prisma.client.freeTutorTrial.updateMany).not.toHaveBeenCalled();
   });
 
   it("rejects when the daily reservation fails (limit already reached)", async () => {
-    const { service, usageService } = makeService({ reserveResult: { reserved: false, limit: 10 } });
+    const { service } = makeService({ reserveResult: { reserved: false, limit: 10 } });
     await expect(service.sendMessage("user-1", { subjectId: "subject-1", message: "hi" })).rejects.toThrow(ForbiddenException);
   });
 

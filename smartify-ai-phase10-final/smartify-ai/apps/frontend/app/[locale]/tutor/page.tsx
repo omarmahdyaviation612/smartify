@@ -2,6 +2,7 @@
 
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getTutorCopy } from "@/content/tutor";
 import { getMarketingCopy } from "@/content/marketing";
@@ -33,10 +34,19 @@ export default function TutorPage() {
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [remaining, setRemaining] = useState<{ dailyRemaining: number; extraRemaining: number; totalRemaining: number; packPriceEGP: number; packSize: number } | null>(null);
+  const [remaining, setRemaining] = useState<{
+    dailyRemaining: number;
+    extraRemaining: number;
+    totalRemaining: number;
+    packPriceEGP: number;
+    packSize: number;
+    isFreeTrial?: boolean;
+    trialSubjectId?: string | null;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [notOnboarded, setNotOnboarded] = useState(false);
+  const trialFinished = Boolean(remaining?.isFreeTrial && remaining.totalRemaining === 0);
 
   useEffect(() => {
     apiFetch<{ subjects: Subject[] }>("/dashboard/summary")
@@ -76,7 +86,8 @@ export default function TutorPage() {
       setRemaining(updated);
     } catch (err: any) {
       const msg = err?.message ?? "";
-      if (msg.includes("not configured")) setError(copy.notConfigured);
+      if (msg.includes("free trial")) setError(copy.freeTrialLimitReached);
+      else if (msg.includes("not configured")) setError(copy.notConfigured);
       else if (msg.includes("used today")) setError(copy.limitReached);
       else setError(copy.genericError);
     } finally {
@@ -122,6 +133,7 @@ export default function TutorPage() {
             {subjects && subjects.length > 0 && (
               <select
                 value={subjectId}
+                disabled={Boolean(remaining?.isFreeTrial && remaining.trialSubjectId)}
                 onChange={(e) => {
                   setSubjectId(e.target.value);
                   setConversationId(undefined);
@@ -141,8 +153,16 @@ export default function TutorPage() {
 
           {remaining && (
             <div className="mb-4 flex flex-wrap items-center gap-3">
-              <p className="text-xs text-neutral-500">{copy.remainingToday(remaining.dailyRemaining, remaining.extraRemaining)}</p>
-              {remaining.totalRemaining === 0 && (
+              <p className="text-xs text-neutral-500">
+                {remaining.isFreeTrial
+                  ? copy.freeTrialRemaining(remaining.totalRemaining)
+                  : copy.remainingToday(remaining.dailyRemaining, remaining.extraRemaining)}
+              </p>
+              {remaining.isFreeTrial && remaining.totalRemaining === 0 ? (
+                <Link href={`/${locale}/pricing`}>
+                  <SmartifyButton type="button" variant="secondary">{copy.subscribeToContinue}</SmartifyButton>
+                </Link>
+              ) : remaining.totalRemaining === 0 && (
                 <SmartifyButton type="button" variant="secondary" onClick={handleBuyPack} disabled={sending}>
                   {sending ? copy.buyingPack : copy.buyPack}
                 </SmartifyButton>
@@ -178,9 +198,9 @@ export default function TutorPage() {
               onChange={(e) => setInput(e.target.value)}
               placeholder={copy.inputPlaceholder}
               className="flex-1 rounded-sf border border-neutral-300 px-4 py-3"
-              disabled={sending || !subjectId}
+              disabled={sending || !subjectId || trialFinished}
             />
-            <SmartifyButton type="submit" variant="ai" disabled={sending || !input.trim() || !subjectId}>
+            <SmartifyButton type="submit" variant="ai" disabled={sending || !input.trim() || !subjectId || trialFinished}>
               {copy.sendLabel}
             </SmartifyButton>
           </form>

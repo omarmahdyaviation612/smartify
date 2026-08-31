@@ -66,6 +66,7 @@ model StudentProfile {
   aiConversations  AIConversation[]
   aiCredits        AICredits?
   subscription     Subscription?
+  freeTutorTrial   FreeTutorTrial?
   parentLinks      ParentStudentRelation[]
   linkInvitations  ParentLinkInvitation[]
   assessments      Assessment[]
@@ -163,6 +164,7 @@ model Subject {
   questionPackPurchases TutorQuestionPackPurchase[]
   extraQuestionCredits TutorExtraQuestionCredit[]
   tutorAnswerCache TutorAnswerCache[]
+  freeTutorTrials FreeTutorTrial[]
 
   @@index([gradeId])
 }
@@ -176,6 +178,19 @@ model StudentSubject {
   createdAt DateTime       @default(now())
 
   @@unique([studentId, subjectId])
+}
+
+model FreeTutorTrial {
+  id           String         @id @default(cuid())
+  studentId    String         @unique
+  student      StudentProfile @relation(fields: [studentId], references: [id])
+  subjectId    String
+  subject      Subject        @relation(fields: [subjectId], references: [id])
+  questionsUsed Int           @default(0)
+  createdAt    DateTime       @default(now())
+  completedAt  DateTime?
+
+  @@index([subjectId])
 }
 
 model Unit {

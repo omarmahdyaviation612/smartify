@@ -37,7 +37,48 @@ export class TutorService {
 
   async getRemainingToday(userId: string, subjectId: string) {
     const profile = await this.getProfileOrThrow(userId);
+    const subscription = await this.prisma.client.subscription.findUnique({ where: { studentId: profile.id } });
+    if (!subscription || subscription.status !== "active") {
+      const trial = await this.prisma.client.freeTutorTrial.findUnique({ where: { studentId: profile.id } });
+      const trialRemaining = trial && trial.subjectId === subjectId ? Math.max(0, 2 - trial.questionsUsed) : trial ? 0 : 2;
+      return {
+        dailyRemaining: 0,
+        extraRemaining: 0,
+        totalRemaining: trialRemaining,
+        packPriceEGP: 50,
+        packSize: 10,
+        freeTrialRemaining: trialRemaining,
+        trialSubjectId: trial?.subjectId ?? null,
+        isFreeTrial: true,
+      };
+    }
     return this.usageService.getRemainingToday(profile.id, subjectId);
+  }
+
+  private async reserveFreeTrial(studentId: string, subjectId: string) {
+    const trial = await this.prisma.client.freeTutorTrial.upsert({
+      where: { studentId },
+      create: { studentId, subjectId, questionsUsed: 0 },
+      update: {},
+    });
+    if (trial.subjectId !== subjectId || trial.questionsUsed >= 2 || trial.completedAt) {
+      throw new ForbiddenException("Your free trial is complete. Subscribe to continue.");
+    }
+    const updated = await this.prisma.client.freeTutorTrial.updateMany({
+      where: { id: trial.id, subjectId, questionsUsed: { lt: 2 }, completedAt: null },
+      data: { questionsUsed: { increment: 1 } },
+    });
+    if (updated.count !== 1) {
+      throw new ForbiddenException("Your free trial is complete. Subscribe to continue.");
+    }
+    return { source: "free-trial" as const };
+  }
+
+  private async releaseFreeTrial(studentId: string, subjectId: string) {
+    await this.prisma.client.freeTutorTrial.updateMany({
+      where: { studentId, subjectId, questionsUsed: { gt: 0 }, completedAt: null },
+      data: { questionsUsed: { decrement: 1 }, completedAt: null },
+    });
   }
 
   private async persistCachedReply(
@@ -113,37 +154,30 @@ export class TutorService {
       throw new BadRequestException(`Message is too long (max ${MAX_MESSAGE_CHARS} characters).`);
     }
 
-    // --- Subscription gate (cheap, no cost/slot consumed yet) ---
-    // Phase 10 hardening: the AI Tutor previously had NO subscription
-    // check at all — any signed-in student with selected subjects could
-    // use their free daily allowance regardless of billing status. This
-    // closes that gap with a coarse-grained check (any active
-    // subscription, since per-subject entitlement isn't modeled beyond
-    // "included subjects count" — see 10-phase10-decisions.md for the
-    // documented limitation). A finer-grained "is THIS subject covered
-    // by the subscription" check is a reasonable follow-up once
-    // per-subject entitlement is tracked explicitly.
+    // --- Subscription/trial gate (cheap, no cost/slot consumed yet) ---
+    // Active subscribers use the normal daily/extra-question allowance.
+    // Other signed-in students receive one account-bound, two-question trial.
     const subscription = await this.prisma.client.subscription.findUnique({ where: { studentId: profile.id } });
-    if (!subscription || subscription.status !== "active") {
-      throw new ForbiddenException("An active subscription is required to use the AI Tutor.");
-    }
+    const hasActiveSubscription = subscription?.status === "active";
 
     // --- Atomic rate-limit reservation (concurrency-safe — see AIUsageService.reserveDailySlot) ---
-    const cached = await this.answerCache.find({
-      curriculumId: profile.curriculum.id,
-      gradeId: profile.grade.id,
-      subjectId: input.subjectId,
-      topicId: input.topicId,
-      language: profile.preferredLang,
-      prompt: trimmed,
-    });
-    if (cached) {
-      return this.persistCachedReply(profile.id, input, trimmed, cached.answer);
-    }
-
-    const reservation = await this.questionPacks.consumeForTutor(profile.id, input.subjectId);
+    const reservation = hasActiveSubscription
+      ? await this.questionPacks.consumeForTutor(profile.id, input.subjectId)
+      : await this.reserveFreeTrial(profile.id, input.subjectId);
 
     try {
+      const cached = await this.answerCache.find({
+        curriculumId: profile.curriculum.id,
+        gradeId: profile.grade.id,
+        subjectId: input.subjectId,
+        topicId: input.topicId,
+        language: profile.preferredLang,
+        prompt: trimmed,
+      });
+      if (cached) {
+        return this.persistCachedReply(profile.id, input, trimmed, cached.answer);
+      }
+
       let conversation = input.conversationId
         ? await this.prisma.client.aIConversation.findUnique({ where: { id: input.conversationId } })
         : null;
@@ -244,7 +278,9 @@ export class TutorService {
         );
       }
 
-      const remainingAfter = await this.usageService.getRemainingToday(profile.id, input.subjectId);
+      const remainingAfter = hasActiveSubscription
+        ? await this.usageService.getRemainingToday(profile.id, input.subjectId)
+        : { remaining: Math.max(0, 2 - ((await this.prisma.client.freeTutorTrial.findUnique({ where: { studentId: profile.id } }))?.questionsUsed ?? 2)), limit: 2 };
 
       await this.answerCache.save({
         curriculumId: profile.curriculum.id,
@@ -277,8 +313,10 @@ export class TutorService {
       // failed, which is handled by logUntrackedUsage() instead.
       if (reservation.source === "daily") {
         await this.usageService.releaseDailySlot(profile.id, input.subjectId).catch(() => undefined);
-      } else {
+      } else if (reservation.source === "extra") {
         await this.questionPacks.refundExtraCredit(profile.id, input.subjectId).catch(() => undefined);
+      } else {
+        await this.releaseFreeTrial(profile.id, input.subjectId);
       }
       throw err;
     }

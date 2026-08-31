@@ -10,6 +10,9 @@ export interface TutorCopy {
   buyPack: string;
   buyingPack: string;
   limitReached: string;
+  freeTrialLimitReached: string;
+  freeTrialRemaining: (remaining: number) => string;
+  subscribeToContinue: string;
   notConfigured: string;
   genericError: string;
   emptyState: string;
@@ -26,6 +29,9 @@ const en: TutorCopy = {
   buyPack: "Buy 10 extra questions - 50 EGP",
   buyingPack: "Opening payment...",
   limitReached: "You've used all questions for this subject.",
+  freeTrialLimitReached: "Your free trial is complete. Subscribe to continue learning.",
+  freeTrialRemaining: (remaining) => `${remaining} free trial questions remaining`,
+  subscribeToContinue: "Subscribe to continue",
   notConfigured: "The AI Tutor isn't fully configured yet on this environment. Please try again later.",
   genericError: "Something went wrong. Please try again.",
   emptyState: "Ask a question about your current lesson to get started.",
@@ -42,6 +48,9 @@ const ar: TutorCopy = {
   buyPack: "شراء 10 أسئلة إضافية - 50 جنيه",
   buyingPack: "جاري فتح الدفع...",
   limitReached: "لقد استخدمت كل الأسئلة المتاحة لهذه المادة.",
+  freeTrialLimitReached: "انتهت الجلسة التجريبية. اشترك للمتابعة والتعلم.",
+  freeTrialRemaining: (remaining) => `متبقي ${remaining} سؤال تجريبي`,
+  subscribeToContinue: "اشترك للمتابعة",
   notConfigured: "المعلم الذكي غير مُفعّل بالكامل في هذه البيئة حاليًا. حاول مرة أخرى لاحقًا.",
   genericError: "حدث خطأ ما. حاول مرة أخرى.",
   emptyState: "اطرح سؤالًا عن درسك الحالي للبدء.",
