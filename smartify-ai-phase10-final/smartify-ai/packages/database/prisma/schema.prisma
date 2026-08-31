@@ -1,0 +1,640 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ IDENTITY & ROLES ============
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  CONTENT_MANAGER
+  SUPPORT
+  TEACHER
+  PARENT
+  STUDENT
+}
+
+model User {
+  id            String    @id @default(cuid())
+  clerkUserId   String    @unique // external identity from Clerk; sync boundary
+  email         String    @unique
+  role          UserRole  @default(STUDENT)
+  isActive      Boolean   @default(true)
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  studentProfile StudentProfile?
+  parentProfile  ParentProfile?
+  teacherProfile TeacherProfile?
+  auditLogs      AuditLog[]
+  linkInvitations ParentLinkInvitation[]
+
+  @@index([role])
+  @@index([clerkUserId])
+}
+
+model StudentProfile {
+  id               String     @id @default(cuid())
+  userId           String     @unique
+  user             User       @relation(fields: [userId], references: [id])
+  fullName         String
+  age              Int
+  country          String
+  preferredLang    String // "ar" | "en"
+  curriculumId     String
+  curriculum       Curriculum @relation(fields: [curriculumId], references: [id])
+  gradeId          String
+  grade            Grade      @relation(fields: [gradeId], references: [id])
+  weeklyStudyHours Int?
+  goals            String?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  subjects         StudentSubject[]
+  progress         StudentProgress[]
+  learningPlans    LearningPlan[]
+  quizResults      QuizResult[]
+  questionAttempts QuestionAttempt[]
+  achievements     StudentAchievement[]
+  aiConversations  AIConversation[]
+  aiCredits        AICredits?
+  subscription     Subscription?
+  parentLinks      ParentStudentRelation[]
+  linkInvitations  ParentLinkInvitation[]
+  assessments      Assessment[]
+  questionPackPurchases TutorQuestionPackPurchase[]
+  extraQuestionCredits TutorExtraQuestionCredit[]
+}
+
+model ParentProfile {
+  id       String @id @default(cuid())
+  userId   String @unique
+  user     User   @relation(fields: [userId], references: [id])
+  fullName String
+
+  children ParentStudentRelation[]
+}
+
+model TeacherProfile {
+  id       String @id @default(cuid())
+  userId   String @unique
+  user     User   @relation(fields: [userId], references: [id])
+  fullName String
+  // Reserved for future class/assignment management (Phase 2 defines the role & table only)
+}
+
+model ParentStudentRelation {
+  id                   String         @id @default(cuid())
+  parentId             String
+  parent               ParentProfile  @relation(fields: [parentId], references: [id])
+  studentId            String
+  student              StudentProfile @relation(fields: [studentId], references: [id])
+  canViewConversations Boolean        @default(false)
+  createdAt            DateTime       @default(now())
+
+  @@unique([parentId, studentId])
+}
+
+model ParentLinkInvitation {
+  id            String         @id @default(cuid())
+  code          String         @unique
+  studentId     String
+  student       StudentProfile @relation(fields: [studentId], references: [id])
+  createdByUserId String
+  createdByUser  User           @relation(fields: [createdByUserId], references: [id])
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime       @default(now())
+
+  @@index([studentId, expiresAt])
+}
+
+// ============ CURRICULUM HIERARCHY ============
+
+model Curriculum {
+  id       String  @id @default(cuid())
+  nameEn   String
+  nameAr   String
+  code     String  @unique // "LOCAL" | "EG_NATIONAL" | "BRITISH_INTL" | "AMERICAN_INTL"
+  country  String?
+  isActive Boolean @default(true)
+
+  grades          Grade[]
+  studentProfiles StudentProfile[]
+  pricingPlans    PricingPlan[]
+  tutorAnswerCache TutorAnswerCache[]
+}
+
+model Grade {
+  id           String     @id @default(cuid())
+  curriculumId String
+  curriculum   Curriculum @relation(fields: [curriculumId], references: [id])
+  nameEn       String
+  nameAr       String
+  level        Int // sort order / numeric grade
+  isActive     Boolean    @default(true)
+
+  subjects        Subject[]
+  studentProfiles StudentProfile[]
+  tutorAnswerCache TutorAnswerCache[]
+
+  @@index([curriculumId])
+}
+
+model Subject {
+  id       String  @id @default(cuid())
+  gradeId  String
+  grade    Grade   @relation(fields: [gradeId], references: [id])
+  nameEn   String
+  nameAr   String
+  icon     String?
+  isActive Boolean @default(true)
+
+  units           Unit[]
+  studentSubjects StudentSubject[]
+  assessments     Assessment[]
+  questionPackPurchases TutorQuestionPackPurchase[]
+  extraQuestionCredits TutorExtraQuestionCredit[]
+  tutorAnswerCache TutorAnswerCache[]
+
+  @@index([gradeId])
+}
+
+model StudentSubject {
+  id        String         @id @default(cuid())
+  studentId String
+  student   StudentProfile @relation(fields: [studentId], references: [id])
+  subjectId String
+  subject   Subject        @relation(fields: [subjectId], references: [id])
+  createdAt DateTime       @default(now())
+
+  @@unique([studentId, subjectId])
+}
+
+model Unit {
+  id        String  @id @default(cuid())
+  subjectId String
+  subject   Subject @relation(fields: [subjectId], references: [id])
+  nameEn    String
+  nameAr    String
+  order     Int
+
+  topics Topic[]
+
+  @@index([subjectId])
+}
+
+model Topic {
+  id     String @id @default(cuid())
+  unitId String
+  unit   Unit   @relation(fields: [unitId], references: [id])
+  nameEn String
+  nameAr String
+  order  Int
+
+  lessons   Lesson[]
+  questions Question[]
+  tutorAnswerCache TutorAnswerCache[]
+
+  @@index([unitId])
+}
+
+model Lesson {
+  id            String  @id @default(cuid())
+  topicId       String
+  topic         Topic   @relation(fields: [topicId], references: [id])
+  nameEn        String
+  nameAr        String
+  order         Int
+  contentEn     String? @db.Text
+  contentAr     String? @db.Text
+  isAiGenerated Boolean @default(false) // distinguishes AI-generated vs. verified curriculum content
+  isPlaceholder Boolean @default(false) // marks seed/demo content, never shown as reviewed curriculum
+
+  objectives LearningObjective[]
+  progress   StudentProgress[]
+
+  @@index([topicId])
+}
+
+model LearningObjective {
+  id            String @id @default(cuid())
+  lessonId      String
+  lesson        Lesson @relation(fields: [lessonId], references: [id])
+  descriptionEn String
+  descriptionAr String
+}
+
+// ============ PROGRESS & LEARNING PLANS ============
+
+model StudentProgress {
+  id           String         @id @default(cuid())
+  studentId    String
+  student      StudentProfile @relation(fields: [studentId], references: [id])
+  lessonId     String
+  lesson       Lesson         @relation(fields: [lessonId], references: [id])
+  status       String // "not_started" | "in_progress" | "completed"
+  masteryScore Float? // 0-100
+  timeSpentSec Int            @default(0)
+  updatedAt    DateTime       @updatedAt
+
+  @@unique([studentId, lessonId])
+  @@index([studentId])
+}
+
+model LearningPlan {
+  id        String         @id @default(cuid())
+  studentId String
+  student   StudentProfile @relation(fields: [studentId], references: [id])
+  title     String
+  planJson  Json // structured plan: daily/weekly tasks, AI-generated
+  isActive  Boolean        @default(true)
+  createdAt DateTime       @default(now())
+
+  @@index([studentId])
+}
+
+// ============ ASSESSMENTS, QUESTIONS, QUIZZES ============
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  TRUE_FALSE
+  SHORT_ANSWER
+  FILL_BLANK
+  MATCHING
+  STEP_PROBLEM
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+model Question {
+  id                String       @id @default(cuid())
+  topicId           String
+  topic             Topic        @relation(fields: [topicId], references: [id])
+  type              QuestionType
+  difficulty        Difficulty
+  promptEn          String       @db.Text
+  promptAr          String?      @db.Text
+  optionsJson       Json? // choices for MCQ/matching
+  correctAnswerJson Json
+  explanationEn     String?      @db.Text
+  explanationAr     String?      @db.Text
+  isAiGenerated     Boolean      @default(false)
+  isPlaceholder     Boolean      @default(false)
+  createdAt         DateTime     @default(now())
+
+  attempts QuestionAttempt[]
+
+  @@index([topicId, difficulty])
+}
+
+model QuestionAttempt {
+  id          String         @id @default(cuid())
+  studentId   String
+  student     StudentProfile @relation(fields: [studentId], references: [id])
+  questionId  String
+  question    Question       @relation(fields: [questionId], references: [id])
+  answerJson  Json
+  isCorrect   Boolean
+  source      String         @default("practice") // "diagnostic" | "practice" | "quiz" — which flow produced this attempt
+  attemptedAt DateTime       @default(now())
+
+  @@index([studentId, questionId])
+}
+
+model Assessment {
+  id        String         @id @default(cuid())
+  studentId String
+  student   StudentProfile @relation(fields: [studentId], references: [id])
+  type      String // "diagnostic" | "topic" | "mock_exam"
+  subjectId String?
+  subject   Subject?       @relation(fields: [subjectId], references: [id])
+  scoreJson Json // per-subject / per-topic breakdown
+  createdAt DateTime       @default(now())
+
+  @@index([studentId])
+}
+
+model QuizResult {
+  id             String         @id @default(cuid())
+  studentId      String
+  student        StudentProfile @relation(fields: [studentId], references: [id])
+  quizType       String // "quiz" | "topic_assessment" | "mock_exam"
+  score          Float
+  totalQuestions Int
+  correctCount   Int
+  resultJson     Json // detailed breakdown, weak topics, recommendations
+  createdAt      DateTime       @default(now())
+
+  @@index([studentId])
+}
+
+// ============ SUBSCRIPTIONS & AI CREDITS ============
+//
+// NOTE (Phase 8 correction): the earlier `SubscriptionPlan` model
+// (generic FREE/BASIC/PLUS/PREMIUM USD tiers) was a Phase 1 draft that
+// was never seeded after Phase 3 replaced it with real EGP pricing via
+// `PricingPlan`. Nothing in the codebase referenced `SubscriptionPlan`
+// at runtime, so it's removed here rather than carried forward — actual
+// billing is tied to `PricingPlan` (Curriculum × Level, approved EGP
+// numbers), which is what a real subscription should reference.
+
+model Subscription {
+  id                      String         @id @default(cuid())
+  studentId               String         @unique // one active subscription per student for MVP simplicity
+  student                 StudentProfile @relation(fields: [studentId], references: [id])
+  pricingPlanId           String
+  pricingPlan             PricingPlan    @relation(fields: [pricingPlanId], references: [id])
+  additionalSubjectsCount Int            @default(0) // subjects beyond pricingPlan.includedSubjects
+  monthlyTotalEGP         Decimal // pricingPlan.monthlyPriceEGP + (additionalSubjectsCount * pricingPlan.additionalSubjectPriceEGP), snapshotted at subscribe time
+  status                  String // "pending" | "active" | "canceled" | "past_due"
+  currentPeriodStart      DateTime?
+  currentPeriodEnd        DateTime?
+  paymentProvider         String? // "stripe" | "paymob" | "paypal"
+  externalSubscriptionId  String?
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+}
+
+model TutorQuestionPackPurchase {
+  id                    String   @id @default(cuid())
+  studentId             String
+  student               StudentProfile @relation(fields: [studentId], references: [id])
+  subjectId             String
+  subject               Subject @relation(fields: [subjectId], references: [id])
+  quantity              Int      @default(10)
+  amountEGP             Decimal
+  status                String   // "pending" | "paid" | "failed" | "canceled"
+  paymentProvider       String?
+  externalSessionId     String?
+  externalEventId       String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  credits               TutorExtraQuestionCredit[]
+
+  @@index([studentId, status])
+  @@index([externalSessionId])
+  @@unique([paymentProvider, externalEventId])
+}
+
+model TutorExtraQuestionCredit {
+  id          String   @id @default(cuid())
+  studentId   String
+  student     StudentProfile @relation(fields: [studentId], references: [id])
+  subjectId   String
+  subject     Subject @relation(fields: [subjectId], references: [id])
+  usageDate   DateTime
+  remaining   Int      @default(0)
+  purchaseId  String
+  purchase    TutorQuestionPackPurchase @relation(fields: [purchaseId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([studentId, subjectId, usageDate])
+  @@index([studentId, subjectId, usageDate])
+}
+
+model TutorAnswerCache {
+  id             String   @id @default(cuid())
+  curriculumId   String
+  gradeId        String
+  subjectId      String
+  topicId        String?
+  language       String
+  normalizedPrompt String @db.Text
+  answer         String @db.Text
+  provider       String
+  model          String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  curriculum     Curriculum @relation(fields: [curriculumId], references: [id])
+  grade          Grade @relation(fields: [gradeId], references: [id])
+  subject        Subject @relation(fields: [subjectId], references: [id])
+  topic          Topic? @relation(fields: [topicId], references: [id])
+
+  @@unique([curriculumId, gradeId, subjectId, topicId, language, normalizedPrompt])
+  @@index([subjectId, language])
+}
+
+model AICredits {
+  id          String         @id @default(cuid())
+  studentId   String         @unique
+  student     StudentProfile @relation(fields: [studentId], references: [id])
+  balance     Int // remaining credits this period
+  periodStart DateTime
+  periodEnd   DateTime
+  updatedAt   DateTime       @updatedAt
+}
+
+model AIUsage {
+  id           String   @id @default(cuid())
+  userId       String
+  studentId    String? // StudentProfile.id, when the request came from a student context (nullable so AIUsage can log non-student AI calls later, e.g. admin content generation)
+  subjectId    String? // which subject this usage counted against, for daily per-subject limits
+  feature      String // "tutor_chat" | "assessment" | "exercise_gen" | "grading"
+  provider     String // "openai" | "anthropic" | "local"
+  model        String
+  inputTokens  Int
+  outputTokens Int
+  creditsUsed  Int
+  costUsd      Decimal
+  createdAt    DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([studentId, subjectId, createdAt])
+  @@index([feature])
+}
+
+// Phase 10 concurrency hardening: the daily per-subject question limit
+// used to be enforced by counting AIUsage rows at request time — a
+// classic read-then-write race (two concurrent requests can both read
+// "1 remaining" and both proceed). This table is the atomic reservation
+// counter: AIUsageService.reserveDailySlot() does a single
+// INSERT ... ON CONFLICT ... WHERE count < limit statement against this
+// table, which Postgres executes atomically — two concurrent requests
+// racing for the last slot cannot both succeed. AIUsage (above) remains
+// the append-only cost/analytics ledger, written only after the AI
+// provider call actually succeeds; this table is the enforcement gate,
+// written before the provider is ever called.
+model AIDailyUsageCounter {
+  id        String   @id @default(cuid())
+  studentId String
+  subjectId String
+  usageDate DateTime // truncated to the day (00:00) — one row per student+subject+day
+  count     Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([studentId, subjectId, usageDate])
+}
+
+// Phase 10 concurrency/idempotency hardening: payment providers
+// (Stripe now, Fawry later) deliver webhooks at-least-once — the same
+// event can arrive more than once. Without this table, a duplicate
+// "subscription activated" delivery would silently re-run
+// BillingService.applyWebhookEvent(), resetting currentPeriodStart and
+// potentially corrupting billing period data. Each (provider,
+// externalEventId) pair is logged exactly once via a unique constraint;
+// a duplicate delivery hits that constraint and is treated as a no-op,
+// enforced by the database itself rather than an application-level
+// check that could itself race.
+model WebhookEventLog {
+  id              String   @id @default(cuid())
+  provider        String // "stripe" | "fawry" | "paymob" | "paypal" | "instapay"
+  externalEventId String // the provider's own event ID (e.g. Stripe's "evt_...")
+  eventType       String
+  receivedAt      DateTime @default(now())
+
+  @@unique([provider, externalEventId])
+}
+
+// ============ AI TUTOR CONVERSATIONS ============
+
+model AIConversation {
+  id        String         @id @default(cuid())
+  studentId String
+  student   StudentProfile @relation(fields: [studentId], references: [id])
+  subjectId String?
+  topicId   String?
+  title     String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  messages AIMessage[]
+
+  @@index([studentId])
+}
+
+model AIMessage {
+  id             String         @id @default(cuid())
+  conversationId String
+  conversation   AIConversation @relation(fields: [conversationId], references: [id])
+  role           String // "user" | "assistant" | "system"
+  content        String         @db.Text
+  createdAt      DateTime       @default(now())
+
+  @@index([conversationId])
+}
+
+// ============ GAMIFICATION ============
+
+model Achievement {
+  id            String  @id @default(cuid())
+  code          String  @unique
+  nameEn        String
+  nameAr        String
+  descriptionEn String
+  descriptionAr String
+  icon          String?
+
+  studentAchievements StudentAchievement[]
+}
+
+model StudentAchievement {
+  id            String         @id @default(cuid())
+  studentId     String
+  student       StudentProfile @relation(fields: [studentId], references: [id])
+  achievementId String
+  achievement   Achievement    @relation(fields: [achievementId], references: [id])
+  earnedAt      DateTime       @default(now())
+
+  @@unique([studentId, achievementId])
+}
+
+// ============ AUDIT / ADMIN ============
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  action     String
+  entityType String?
+  entityId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model AIProviderConfig {
+  id                 String   @id @default(cuid())
+  providerKey        String   @unique // "openai" | "anthropic" | "local"
+  model              String
+  isActive           Boolean  @default(false)
+  costPerInputToken  Decimal
+  costPerOutputToken Decimal
+  updatedAt          DateTime @updatedAt
+}
+
+// ============ PRICING (EGP) ============
+//
+// Pricing is per Curriculum × Level (not per individual Grade row — a
+// "Level" here is a pricing tier, e.g. "Primary" or "Grade 6-8", that can
+// span multiple Grade rows). British and American curricula are kept as
+// SEPARATE Curriculum rows even though they currently share numbers —
+// business rule, not a schema shortcut, so they can diverge freely later.
+
+model PricingPlan {
+  id                       String     @id @default(cuid())
+  curriculumId             String
+  curriculum               Curriculum @relation(fields: [curriculumId], references: [id])
+  levelCodeEn              String // e.g. "Primary", "Preparatory", "Secondary Year 1-2", "Grade 6-8"
+  levelCodeAr              String
+  monthlyPriceEGP          Decimal
+  includedSubjects         Int        @default(3)
+  additionalSubjectPriceEGP Decimal
+  isActive                 Boolean    @default(true)
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
+
+  subscriptions Subscription[]
+
+  @@unique([curriculumId, levelCodeEn])
+  @@index([curriculumId])
+}
+
+// Extra AI questions beyond the included daily allowance. Prices are TBD
+// on purpose — configurable from the Admin Panel, never hardcoded.
+model QuestionPackage {
+  id            String   @id @default(cuid())
+  nameEn        String
+  nameAr        String
+  questionCount Int
+  priceEGP      Decimal? // null = price not yet set (TBD), package inactive until priced
+  isActive      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Generic key-value store for tunable business rules that don't deserve
+// their own table (e.g. "default_daily_ai_questions_per_subject": 10).
+// Read/cached by the backend, editable from the Admin Panel.
+model SystemConfig {
+  key         String   @id
+  value       Json
+  description String?
+  updatedAt   DateTime @updatedAt
+}
+
+// Mirrors AIProviderConfig's pattern: which payment provider is active is
+// a database row, not a code path, so switching Stripe/Paymob/PayPal is
+// an admin/config change. Secrets (API keys, webhook signing secrets)
+// stay in environment variables — this table only holds non-secret
+// routing/config data, per the "never expose payment secrets" rule.
+model PaymentProviderConfig {
+  id           String   @id @default(cuid())
+  providerKey  String   @unique // "stripe" | "paymob" | "paypal"
+  isActive     Boolean  @default(false)
+  publicConfig Json? // non-secret config (e.g. Stripe publishable key), safe to read from the admin panel
+  updatedAt    DateTime @updatedAt
+}

@@ -1,0 +1,98 @@
+# Smartify AI — Phase 10 Final Acceptance Review
+
+This is a direct point-by-point response to the acceptance review request. Every claim below was checked against the actual code in this pass — where a gap was found, it was fixed (not just noted), and the fix is described. Where something could not be verified without real infrastructure, that's stated plainly rather than assumed.
+
+---
+
+## 1. Authentication and authorization
+
+| Check | Finding |
+|---|---|
+| Unauthenticated requests rejected where required | **Confirmed by audit.** Every controller was grepped for `@UseGuards`/`@Roles`. Public endpoints (`curricula`, `pricing`, webhooks) intentionally have none — correct by design. Every other controller (`users`, `onboarding`, `dashboard`, `practice`, `quizzes`, `tutor`, `billing`, all `admin/*`) has `@UseGuards(ClerkAuthGuard)` at minimum. |
+| RBAC enforced server-side on every protected admin endpoint | **Confirmed by audit.** All four `admin/*` controllers carry `@UseGuards(ClerkAuthGuard, RolesGuard)` plus `@Roles(...)`, with `AdminCurriculumController`'s pricing routes correctly overriding to exclude `CONTENT_MANAGER` at the handler level (verified `RolesGuard.canActivate` uses `getAllAndOverride`, so the handler-level decorator wins over the class-level one — this is exactly what makes the per-route override real rather than cosmetic). |
+| Frontend guards not relied on for security | **Confirmed by design and comment.** `AdminGuard` (frontend) explicitly documents in its own source: "This is NOT the security boundary." Every admin page's actual data access goes through the backend, which independently re-checks role via `RolesGuard`. |
+| A user cannot access another student's private data by manipulating IDs | **Gap found and fixed.** `TutorService.getConversation` already checked `conversation.studentId !== profile.id` (pre-existing). Added direct test coverage for this (`tutor.service.spec.ts`) and for the equivalent check in `QuizzesService.getResult` (`quizzes.service.spec.ts`) — both now explicitly verified to return `NotFoundException` (not a different error that would leak whether the ID exists) when the resource belongs to someone else. |
+| A parent can only access students linked to that parent | **Not applicable — not yet built, stated honestly.** No parent-facing API endpoint exists anywhere in this codebase. `ParentProfile`/`ParentStudentRelation` are schema-only since Phase 2; the `/for-parents` page is a marketing page listing all capabilities as "planned." There is nothing to audit here because there is no code path where a parent reads student data yet. This should be re-audited specifically when parent endpoints are actually built. |
+| A teacher cannot access another teacher's private data | **Not applicable — not yet built, same as above.** `TeacherProfile` is a schema-only placeholder; zero endpoints reference it. |
+| `SUPER_ADMIN` protections correctly enforced | **Real gap found and fixed.** Before this pass, any `ADMIN` (not just `SUPER_ADMIN`) could call `PATCH /users/:id/role` and grant `SUPER_ADMIN` to anyone, including themselves — `RolesGuard` only checked that the *caller* was `ADMIN`-or-above, never what role was being *granted*. Fixed in `UsersService.updateRole`: only a `SUPER_ADMIN` may grant or modify the `SUPER_ADMIN` role (including demoting an existing one), and **no caller can change their own role at all**, closing the self-escalation path entirely. Confirmed by audit that `User.role` is written in exactly two places in the whole codebase: the Clerk webhook (always defaults to `STUDENT`, never from Clerk data) and this now-hardened method. 6 new tests in `users.service.spec.ts`. |
+
+## 2. AI cost protection
+
+| Check | Finding |
+|---|---|
+| Active subscription required | **Real gap found and fixed.** The AI Tutor previously had no subscription check at all — any signed-in student with selected subjects could use the free daily allowance regardless of billing status. `TutorService.sendMessage` now requires `Subscription.status === "active"` before reserving a slot. **Documented limitation**: this is coarse-grained (any active subscription, not "is this specific subject covered by the plan's included-subjects count") because per-subject entitlement isn't modeled as an explicit list anywhere in the schema — only a total count (`PricingPlan.includedSubjects` + `Subscription.additionalSubjectsCount`). Building precise per-subject entitlement would be a real schema addition, out of scope for a hardening pass — flagged here rather than silently left unstated. |
+| Subscribed subject | Enforced via the existing `studentSubject` ownership check (subject must be one of the student's selected subjects) combined with the new subscription-active check above. See documented limitation immediately above regarding precision. |
+| Daily per-subject question limit | **Confirmed, and hardened for concurrency** — see Section 3. |
+| Additional credit/package availability | **Not applicable — not yet implemented, correctly so.** `QuestionPackage` pricing is genuinely TBD (Phase 3 decision); there is no path to grant extra usage today, so the daily limit is a hard stop with no bypass, which is the correct behavior given nothing is priced yet. |
+| Maximum tokens per request | **Gap found and fixed on the input side.** Output was already capped (`maxOutputTokens` on the OpenAI call, defaulting to 600). Input had no cap at all — a student could send an arbitrarily long message, inflating cost uncontrolled. Added a hard `MAX_MESSAGE_CHARS = 4000` check in `TutorService.sendMessage`, rejected with `BadRequestException` **before** any slot is reserved or provider called. |
+| Usage recording | Confirmed, and rebuilt to be transactional — see below. |
+| Failure-safe behavior if usage recording or cost calculation fails | **Real gap found and fixed — this was the most important item in the whole review.** Previously: chat messages were persisted, *then* usage was recorded as a separate step; if that second step failed, the student had a saved reply with zero cost tracking — literally "untracked billable usage." Fixed: message persistence and the `AIUsage` cost-ledger write now happen inside a single `$transaction`, so they succeed or fail together. In the rare case the transaction itself fails (e.g. a DB hiccup) **after** the AI provider call already succeeded and real cost was already incurred, the reply is still returned to the student (they already paid for it in real API cost, and the rate-limit slot was already legitimately consumed), but the cost details are logged at `error` level via `AIUsageService.logUntrackedUsage()` with everything needed for manual reconciliation — so nothing is silently lost, even in that narrow failure window. |
+| A failed/malformed AI request cannot bypass limits or produce untracked billable usage | **Directly addressed.** If the provider call itself throws (network error, invalid key, OpenAI-side failure), no cost was incurred and the previously-reserved slot is explicitly given back via `releaseDailySlot()` — a failed request never both fails to help the student AND silently costs them a question. See Section 3 for why the reservation itself can't be raced. |
+
+## 3. Concurrency protection
+
+This was the review's central technical concern, and rightly so — the pre-existing code had a genuine, exploitable race.
+
+| Scenario | Before this pass | After this pass |
+|---|---|---|
+| **Two simultaneous AI requests consuming the last available question** | Real TOCTOU race: `getRemainingToday()` counted `AIUsage` rows, compared to the limit, and only inserted a new row *after* the AI call succeeded. Two concurrent requests could both read "1 remaining," both pass the check, both call OpenAI, and both succeed — exceeding the daily limit by however many requests raced. | **Fixed with a single atomic SQL statement.** `AIUsageService.reserveDailySlot()` runs one `INSERT ... ON CONFLICT ... WHERE count < limit ... RETURNING` statement — a genuinely atomic Postgres operation, executed *before* the AI provider is ever called. Whichever concurrent request's transaction commits second sees the already-incremented count, its `WHERE` clause matches nothing, and it gets zero rows back — correctly rejected, no race window exists. This is now a new table (`AIDailyUsageCounter`) specifically because counting rows in the append-only `AIUsage` ledger can't be made atomic the same way. |
+| **Duplicate payment/webhook delivery** | `applyWebhookEvent` re-applied its effect on every delivery — a duplicate "subscription.activated" event would silently reset `currentPeriodStart`/`currentPeriodEnd` to "now" a second time. | **Fixed via a unique-constraint-enforced idempotency log.** New `WebhookEventLog` table with `@@unique([provider, externalEventId])`. Every webhook attempts to log its own event ID *before* applying any effect; a duplicate delivery hits the DB's own unique constraint (Prisma error code `P2002`) and is treated as a no-op. This is safe even if two duplicate deliveries race each other, since only one `INSERT` can win a unique constraint — no separate application-level lock is needed. `StripeProvider` now populates `externalEventId` from Stripe's own `event.id`. |
+| **Simultaneous provider activation** (AI or payment config) | Two-step "deactivate all others, then activate target" inside a transaction — under concurrent activation of two *different* providers, the final state depended on commit ordering and could plausibly leave both active. | **Fixed with a single atomic UPDATE.** Both `AdminAIConfigService.updateProvider` and `AdminPaymentsService.updateProvider` now issue one `UPDATE ... SET "isActive" = ("providerKey" = $1)` statement — a single SQL statement is inherently atomic in Postgres, eliminating the two-step read-modify-write window entirely. |
+| **Subscription activation** | `BillingService.startCheckout`'s `Subscription.upsert` is keyed by the unique `studentId` column, which Prisma implements as `INSERT ... ON CONFLICT` — already atomic at the DB level for concurrent checkout attempts by the same student. No change needed; confirmed by inspection, not previously stated explicitly. | Documented as already safe; the webhook-driven *activation* step is additionally now idempotency-protected per the row above. |
+
+**Honest limitation**: none of the above atomicity claims were verified against a real running Postgres instance in this environment (no live database exists here) — they're verified by (a) the SQL being genuinely a single atomic statement by Postgres's own documented semantics, and (b) unit tests confirming the *decision logic* around those statements (what happens when zero rows vs. one row comes back) is correct. Running an actual concurrent-request test against a real database is a reasonable, recommended follow-up before high-traffic production use.
+
+## 4. Webhook security
+
+| Check | Finding |
+|---|---|
+| Raw request body preserved wherever the active provider requires it | **Confirmed by audit.** `main.ts` registers `express.raw({ type: "application/json" })` for both `/webhooks/clerk` and `/webhooks/billing` *before* the global `express.json()`/`express.urlencoded()` middleware — Express matches path-specific middleware first, so only these two prefixes get raw `Buffer` bodies; everything else gets normally-parsed JSON. `BillingWebhookController` additionally guards with `Buffer.isBuffer(req.body)` and throws `BadRequestException` if that's somehow not true, rather than silently attempting signature verification against an already-parsed object. |
+| Signature verification occurs before business processing | **Confirmed by code structure.** `BillingWebhookController.handle()` calls `provider.verifyAndParseWebhook()` (which throws on an invalid/missing signature) before ever calling `billingService.applyWebhookEvent()`. Same pattern for Clerk's webhook controller (`svix` verification before any `User` upsert). |
+| Invalid webhooks are rejected | **Confirmed.** `StripeProvider.verifyAndParseWebhook` uses `stripe.webhooks.constructEvent`, which throws on a bad signature; that exception propagates as an error response, never a silent pass-through. |
+| Duplicate webhooks are idempotent | **Fixed this pass** — see Section 3's webhook row. |
+| Webhook events logged without exposing secrets | **Confirmed.** `WebhookEventLog` stores only `provider`, `externalEventId`, `eventType`, and a timestamp — no payload body, no signature, no secret material. |
+
+## 5. Production configuration
+
+| Check | Finding |
+|---|---|
+| Database configuration | Already required (`DATABASE_URL`, `REDIS_URL`) — hard failure at boot if missing, unchanged this phase. |
+| Clerk | Already required (`CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `CLERK_WEBHOOK_SIGNING_SECRET`) — hard failure at boot if missing, unchanged. |
+| OpenAI | Legitimately optional (the app should be able to boot with AI Tutor disabled) — but previously silent if missing. **Hardened this phase**: in `NODE_ENV=production`, a loud `console.warn` fires at boot listing exactly which optional-but-important vars are absent, so it's never discovered only when a real user hits the feature. |
+| Payment providers | Same treatment as OpenAI above — `STRIPE_SECRET_KEY` missing in production now produces a loud boot-time warning. |
+| Frontend/backend URLs | **Real gap found and fixed.** `FRONTEND_URL` had a `localhost` default that would silently misconfigure CORS in production (the real frontend's origin would be rejected). Now a **hard failure at boot** in `NODE_ENV=production` if `FRONTEND_URL` isn't explicitly set — this one specifically is treated as fail-closed rather than a warning, since it's a security-relevant default, not just a missing feature. |
+| Secrets | Confirmed no secret has ever been committed (grepped for common secret patterns; only `.env.example` files exist, all containing placeholder values). `.gitignore` hardened this pass to also exclude `*.pem`/`*.key`/`*.p12`/`*.pfx` and local DB artifacts. |
+| Production mode flags | `NODE_ENV` is a required enum (`development`/`test`/`production`), defaulting to `development` — the production-specific checks above only activate when it's explicitly set to `production`. |
+
+## 6. Database and operations
+
+Covered in full in the new `DEPLOYMENT.md`. Honest summary: migrations, seeding, backup, restore, and rollback are all **documented procedures using standard tooling** (Prisma's own migration guarantees, `pg_dump`/`pg_restore`), but **none have been rehearsed against a real database in this environment**, because no live Postgres instance exists here. `DEPLOYMENT.md` says this explicitly rather than implying a documented procedure equals a tested one. `.gitignore` was audited and hardened (see Section 5).
+
+## 7. Test suite
+
+**67 automated tests now exist, up from 20** (11 spec files). New coverage added specifically for the highest-risk gaps identified in the previous `PRODUCTION-READINESS.md`:
+
+- **Onboarding validation & diagnostic grading** (`onboarding.service.spec.ts`, 9 tests) — cross-curriculum/grade/subject validation rejections, and diagnostic scoring correctness including the exact case the review named: per-subject score breakdown and rule-based plan recommendation ordering.
+- **Webhook-driven subscription transitions** (extended `billing.service.spec.ts`, +4 tests) — idempotent-on-duplicate-delivery, applies-on-first-delivery, doesn't swallow genuine DB errors as false duplicates, ignores events with nothing to reconcile.
+- **Authorization ownership/isolation** (`tutor.service.spec.ts`, `quizzes.service.spec.ts`, `practice.service.spec.ts` — 19 tests combined) — cross-student data access correctly rejected with `NotFoundException` (not a leakier error), cross-subject access correctly rejected with `ForbiddenException`.
+- **AI limit concurrency** (`ai-usage.service.spec.ts`, extended to 9 tests) — the reservation decision logic (what happens when the atomic query returns 0 vs. 1 rows) and the release-on-failure behavior, plus 12 new tests in `tutor.service.spec.ts` specifically covering the failure-safe flows: release-on-provider-failure, release-on-ownership-violation, no-release-on-successful-reply-with-failed-persist, and the untracked-usage logging fallback.
+- **Privilege escalation** (`users.service.spec.ts`, 6 tests) — the SUPER_ADMIN protection fix from Section 1.
+- **Atomic provider activation** (`admin-ai-config.service.spec.ts` + `admin-payments.service.spec.ts`, 5 tests combined) — confirms the single-atomic-statement path is actually used.
+
+**What remains genuinely untested**, stated plainly rather than glossed over:
+- Dashboard aggregation logic (read-only, lower risk, no dedicated test).
+- The safety-guardrail system prompt's exact content (`AIContextBuilderService`) — deterministic string-building with no assertion on its output.
+- Real concurrent-request behavior against an actual Postgres instance — every concurrency fix above is verified at the level of "this SQL statement is atomic by Postgres's semantics, and the surrounding decision logic is correct," not "we fired 50 simultaneous requests at a real database and watched it hold." That remains a recommended pre-launch load/concurrency test against real infrastructure.
+- Full end-to-end request cycles through actual Clerk/OpenAI/Stripe — unchanged from prior phases, still blocked on real credentials.
+
+Zero of these 67 tests have been executed in this sandbox (no `pnpm install` has been run here — no live environment exists to run them in). They are real, complete, mockable-without-a-database test code; running them is the concrete next step for whoever has real infrastructure.
+
+---
+
+## Final Classification
+
+- **Structurally Complete** — Yes. All ten phases are built; this review's fixes (concurrency, privilege escalation, cost-tracking failure-safety, config fail-fast) are integrated into the existing architecture without any redesign, exactly as instructed.
+- **Automated Tests Passed** — Not claimed. 67 tests are written and internally consistent with the code they test, but have never been executed (no live environment in this sandbox). "Written and reasoned correct," not "observed passing."
+- **Internal Security Hardening Complete** — For the items identified in this review: yes, each confirmed gap (privilege escalation, AI cost-tracking failure mode, three separate concurrency races, input-length cap, subscription gate, production config fail-fast, `.gitignore`) was fixed, not just documented. Two explicitly out-of-scope items remain honestly stated: parent/teacher data isolation is not applicable because those features don't have endpoints yet, and per-subject subscription entitlement is coarse-grained by design pending a schema decision that wasn't in scope for a hardening pass.
+- **External Integration Verification Pending** — Yes, unchanged. Clerk, OpenAI, and Stripe (dev/test) have never been exercised against real credentials in this project's history. Fawry and InstaPay remain honest stubs, not integrations.
+- **Not Yet Production-Verified** — Yes. This is the operative overall status. "Structurally Complete" and "Internal Security Hardening Complete" describe code and design quality; they are not a substitute for running the real integration-test milestones (Clerk, OpenAI, Stripe test-mode, a real concurrent-load test, and a real migrate/seed/backup/restore rehearsal) against actual infrastructure before this is called production-ready. That phrase is deliberately not used anywhere in this document.

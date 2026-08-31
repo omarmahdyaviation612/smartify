@@ -1,0 +1,146 @@
+/**
+ * Smartify AI — design tokens (single source of truth).
+ *
+ * Brand colors are sampled directly from the provided logo:
+ *   - Deep navy wordmark / cap        -> --sf-navy-*
+ *   - Mid blue (cap gradient, robot)  -> --sf-blue-*
+ *   - Cyan (headphone ring, sparkles) -> --sf-cyan-*
+ *   - Purple (AI wordmark gradient)   -> --sf-purple-*
+ *
+ * This is a practical MVP token set, not a full enterprise system —
+ * extend shades only when a real screen needs one that's missing.
+ */
+
+:root {
+  /* ===== Brand colors ===== */
+  --sf-navy-900: #0b1530;
+  --sf-navy-700: #101d45;
+  --sf-navy-500: #1c2c5c;
+
+  --sf-blue-600: #1d4ed8;
+  --sf-blue-500: #2563eb;
+  --sf-blue-400: #3b82f6;
+
+  --sf-cyan-500: #22d3ee;
+  --sf-cyan-400: #67e8f9;
+
+  --sf-purple-600: #6d28d9;
+  --sf-purple-500: #7c3aed;
+
+  /* AI-specific gradient, used ONLY for AI elements / primary CTAs / highlights,
+     per the "avoid excessive gradients" rule */
+  --sf-ai-gradient: linear-gradient(90deg, var(--sf-blue-500) 0%, var(--sf-purple-500) 100%);
+
+  /* ===== Neutral colors ===== */
+  --sf-neutral-0: #ffffff;
+  --sf-neutral-50: #f7f9fc;
+  --sf-neutral-100: #eef2f8;
+  --sf-neutral-200: #e2e8f2;
+  --sf-neutral-300: #cbd5e3;
+  --sf-neutral-400: #94a3b8;
+  --sf-neutral-500: #64748b;
+  --sf-neutral-600: #475569;
+  --sf-neutral-700: #334155;
+  --sf-neutral-800: #1e293b;
+  --sf-neutral-900: #0f172a;
+
+  /* ===== Backgrounds ===== */
+  --sf-bg-page: var(--sf-neutral-0);
+  --sf-bg-subtle: #f5f8ff; /* very light blue, per spec */
+  --sf-bg-surface: var(--sf-neutral-0);
+  --sf-bg-surface-alt: var(--sf-neutral-50);
+  --sf-bg-inverse: var(--sf-navy-900);
+
+  /* ===== Text colors ===== */
+  --sf-text-primary: var(--sf-navy-900);
+  --sf-text-secondary: var(--sf-neutral-600);
+  --sf-text-muted: var(--sf-neutral-400);
+  --sf-text-inverse: var(--sf-neutral-0);
+  --sf-text-link: var(--sf-blue-600);
+
+  /* ===== Semantic: success / warning / error ===== */
+  --sf-success-500: #16a34a;
+  --sf-success-100: #dcfce7;
+  --sf-warning-500: #d97706;
+  --sf-warning-100: #fef3c7;
+  --sf-error-500: #dc2626;
+  --sf-error-100: #fee2e2;
+
+  /* ===== Spacing scale (4px base) ===== */
+  --sf-space-1: 4px;
+  --sf-space-2: 8px;
+  --sf-space-3: 12px;
+  --sf-space-4: 16px;
+  --sf-space-5: 20px;
+  --sf-space-6: 24px;
+  --sf-space-8: 32px;
+  --sf-space-10: 40px;
+  --sf-space-12: 48px;
+  --sf-space-16: 64px;
+  --sf-space-20: 80px;
+  --sf-space-24: 96px;
+
+  /* ===== Typography scale ===== */
+  --sf-font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+  --sf-font-arabic: "IBM Plex Sans Arabic", "Cairo", "Segoe UI", system-ui, sans-serif;
+
+  --sf-text-xs: 12px;
+  --sf-text-sm: 14px;
+  --sf-text-base: 16px;
+  --sf-text-lg: 18px;
+  --sf-text-xl: 20px;
+  --sf-text-2xl: 24px;
+  --sf-text-3xl: 30px;
+  --sf-text-4xl: 36px;
+  --sf-text-5xl: 48px;
+
+  --sf-line-tight: 1.2;
+  --sf-line-normal: 1.5;
+  --sf-line-relaxed: 1.75;
+
+  /* ===== Font weights ===== */
+  --sf-weight-regular: 400;
+  --sf-weight-medium: 500;
+  --sf-weight-semibold: 600;
+  --sf-weight-bold: 700;
+
+  /* ===== Border radius ===== */
+  --sf-radius-sm: 6px;
+  --sf-radius-md: 10px;
+  --sf-radius-lg: 16px;
+  --sf-radius-xl: 24px;
+  --sf-radius-full: 9999px;
+
+  /* ===== Shadows ===== */
+  --sf-shadow-sm: 0 1px 2px rgba(11, 21, 48, 0.06);
+  --sf-shadow-md: 0 4px 12px rgba(11, 21, 48, 0.08);
+  --sf-shadow-lg: 0 12px 32px rgba(11, 21, 48, 0.12);
+  --sf-shadow-ai: 0 8px 24px rgba(124, 58, 237, 0.18); /* used only on AI-related surfaces */
+
+  /* ===== Borders ===== */
+  --sf-border-thin: 1px solid var(--sf-neutral-200);
+  --sf-border-medium: 1.5px solid var(--sf-neutral-300);
+  --sf-border-focus: 2px solid var(--sf-blue-500);
+
+  /* ===== Breakpoints (reference values; enforced via Tailwind config) ===== */
+  --sf-bp-sm: 640px;
+  --sf-bp-md: 768px;
+  --sf-bp-lg: 1024px;
+  --sf-bp-xl: 1280px;
+  --sf-bp-2xl: 1536px;
+
+  /* ===== Animation / transition tokens ===== */
+  --sf-duration-fast: 120ms;
+  --sf-duration-base: 200ms;
+  --sf-duration-slow: 320ms;
+  --sf-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --sf-ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ===== Z-index scale ===== */
+  --sf-z-base: 0;
+  --sf-z-dropdown: 100;
+  --sf-z-sticky: 200;
+  --sf-z-overlay: 300;
+  --sf-z-modal: 400;
+  --sf-z-toast: 500;
+}
