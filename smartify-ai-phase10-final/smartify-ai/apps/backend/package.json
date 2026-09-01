@@ -19,6 +19,7 @@
     "@smartify/database": "workspace:*",
     "@smartify/shared-types": "workspace:*",
     "@smartify/validation": "workspace:*",
+    "dotenv": "^17.4.2",
     "express": "^4.21.2",
     "helmet": "^7.1.0",
     "openai": "^4.55.4",

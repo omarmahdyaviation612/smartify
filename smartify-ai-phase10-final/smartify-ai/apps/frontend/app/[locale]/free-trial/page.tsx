@@ -1,6 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 import { useEffect, useState } from "react";
 import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getMarketingCopy } from "@/content/marketing";
@@ -20,6 +21,7 @@ export default function FreeTrialPage() {
   const router = useRouter();
   const copy = getMarketingCopy(locale);
   const { apiFetch } = useApiClient();
+  const { isLoaded, isSignedIn } = useAuth();
 
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
@@ -27,6 +29,12 @@ export default function FreeTrialPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      router.replace(`/${locale}/sign-up`);
+      return;
+    }
+
     apiFetch<{ subjects: Subject[] }>("/dashboard/summary")
       .then((data) => {
         setSubjects(data.subjects);
@@ -38,7 +46,7 @@ export default function FreeTrialPage() {
         setLoading(false);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isLoaded, isSignedIn, locale]);
 
   const handleStartTrial = () => {
     if (!selectedSubject) {
@@ -47,6 +55,46 @@ export default function FreeTrialPage() {
     }
     router.push(`/${locale}/tutor?subjectId=${selectedSubject}`);
   };
+
+  if (!isLoaded) {
+    return (
+      <>
+        <Navbar locale={locale} copy={copy} />
+        <main className="min-h-[70vh] bg-neutral-50 py-12">
+          <SmartifyContainer className="max-w-2xl">
+            <div className="rounded-sf-xl bg-white p-8 shadow-sm text-center text-neutral-600">
+              {isAr ? "جاري التحقق من الحساب..." : "Checking your account..."}
+            </div>
+          </SmartifyContainer>
+        </main>
+      </>
+    );
+  }
+
+  if (!isSignedIn) {
+    return (
+      <>
+        <Navbar locale={locale} copy={copy} />
+        <main className="min-h-[70vh] bg-neutral-50 py-12">
+          <SmartifyContainer className="max-w-2xl">
+            <div className="rounded-sf-xl bg-white p-8 shadow-sm">
+              <h1 className="text-3xl font-bold text-navy-900">
+                {isAr ? "يجب عليك التسجيل أولاً" : "You must sign up first"}
+              </h1>
+              <p className="mt-3 text-neutral-600">
+                {isAr ? "قم بتسجيل الدخول أو إنشاء حساب للمتابعة." : "Please sign in or create an account to continue."}
+              </p>
+              <div className="mt-6">
+                <SmartifyButton variant="ai" onClick={() => router.push(`/${locale}/sign-up`)}>
+                  {isAr ? "تسجيل الدخول" : "Sign in"}
+                </SmartifyButton>
+              </div>
+            </div>
+          </SmartifyContainer>
+        </main>
+      </>
+    );
+  }
 
   return (
     <>

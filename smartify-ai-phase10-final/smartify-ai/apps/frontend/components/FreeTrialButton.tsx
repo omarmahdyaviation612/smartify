@@ -13,15 +13,18 @@ interface FreeTrialButtonProps {
 
 export function FreeTrialButton({ locale, label, notSignedInMessage = "يجب عليك التسجيل أولاً" }: FreeTrialButtonProps) {
   const router = useRouter();
-  const { isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn } = useAuth();
 
   const handleClick = () => {
+    if (!isLoaded) return;
+
     if (!isSignedIn) {
       alert(notSignedInMessage);
       router.push(`/${locale}/sign-up`);
-    } else {
-      router.push(`/${locale}/free-trial`);
+      return;
     }
+
+    router.push(`/${locale}/free-trial`);
   };
 
   return (

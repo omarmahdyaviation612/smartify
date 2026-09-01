@@ -15,9 +15,11 @@ export function Hero({ locale, copy }: { locale: Locale; copy: MarketingCopy }) 
         </h1>
         <p className="mt-6 max-w-2xl text-lg text-neutral-600">{copy.hero.subheadline}</p>
         <div className="mt-8 flex flex-wrap justify-center gap-4">
-          <Link href={`/${locale}/sign-up`}>
-            <SmartifyButton variant="ai">{copy.hero.ctaPrimary}</SmartifyButton>
-          </Link>
+          <FreeTrialButton
+            locale={locale}
+            label={copy.hero.ctaPrimary}
+            notSignedInMessage="يجب عليك التسجيل أولاً"
+          />
           <Link href={`/${locale}/#how-it-works`}>
             <SmartifyButton variant="secondary">{copy.hero.ctaSecondary}</SmartifyButton>
           </Link>
