@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import type { Locale, MarketingCopy } from "@/content/marketing";
+import { FreeTrialButton } from "@/components/FreeTrialButton";
 
 export function Hero({ locale, copy }: { locale: Locale; copy: MarketingCopy }) {
   return (
@@ -182,9 +183,13 @@ export function FinalCtaSection({ locale, copy }: { locale: Locale; copy: Market
       <SmartifyContainer>
         <h2 className="text-3xl font-bold">{copy.finalCta.title}</h2>
         <p className="mx-auto mt-4 max-w-xl text-white/90">{copy.finalCta.body}</p>
-        <Link href={`/${locale}/sign-up`} className="mt-8 inline-block">
-          <SmartifyButton variant="secondary">{copy.finalCta.ctaLabel}</SmartifyButton>
-        </Link>
+        <div className="mt-8 inline-block">
+          <FreeTrialButton 
+            locale={locale} 
+            label={copy.finalCta.ctaLabel}
+            notSignedInMessage={copy.finalCta.signUpPrompt || "يجب عليك التسجيل أولاً"}
+          />
+        </div>
       </SmartifyContainer>
     </section>
   );

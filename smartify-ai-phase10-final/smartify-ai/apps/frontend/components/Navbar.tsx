@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
+import { SignedIn, SignedOut, UserButton, useClerk } from "@clerk/nextjs";
 import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import type { Locale, MarketingCopy } from "@/content/marketing";
 import { LanguageSwitcher } from "./LanguageSwitcher";
@@ -13,6 +13,7 @@ const ADMIN_ROLES = ["SUPER_ADMIN", "ADMIN", "CONTENT_MANAGER", "SUPPORT"];
 export function Navbar({ locale, copy }: { locale: Locale; copy: MarketingCopy }) {
   const base = `/${locale}`;
   const { user } = useCurrentUser();
+  const { signOut } = useClerk();
   const isAdmin = user && ADMIN_ROLES.includes(user.role);
 
   return (
@@ -52,6 +53,13 @@ export function Navbar({ locale, copy }: { locale: Locale; copy: MarketingCopy }
             <Link href={`${base}/dashboard`} className="hidden text-sm font-medium text-neutral-700 sm:block">
               {locale === "ar" ? "لوحة التحكم" : "Dashboard"}
             </Link>
+            <button
+              type="button"
+              onClick={() => signOut({ redirectUrl: base })}
+              className="hidden text-sm font-medium text-error-500 transition-colors hover:text-error-600 sm:block"
+            >
+              {locale === "ar" ? "تسجيل الخروج" : "Sign out"}
+            </button>
             <UserButton afterSignOutUrl={base} />
           </SignedIn>
         </div>

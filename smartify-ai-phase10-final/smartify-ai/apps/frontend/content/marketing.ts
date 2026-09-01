@@ -73,6 +73,7 @@ export interface MarketingCopy {
     title: string;
     body: string;
     ctaLabel: string;
+    signUpPrompt?: string;
   };
   footer: {
     tagline: string;
@@ -164,6 +165,7 @@ const en: MarketingCopy = {
     title: "Ready to learn smarter?",
     body: "Create a free account and get a personalized learning plan in minutes.",
     ctaLabel: "Start Learning Free",
+    signUpPrompt: "You must sign up first",
   },
   footer: {
     tagline: "Learn • Practice • Achieve",
@@ -255,6 +257,7 @@ const ar: MarketingCopy = {
     title: "جاهز للتعلم بذكاء أكبر؟",
     body: "أنشئ حسابًا مجانيًا واحصل على خطة تعلم شخصية خلال دقائق.",
     ctaLabel: "ابدأ التعلم مجانًا",
+    signUpPrompt: "يجب عليك التسجيل أولاً",
   },
   footer: {
     tagline: "تعلّم • تدرّب • حقق إنجازك",
