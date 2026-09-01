@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useAuth } from "@clerk/nextjs";
 import { SmartifyContainer } from "@smartify/ui";
 import { AdminGuard } from "@/components/AdminGuard";
 import { useApiClient } from "@/lib/api-client";
 import { useCurrentUser } from "@/lib/use-current-user";
+import { API_URL } from "@/lib/api";
 
 interface Curriculum {
   id: string;
@@ -28,6 +30,49 @@ interface PricingPlan {
   additionalSubjectPriceEGP: string;
   isActive: boolean;
   curriculum: { nameEn: string };
+}
+interface Topic { id: string; nameEn: string; nameAr: string; unit: { nameEn: string } }
+interface Material { id: string; originalName: string; sizeBytes: number; createdAt: string }
+
+function MaterialsSection() {
+  const { apiFetch } = useApiClient();
+  const { getToken } = useAuth();
+  const [subjects, setSubjects] = useState<{ id: string; nameEn: string }[]>([]);
+  const [topics, setTopics] = useState<Topic[]>([]);
+  const [subjectId, setSubjectId] = useState("");
+  const [topicId, setTopicId] = useState("");
+  const [materials, setMaterials] = useState<Material[]>([]);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => { apiFetch<Grade[]>("/admin/curriculum/grades").then((grades) => {
+    if (grades[0]) apiFetch<{ id: string; nameEn: string }[]>(`/admin/curriculum/subjects?gradeId=${grades[0].id}`).then(setSubjects);
+  }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (subjectId) apiFetch<Topic[]>(`/admin/curriculum/topics?subjectId=${subjectId}`).then(setTopics); }, [subjectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (topicId) apiFetch<Material[]>(`/admin/curriculum/materials?topicId=${topicId}`).then(setMaterials); }, [topicId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function upload(file: File) {
+    if (!topicId) return setMessage("Choose a topic first.");
+    const form = new FormData(); form.append("file", file); form.append("topicId", topicId);
+    const token = await getToken();
+    const response = await fetch(`${API_URL}/admin/curriculum/materials`, { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form });
+    if (!response.ok) { const body = await response.json().catch(() => ({})); return setMessage(body.message ?? "Upload failed."); }
+    setMessage("Material uploaded."); setMaterials(await apiFetch<Material[]>(`/admin/curriculum/materials?topicId=${topicId}`));
+  }
+  return <div className="mt-6 rounded-sf-lg border border-neutral-200 bg-white p-6">
+    <h2 className="font-semibold text-navy-900">Upload text materials</h2>
+    <p className="mt-1 text-sm text-neutral-500">TXT, Markdown, or JSON only. Images are never extracted or shown.</p>
+    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      <select className="rounded-sf border p-2" value={subjectId} onChange={e => { setSubjectId(e.target.value); setTopicId(""); }}>
+        <option value="">Choose subject</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.nameEn}</option>)}
+      </select>
+      <select className="rounded-sf border p-2" value={topicId} onChange={e => setTopicId(e.target.value)}>
+        <option value="">Choose topic</option>{topics.map(t => <option key={t.id} value={t.id}>{t.unit.nameEn} — {t.nameEn}</option>)}
+      </select>
+    </div>
+    <input className="mt-4" type="file" accept=".txt,.md,.json,text/plain,text/markdown,application/json" onChange={e => e.target.files?.[0] && upload(e.target.files[0])} />
+    {message && <p className="mt-2 text-sm text-neutral-600">{message}</p>}
+    <ul className="mt-4 space-y-2 text-sm">{materials.map(m => <li key={m.id} className="rounded border p-2">{m.originalName} ({Math.ceil(m.sizeBytes / 1024)} KB)</li>)}</ul>
+  </div>;
 }
 
 function CurriculaSection() {
@@ -168,6 +213,7 @@ export default function AdminCurriculumPage() {
             <CurriculaSection />
           </div>
           {canSeePricing && <PricingSection />}
+          <MaterialsSection />
         </SmartifyContainer>
       </main>
     </AdminGuard>

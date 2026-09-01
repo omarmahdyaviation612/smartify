@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import { ClerkAuthGuard } from "../../auth/clerk-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
@@ -52,6 +53,31 @@ export class AdminCurriculumController {
   @Patch("subjects/:id")
   updateSubject(@Param("id") id: string, @Body() body: any) {
     return this.service.updateSubject(id, body);
+  }
+
+  @Get("topics")
+  listTopics(@Query("subjectId") subjectId: string) {
+    return this.service.listTopics(subjectId);
+  }
+
+  @Get("materials")
+  listMaterials(@Query("topicId") topicId: string) {
+    return this.service.listMaterials(topicId);
+  }
+
+  @Post("materials")
+  @UseInterceptors(FileInterceptor("file"))
+  uploadMaterial(@UploadedFile() file: { originalname: string; mimetype: string; size: number; buffer: Buffer }, @Body("topicId") topicId: string) {
+    if (!file) throw new BadRequestException("Upload a text material file.");
+    const allowed = ["text/plain", "text/markdown", "application/json"];
+    if (!allowed.includes(file.mimetype)) throw new BadRequestException("Only TXT, Markdown, or JSON text files are supported; images are ignored.");
+    if (file.size > 5 * 1024 * 1024) throw new BadRequestException("Material must be smaller than 5 MB.");
+    return this.service.createMaterial(topicId, file);
+  }
+
+  @Delete("materials/:id")
+  deleteMaterial(@Param("id") id: string) {
+    return this.service.deleteMaterial(id);
   }
 
   // Pricing — financial data, restricted further than the controller default.

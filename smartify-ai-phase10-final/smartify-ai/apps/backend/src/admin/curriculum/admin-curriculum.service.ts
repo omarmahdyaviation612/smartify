@@ -40,6 +40,24 @@ export class AdminCurriculumService {
     return this.prisma.client.subject.update({ where: { id }, data });
   }
 
+  listTopics(subjectId: string) {
+    return this.prisma.client.topic.findMany({ where: { unit: { subjectId } }, include: { unit: true }, orderBy: [{ unit: { order: "asc" } }, { order: "asc" }] });
+  }
+
+  listMaterials(topicId: string) {
+    return this.prisma.client.learningMaterial.findMany({ where: { topicId }, orderBy: { createdAt: "desc" }, select: { id: true, originalName: true, mimeType: true, sizeBytes: true, createdAt: true } });
+  }
+
+  createMaterial(topicId: string, file: { originalname: string; mimetype: string; size: number; buffer: Buffer }) {
+    return this.prisma.client.learningMaterial.create({
+      data: { topicId, originalName: file.originalname, mimeType: file.mimetype, sizeBytes: file.size, contentText: file.buffer.toString("utf8") },
+    });
+  }
+
+  deleteMaterial(id: string) {
+    return this.prisma.client.learningMaterial.delete({ where: { id } });
+  }
+
   // ---- Pricing plans (SUPER_ADMIN/ADMIN only — enforced at the controller level, not here) ----
   listPricingPlans(curriculumId?: string) {
     return this.prisma.client.pricingPlan.findMany({

@@ -217,8 +217,23 @@ model Topic {
   lessons   Lesson[]
   questions Question[]
   tutorAnswerCache TutorAnswerCache[]
+  materials LearningMaterial[]
 
   @@index([unitId])
+}
+
+model LearningMaterial {
+  id           String   @id @default(cuid())
+  topicId      String
+  topic        Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  contentText  String   @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([topicId])
 }
 
 model Lesson {

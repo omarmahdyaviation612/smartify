@@ -1,11 +1,12 @@
 "use client";
 
 import { useRouter, useParams } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 import { useEffect, useState } from "react";
 import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getOnboardingCopy } from "@/content/onboarding";
 import { OnboardingStepper } from "@/components/OnboardingStepper";
-import { useApiClient } from "@/lib/api-client";
+import { ApiError, useApiClient } from "@/lib/api-client";
 import type { Locale } from "@/content/marketing";
 
 interface DiagnosticQuestion {
@@ -26,18 +27,35 @@ export default function OnboardingDiagnosticPage() {
   const copy = getOnboardingCopy(locale);
   const router = useRouter();
   const { apiFetch } = useApiClient();
+  const { isLoaded, isSignedIn } = useAuth();
 
   const [questions, setQuestions] = useState<DiagnosticQuestion[] | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [loadError, setLoadError] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      router.replace(`/${locale}/sign-in`);
+      return;
+    }
+
     apiFetch<DiagnosticQuestion[]>("/onboarding/diagnostic")
       .then(setQuestions)
-      .catch(() => setLoadError(true));
+      .catch((error: unknown) => {
+        if (error instanceof ApiError && error.status === 404) {
+          router.replace(`/${locale}/onboarding/profile`);
+          return;
+        }
+        if (error instanceof ApiError && error.status === 400) {
+          router.replace(`/${locale}/onboarding/grade-subjects`);
+          return;
+        }
+        setLoadError(error instanceof ApiError ? error.message : copy.diagnostic.error);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isLoaded, isSignedIn, locale]);
 
   async function handleSubmit() {
     if (!questions) return;
@@ -51,7 +69,7 @@ export default function OnboardingDiagnosticPage() {
       });
       router.push(`/${locale}/onboarding/plan-ready`);
     } catch {
-      setLoadError(true);
+      setLoadError(copy.diagnostic.error);
       setSubmitting(false);
     }
   }
@@ -68,7 +86,7 @@ export default function OnboardingDiagnosticPage() {
           <p className="mt-2 text-xs text-neutral-400">{copy.diagnostic.placeholderNotice}</p>
 
           {!questions && !loadError && <p className="mt-8 text-neutral-500">{copy.diagnostic.loading}</p>}
-          {loadError && <p className="mt-8 text-sm text-error-500">{copy.diagnostic.error}</p>}
+          {loadError && <p className="mt-8 text-sm text-error-500">{loadError}</p>}
           {questions && questions.length === 0 && <p className="mt-8 text-neutral-500">{copy.diagnostic.noQuestions}</p>}
 
           {questions && questions.length > 0 && (
