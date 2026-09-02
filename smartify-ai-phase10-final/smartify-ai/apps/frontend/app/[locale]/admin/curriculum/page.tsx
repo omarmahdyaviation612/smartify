@@ -37,21 +37,31 @@ interface Material { id: string; originalName: string; sizeBytes: number; create
 function MaterialsSection() {
   const { apiFetch } = useApiClient();
   const { getToken } = useAuth();
+  const [curricula, setCurricula] = useState<Curriculum[]>([]);
+  const [grades, setGrades] = useState<Grade[]>([]);
   const [subjects, setSubjects] = useState<{ id: string; nameEn: string }[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [subjectId, setSubjectId] = useState("");
   const [topicId, setTopicId] = useState("");
+  const [curriculumId, setCurriculumId] = useState("");
+  const [gradeId, setGradeId] = useState("");
   const [materials, setMaterials] = useState<Material[]>([]);
   const [message, setMessage] = useState("");
 
-  useEffect(() => { apiFetch<Grade[]>("/admin/curriculum/grades").then((grades) => {
-    if (grades[0]) apiFetch<{ id: string; nameEn: string }[]>(`/admin/curriculum/subjects?gradeId=${grades[0].id}`).then(setSubjects);
-  }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { apiFetch<Curriculum[]>("/admin/curriculum/curricula").then(setCurricula); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setGrades([]); setGradeId(""); setSubjects([]); setSubjectId(""); setTopics([]); setTopicId("");
+    if (curriculumId) apiFetch<Grade[]>(`/admin/curriculum/grades?curriculumId=${curriculumId}`).then(setGrades);
+  }, [curriculumId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setSubjects([]); setSubjectId(""); setTopics([]); setTopicId("");
+    if (gradeId) apiFetch<{ id: string; nameEn: string }[]>(`/admin/curriculum/subjects?gradeId=${gradeId}`).then(setSubjects);
+  }, [gradeId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (subjectId) apiFetch<Topic[]>(`/admin/curriculum/topics?subjectId=${subjectId}`).then(setTopics); }, [subjectId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (topicId) apiFetch<Material[]>(`/admin/curriculum/materials?topicId=${topicId}`).then(setMaterials); }, [topicId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function upload(file: File) {
-    if (!topicId) return setMessage("Choose a topic first.");
+    if (!curriculumId || !gradeId || !subjectId || !topicId) return setMessage("Choose a curriculum, grade, subject, and topic first.");
     const form = new FormData(); form.append("file", file); form.append("topicId", topicId);
     const token = await getToken();
     const response = await fetch(`${API_URL}/admin/curriculum/materials`, { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form });
@@ -62,10 +72,16 @@ function MaterialsSection() {
     <h2 className="font-semibold text-navy-900">Upload text materials</h2>
     <p className="mt-1 text-sm text-neutral-500">TXT, Markdown, or JSON only. Images are never extracted or shown.</p>
     <div className="mt-4 grid gap-3 sm:grid-cols-2">
-      <select className="rounded-sf border p-2" value={subjectId} onChange={e => { setSubjectId(e.target.value); setTopicId(""); }}>
+      <select className="rounded-sf border p-2" value={curriculumId} onChange={e => setCurriculumId(e.target.value)}>
+        <option value="">Choose curriculum</option>{curricula.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
+      </select>
+      <select className="rounded-sf border p-2" value={gradeId} onChange={e => setGradeId(e.target.value)} disabled={!curriculumId}>
+        <option value="">Choose grade</option>{grades.map(g => <option key={g.id} value={g.id}>{g.nameEn}</option>)}
+      </select>
+      <select className="rounded-sf border p-2" value={subjectId} onChange={e => { setSubjectId(e.target.value); setTopicId(""); }} disabled={!gradeId}>
         <option value="">Choose subject</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.nameEn}</option>)}
       </select>
-      <select className="rounded-sf border p-2" value={topicId} onChange={e => setTopicId(e.target.value)}>
+      <select className="rounded-sf border p-2" value={topicId} onChange={e => setTopicId(e.target.value)} disabled={!subjectId}>
         <option value="">Choose topic</option>{topics.map(t => <option key={t.id} value={t.id}>{t.unit.nameEn} — {t.nameEn}</option>)}
       </select>
     </div>
