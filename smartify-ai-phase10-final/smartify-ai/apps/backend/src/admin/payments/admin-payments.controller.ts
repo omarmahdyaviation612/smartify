@@ -4,6 +4,8 @@ import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { UserRole } from "@smartify/shared-types";
 import { AdminPaymentsService } from "./admin-payments.service";
+import { updatePaymentProviderSchema } from "@smartify/validation";
+import { parseBody } from "../../common/validation/parse-body";
 
 // SUPER_ADMIN only — activating a real payment provider is a financial/
 // operational decision, not a content-management one.
@@ -19,7 +21,7 @@ export class AdminPaymentsController {
   }
 
   @Patch("providers/:providerKey")
-  updateProvider(@Param("providerKey") providerKey: string, @Body() body: any) {
-    return this.service.updateProvider(providerKey, body);
+  updateProvider(@Param("providerKey") providerKey: string, @Body() body: unknown) {
+    return this.service.updateProvider(providerKey, parseBody(updatePaymentProviderSchema, body));
   }
 }

@@ -5,6 +5,8 @@ import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { UserRole } from "@smartify/shared-types";
 import { AdminCurriculumService } from "./admin-curriculum.service";
+import { updateCurriculumSchema, updateGradeSchema, updatePricingPlanSchema, updateSubjectSchema } from "@smartify/validation";
+import { parseBody } from "../../common/validation/parse-body";
 
 // Curriculum/content CRUD: CONTENT_MANAGER can fully manage content but
 // NOT pricing — pricing endpoints are further restricted to SUPER_ADMIN/
@@ -21,8 +23,8 @@ export class AdminCurriculumController {
   }
 
   @Patch("curricula/:id")
-  updateCurriculum(@Param("id") id: string, @Body() body: any) {
-    return this.service.updateCurriculum(id, body);
+  updateCurriculum(@Param("id") id: string, @Body() body: unknown) {
+    return this.service.updateCurriculum(id, parseBody(updateCurriculumSchema, body));
   }
 
   @Get("grades")
@@ -36,8 +38,8 @@ export class AdminCurriculumController {
   }
 
   @Patch("grades/:id")
-  updateGrade(@Param("id") id: string, @Body() body: any) {
-    return this.service.updateGrade(id, body);
+  updateGrade(@Param("id") id: string, @Body() body: unknown) {
+    return this.service.updateGrade(id, parseBody(updateGradeSchema, body));
   }
 
   @Get("subjects")
@@ -51,8 +53,8 @@ export class AdminCurriculumController {
   }
 
   @Patch("subjects/:id")
-  updateSubject(@Param("id") id: string, @Body() body: any) {
-    return this.service.updateSubject(id, body);
+  updateSubject(@Param("id") id: string, @Body() body: unknown) {
+    return this.service.updateSubject(id, parseBody(updateSubjectSchema, body));
   }
 
   @Get("topics")
@@ -72,6 +74,14 @@ export class AdminCurriculumController {
     const allowed = ["text/plain", "text/markdown", "application/json"];
     if (!allowed.includes(file.mimetype)) throw new BadRequestException("Only TXT, Markdown, or JSON text files are supported; images are ignored.");
     if (file.size > 5 * 1024 * 1024) throw new BadRequestException("Material must be smaller than 5 MB.");
+    if (file.buffer.includes(0)) throw new BadRequestException("Material must contain UTF-8 text, not binary data.");
+    const text = file.buffer.toString("utf8");
+    if (Buffer.from(text, "utf8").compare(file.buffer) !== 0 || text.includes("�")) {
+      throw new BadRequestException("Material must be valid UTF-8 text.");
+    }
+    if (file.mimetype === "application/json") {
+      try { JSON.parse(text); } catch { throw new BadRequestException("JSON material must contain valid JSON."); }
+    }
     return this.service.createMaterial(topicId, file);
   }
 
@@ -89,7 +99,7 @@ export class AdminCurriculumController {
 
   @Patch("pricing-plans/:id")
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
-  updatePricingPlan(@Param("id") id: string, @Body() body: any) {
-    return this.service.updatePricingPlan(id, body);
+  updatePricingPlan(@Param("id") id: string, @Body() body: unknown) {
+    return this.service.updatePricingPlan(id, parseBody(updatePricingPlanSchema, body));
   }
 }

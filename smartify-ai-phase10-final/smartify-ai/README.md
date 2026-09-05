@@ -25,26 +25,29 @@ packages/validation      shared zod request schemas
 
 ## First-time setup
 
+The repository includes an isolated PostgreSQL 16 + Redis 7 Compose stack. Its credentials are intentionally local-only; staging must supply secrets through its secret manager.
+
 ```bash
 # 1. Install all workspace dependencies
 pnpm install
 
-# 2. Copy env files and fill in real values
+# 2. Start local infrastructure
+pnpm infra:up
+
+# 3. Copy env files and fill in real values
 cp apps/backend/.env.example apps/backend/.env
 cp apps/frontend/.env.example apps/frontend/.env.local
 
-# 3. Generate the Prisma client and run the first migration
+# 4. Generate the client, deploy the committed baseline, seed twice, and verify
 pnpm db:generate
-pnpm db:migrate
-
-# 4. Load placeholder curriculum + subscription plan data
-pnpm db:seed
+DATABASE_URL=postgresql://smartify:smartify_local@localhost:5432/smartify pnpm staging:verify
 
 # 5. Run both apps
 pnpm dev
 ```
 
 Backend runs on `http://localhost:4000`, frontend on `http://localhost:3000`.
+Unauthenticated probes are `GET /health/live` (process) and `GET /health/ready` (database). Compose checks PostgreSQL and Redis health. Use `docker compose down -v` only when deliberately destroying local data to rehearse a clean deployment.
 
 ## Verifying the auth flow
 

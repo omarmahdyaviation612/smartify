@@ -32,14 +32,16 @@ async function main() {
     });
 
     // One representative grade per curriculum
-    const grade = await prisma.grade.create({
-      data: {
+    const grade =
+      (await prisma.grade.findFirst({ where: { curriculumId: curriculum.id, level: 7 } })) ??
+      (await prisma.grade.create({
+        data: {
         curriculumId: curriculum.id,
         nameEn: `[PLACEHOLDER] Grade 7`,
         nameAr: `[نموذج] الصف السابع`,
         level: 7,
-      },
-    });
+        },
+      }));
 
     // Two subjects: Math and Science, present in every system for comparability
     const subjectDefs = [
@@ -48,18 +50,20 @@ async function main() {
     ];
 
     for (const s of subjectDefs) {
-      const subject = await prisma.subject.create({
-        data: { gradeId: grade.id, ...s },
-      });
+      const subject =
+        (await prisma.subject.findFirst({ where: { gradeId: grade.id, nameEn: s.nameEn } })) ??
+        (await prisma.subject.create({ data: { gradeId: grade.id, ...s } }));
 
-      const unit = await prisma.unit.create({
-        data: {
+      const unit =
+        (await prisma.unit.findFirst({ where: { subjectId: subject.id, order: 1 } })) ??
+        (await prisma.unit.create({
+          data: {
           subjectId: subject.id,
           nameEn: `[PLACEHOLDER] Unit 1`,
           nameAr: `[نموذج] الوحدة الأولى`,
           order: 1,
-        },
-      });
+          },
+        }));
 
       const topicDefs =
         s.nameEn.includes("Mathematics")
@@ -73,11 +77,12 @@ async function main() {
             ];
 
       for (const [i, t] of topicDefs.entries()) {
-        const topic = await prisma.topic.create({
-          data: { unitId: unit.id, ...t, order: i + 1 },
-        });
+        const topic =
+          (await prisma.topic.findFirst({ where: { unitId: unit.id, order: i + 1 } })) ??
+          (await prisma.topic.create({ data: { unitId: unit.id, ...t, order: i + 1 } }));
 
-        await prisma.lesson.create({
+        const lesson = await prisma.lesson.findFirst({ where: { topicId: topic.id, order: 1 } });
+        if (!lesson) await prisma.lesson.create({
           data: {
             topicId: topic.id,
             nameEn: `[PLACEHOLDER] Introduction to ${t.nameEn.replace("[PLACEHOLDER] ", "")}`,
@@ -90,7 +95,8 @@ async function main() {
         });
 
         // A couple of practice questions per topic so the practice engine is testable
-        await prisma.question.create({
+        const question = await prisma.question.findFirst({ where: { topicId: topic.id, promptEn: { startsWith: "[PLACEHOLDER] Sample question" } } });
+        if (!question) await prisma.question.create({
           data: {
             topicId: topic.id,
             type: QuestionType.MULTIPLE_CHOICE,
