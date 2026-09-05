@@ -32,3 +32,42 @@ export const studentOnboardingSchema = z.object({
   goals: z.string().max(500).optional(),
 });
 export type StudentOnboardingInput = z.infer<typeof studentOnboardingSchema>;
+
+export const updatePaymentProviderSchema = z.object({
+  isActive: z.boolean().optional(),
+  publicConfig: z.record(z.unknown()).optional(),
+}).strict().refine((value) => Object.keys(value).length > 0, "At least one field is required");
+
+export const updateAIProviderSchema = z.object({
+  model: z.string().trim().min(1).max(100).optional(),
+  isActive: z.boolean().optional(),
+  costPerInputToken: z.number().nonnegative().finite().optional(),
+  costPerOutputToken: z.number().nonnegative().finite().optional(),
+}).strict().refine((value) => Object.keys(value).length > 0, "At least one field is required");
+
+export const updateCurriculumSchema = z.object({
+  nameEn: z.string().trim().min(1).max(200).optional(),
+  nameAr: z.string().trim().min(1).max(200).optional(),
+  isActive: z.boolean().optional(),
+}).strict();
+
+export const updateGradeSchema = z.object({
+  nameEn: z.string().trim().min(1).max(200).optional(),
+  nameAr: z.string().trim().min(1).max(200).optional(),
+  level: z.number().int().min(1).max(20).optional(),
+  isActive: z.boolean().optional(),
+}).strict();
+
+export const updateSubjectSchema = z.object({
+  nameEn: z.string().trim().min(1).max(200).optional(),
+  nameAr: z.string().trim().min(1).max(200).optional(),
+  icon: z.string().trim().max(100).optional(),
+  isActive: z.boolean().optional(),
+}).strict();
+
+export const updatePricingPlanSchema = z.object({
+  monthlyPriceEGP: z.number().nonnegative().finite().optional(),
+  includedSubjects: z.number().int().positive().optional(),
+  additionalSubjectPriceEGP: z.number().nonnegative().finite().optional(),
+  isActive: z.boolean().optional(),
+}).strict();

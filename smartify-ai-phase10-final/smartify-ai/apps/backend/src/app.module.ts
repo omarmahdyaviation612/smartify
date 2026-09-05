@@ -21,6 +21,7 @@ import { AdminPaymentsModule } from "./admin/payments/admin-payments.module";
 import { AdminRevenueModule } from "./admin/revenue/admin-revenue.module";
 import { ParentModule } from "./parent/parent.module";
 import { TutorQuestionPacksModule } from "./tutor-question-packs/tutor-question-packs.module";
+import { HealthModule } from "./health/health.module";
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { TutorQuestionPacksModule } from "./tutor-question-packs/tutor-question-
     // instances; that swap doesn't change any application code.
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     PrismaModule,
+    HealthModule,
     AuthModule,
     UsersModule,
     PricingModule,

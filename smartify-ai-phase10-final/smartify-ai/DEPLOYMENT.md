@@ -11,7 +11,7 @@ pnpm exec prisma migrate deploy   # applies all committed migrations in order, i
 pnpm exec prisma migrate dev      # generates + applies a new migration from schema.prisma changes
 ```
 
-`prisma migrate deploy` is the production-safe command — it never generates new migrations or prompts interactively, it only applies what's already committed under `packages/database/prisma/migrations/`. Because Prisma migrations are plain, ordered SQL files checked into the repo, running this against a genuinely empty database reconstructs the full schema from scratch, in order. This project has not yet run `prisma migrate dev` for the first time in a real environment (no `migrations/` directory has been generated — see "What hasn't been exercised" below), so this claim of reproducibility is based on Prisma's own guarantees about how migration files work, not on having watched it happen here.
+`prisma migrate deploy` is the production-safe command: it only applies the ordered SQL committed under `packages/database/prisma/migrations/`. The repository now includes a complete baseline. Rehearse a clean local deployment with `docker compose down -v`, `pnpm infra:up`, and `DATABASE_URL=postgresql://smartify:smartify_local@localhost:5432/smartify pnpm staging:verify`. The last command deploys, seeds twice, and checks critical seed counts. Never use `down -v` against staging or production.
 
 ## Seeding a clean database
 
@@ -62,4 +62,8 @@ This procedure has not been rehearsed in this project. A real "game day" rollbac
 
 ## What hasn't been exercised
 
-Everything above is procedure written from Prisma's/Postgres's documented behavior and standard practice, not from having actually run it in this project — there has never been a live Postgres instance available in this environment. Before going live: actually run a full migrate-from-empty → seed → backup → restore-to-staging → confirm cycle once, and time how long it takes, since "documented" and "rehearsed" are different levels of confidence.
+The current Codex environment did not provide Docker or PostgreSQL, so the checked-in migration was generated and validated statically but not deployed here. Before going live, run the clean deployment above and a backup → restore-to-staging cycle, recording output and duration.
+
+## Credential-dependent staging checks
+
+Use real **test/staging** credentials to exercise Clerk sign-up and webhook role synchronization, OpenAI Tutor reservation/finalization, and Stripe test checkout plus webhook replay. Fawry remains inactive until official base URLs, merchant identifiers, authentication/request schemas, payment-method codes, callback payload and signature rules, idempotency semantics, sandbox credentials, and documented status/refund/error behavior are supplied. These details must not be inferred from another provider.

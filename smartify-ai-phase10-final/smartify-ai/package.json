@@ -7,8 +7,13 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "db:migrate": "pnpm --filter @smartify/database exec prisma migrate dev",
+    "db:deploy": "pnpm --filter @smartify/database exec prisma migrate deploy",
     "db:generate": "pnpm --filter @smartify/database exec prisma generate",
-    "db:seed": "pnpm --filter @smartify/database exec prisma db seed"
+    "db:seed": "pnpm --filter @smartify/database exec prisma db seed",
+    "db:verify": "pnpm --filter @smartify/database exec tsx prisma/verify-seed.ts",
+    "infra:up": "docker compose up -d --wait postgres redis",
+    "infra:down": "docker compose down",
+    "staging:verify": "pnpm db:deploy && pnpm db:seed && pnpm db:seed && pnpm db:verify"
   },
   "devDependencies": {
     "turbo": "^2.1.0",
