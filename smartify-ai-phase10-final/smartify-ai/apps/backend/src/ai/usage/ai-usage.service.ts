@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AIProviderFactory } from "../ai-provider.factory";
 
@@ -102,6 +102,16 @@ export class AIUsageService {
     model: string;
     inputTokens: number;
     outputTokens: number;
+    /** Defaults to "tutor_chat". The Interactive Lesson engine logs "lesson_chat" instead, so lesson vs. free-form Tutor spend is visible separately in the ledger. */
+    feature?: string;
+    /**
+     * Defaults to 1 (one Tutor question consumed), matching the free-form
+     * Tutor's per-message accounting. The Interactive Lesson engine passes
+     * 0 here for every individual teaching turn — entitlement for a lesson
+     * is reserved ONCE at session start (see LessonSessionService), not
+     * per AI turn, so per-turn rows must not double-count quota.
+     */
+    creditsUsed?: number;
   }): Promise<{
     userId: string;
     studentId: string;
@@ -121,14 +131,80 @@ export class AIUsageService {
       userId: params.userId,
       studentId: params.studentId,
       subjectId: params.subjectId,
-      feature: "tutor_chat",
+      feature: params.feature ?? "tutor_chat",
       provider: params.providerKey,
       model: params.model,
       inputTokens: params.inputTokens,
       outputTokens: params.outputTokens,
-      creditsUsed: 1,
+      creditsUsed: params.creditsUsed ?? 1,
       costUsd,
     };
+  }
+
+  /**
+   * Both budget caps are optional SystemConfig keys, following the exact
+   * same "generic key-value store, admin-tunable, absent = disabled"
+   * pattern already used for default_daily_ai_questions_per_subject. When
+   * neither key is set (the default), this is a no-op and behavior is
+   * unchanged from before this pass.
+   */
+  private async getGlobalDailyBudgetUsd(): Promise<number | null> {
+    const config = await this.prisma.client.systemConfig.findUnique({ where: { key: "global_daily_ai_budget_usd" } });
+    return typeof config?.value === "number" ? config.value : null;
+  }
+
+  private async getPerUserDailyBudgetUsd(): Promise<number | null> {
+    const config = await this.prisma.client.systemConfig.findUnique({ where: { key: "per_user_daily_ai_budget_usd" } });
+    return typeof config?.value === "number" ? config.value : null;
+  }
+
+  async getGlobalSpendToday(): Promise<number> {
+    const result = await this.prisma.client.aIUsage.aggregate({
+      where: { createdAt: { gte: this.startOfToday() } },
+      _sum: { costUsd: true },
+    });
+    return Number(result._sum.costUsd ?? 0);
+  }
+
+  async getUserSpendToday(userId: string): Promise<number> {
+    const result = await this.prisma.client.aIUsage.aggregate({
+      where: { userId, createdAt: { gte: this.startOfToday() } },
+      _sum: { costUsd: true },
+    });
+    return Number(result._sum.costUsd ?? 0);
+  }
+
+  /**
+   * Circuit breaker for real OpenAI spend (chat + TTS both log to AIUsage,
+   * so a single aggregate covers both). Checked BEFORE any quota slot is
+   * reserved and before any provider call is made — the same "cheap check
+   * first" placement as the message-length cap in TutorService — so a
+   * tripped budget never consumes a student's question or TTS generation;
+   * there is nothing to release because nothing was ever reserved.
+   */
+  async assertWithinBudget(userId: string): Promise<void> {
+    const [globalLimit, userLimit] = await Promise.all([
+      this.getGlobalDailyBudgetUsd(),
+      this.getPerUserDailyBudgetUsd(),
+    ]);
+    if (globalLimit !== null) {
+      const spent = await this.getGlobalSpendToday();
+      if (spent >= globalLimit) {
+        this.logger.warn(
+          `Global daily AI budget reached: $${spent.toFixed(4)} spent >= $${globalLimit} limit. Rejecting further AI requests until the daily window resets.`,
+        );
+        throw new ServiceUnavailableException(
+          "The AI Tutor is temporarily unavailable due to daily usage limits. Please try again later.",
+        );
+      }
+    }
+    if (userLimit !== null) {
+      const spent = await this.getUserSpendToday(userId);
+      if (spent >= userLimit) {
+        this.logger.warn(`Per-user daily AI budget reached for user ${userId}: $${spent.toFixed(4)} spent >= $${userLimit} limit.`);
+        throw new ServiceUnavailableException("You've reached today's AI usage limit. Please try again tomorrow.");
+      }
+    }
   }
 
   /**

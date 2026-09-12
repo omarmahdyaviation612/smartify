@@ -93,7 +93,7 @@ const en: OnboardingCopy = {
     scoreTitle: "Diagnostic results",
     planTitle: "Initial focus areas",
     planNote: "This is a rule-based starting plan from your diagnostic score — a fully AI-personalized plan is coming in a later phase.",
-    dashboardComingSoon: "Your dashboard is ready — some sections (like AI Tutor and streaks) are still being built.",
+    dashboardComingSoon: "Your dashboard is ready — some sections (like streaks and achievements) are still being built.",
     backHome: "Go to Dashboard",
   },
 };
@@ -142,7 +142,7 @@ const ar: OnboardingCopy = {
     scoreTitle: "نتائج التقييم",
     planTitle: "مجالات التركيز الأولية",
     planNote: "هذه خطة بداية مبنية على قواعد بسيطة من نتيجة تقييمك — خطة مخصصة بالكامل بالذكاء الاصطناعي قادمة في مرحلة لاحقة.",
-    dashboardComingSoon: "لوحة تحكمك جاهزة — بعض الأقسام (مثل المعلم الذكي وسلسلة الإنجاز) ما زالت قيد التطوير.",
+    dashboardComingSoon: "لوحة تحكمك جاهزة — بعض الأقسام (مثل سلسلة الإنجاز والشارات) ما زالت قيد التطوير.",
     backHome: "الذهاب للوحة التحكم",
   },
 };

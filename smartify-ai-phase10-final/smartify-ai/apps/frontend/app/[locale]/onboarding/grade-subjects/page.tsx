@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getOnboardingCopy } from "@/content/onboarding";
 import { OnboardingStepper } from "@/components/OnboardingStepper";
-import { readDraft, writeDraft } from "@/lib/onboarding-draft";
+import { getOnboardingPrerequisite, readDraft, writeDraft } from "@/lib/onboarding-draft";
 import { ApiError, useApiClient } from "@/lib/api-client";
 import { API_URL } from "@/lib/api";
 import type { Locale } from "@/content/marketing";
@@ -28,10 +28,22 @@ export default function OnboardingGradeSubjectsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const currentDraft = readDraft();
+    const previousStep = getOnboardingPrerequisite(currentDraft, "grade-subjects");
+    if (previousStep) {
+      router.replace(`/${locale}/onboarding/${previousStep}`);
+      return;
+    }
     fetch(`${API_URL}/curricula`)
       .then((res) => (res.ok ? res.json() : Promise.reject()))
-      .then(setCatalog)
-      .catch(() => setError(copy.gradeSubjects.submitError));
+      .then((data: CurriculumCatalogEntry[]) => {
+        if (!data.some((c) => c.id === currentDraft.curriculumId && c.code === currentDraft.curriculumCode)) {
+          router.replace(`/${locale}/onboarding/curriculum`);
+          return;
+        }
+        setCatalog(data);
+      })
+      .catch(() => setError(copy.curriculum.loadError));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -103,8 +115,8 @@ export default function OnboardingGradeSubjectsPage() {
           <h1 className="text-2xl font-bold text-navy-900">{copy.gradeSubjects.title}</h1>
           <p className="mt-2 text-neutral-600">{copy.gradeSubjects.body}</p>
 
-          {!curriculum && catalog && (
-            <p className="mt-6 text-sm text-error-500">{copy.gradeSubjects.submitError}</p>
+          {!curriculum && error && (
+            <p className="mt-6 text-sm text-error-500">{error}</p>
           )}
 
           {curriculum && (

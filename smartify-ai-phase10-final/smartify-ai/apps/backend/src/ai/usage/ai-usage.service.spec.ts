@@ -1,3 +1,4 @@
+import { ServiceUnavailableException } from "@nestjs/common";
 import { AIUsageService } from "./ai-usage.service";
 
 /**
@@ -20,12 +21,21 @@ describe("AIUsageService", () => {
     usedToday?: number;
     configuredLimit?: number;
     queryRawRows?: Array<{ count: number }>;
+    globalBudget?: number;
+    perUserBudget?: number;
+    globalSpend?: number;
+    userSpend?: number;
   }) {
+    const systemConfigValues: Record<string, number> = {};
+    if (opts.configuredLimit !== undefined) systemConfigValues.default_daily_ai_questions_per_subject = opts.configuredLimit;
+    if (opts.globalBudget !== undefined) systemConfigValues.global_daily_ai_budget_usd = opts.globalBudget;
+    if (opts.perUserBudget !== undefined) systemConfigValues.per_user_daily_ai_budget_usd = opts.perUserBudget;
+
     const prisma = {
       client: {
         systemConfig: {
-          findUnique: jest.fn().mockResolvedValue(
-            opts.configuredLimit === undefined ? null : { value: opts.configuredLimit },
+          findUnique: jest.fn().mockImplementation(({ where: { key } }: any) =>
+            Promise.resolve(key in systemConfigValues ? { value: systemConfigValues[key] } : null),
           ),
         },
         aIDailyUsageCounter: {
@@ -35,6 +45,11 @@ describe("AIUsageService", () => {
         },
         $queryRaw: jest.fn().mockResolvedValue(opts.queryRawRows ?? [{ count: 1 }]),
         $executeRaw: jest.fn().mockResolvedValue(1),
+        aIUsage: {
+          aggregate: jest.fn().mockImplementation(({ where }: any) =>
+            Promise.resolve({ _sum: { costUsd: where?.userId ? opts.userSpend ?? 0 : opts.globalSpend ?? 0 } }),
+          ),
+        },
       },
     } as any;
     const providerFactory = {
@@ -104,6 +119,41 @@ describe("AIUsageService", () => {
       const { service, prisma } = makeService({});
       await service.releaseDailySlot("student-1", "subject-1");
       expect(prisma.client.$executeRaw).toHaveBeenCalled();
+    });
+  });
+
+  describe("assertWithinBudget (circuit breaker — Phase 10 cost control)", () => {
+    it("is a no-op when neither a global nor a per-user budget is configured (default, unlimited behavior)", async () => {
+      const { service } = makeService({});
+      await expect(service.assertWithinBudget("user-1")).resolves.toBeUndefined();
+    });
+
+    it("does not throw when spend is below both configured budgets", async () => {
+      const { service } = makeService({ globalBudget: 10, perUserBudget: 2, globalSpend: 5, userSpend: 0.5 });
+      await expect(service.assertWithinBudget("user-1")).resolves.toBeUndefined();
+    });
+
+    it("throws ServiceUnavailableException when today's global spend has reached the configured global daily budget", async () => {
+      const { service } = makeService({ globalBudget: 10, globalSpend: 10 });
+      await expect(service.assertWithinBudget("user-1")).rejects.toThrow(ServiceUnavailableException);
+    });
+
+    it("throws ServiceUnavailableException when today's global spend has exceeded the configured global daily budget", async () => {
+      const { service } = makeService({ globalBudget: 10, globalSpend: 15 });
+      await expect(service.assertWithinBudget("user-1")).rejects.toThrow(ServiceUnavailableException);
+    });
+
+    it("throws ServiceUnavailableException when this user's own spend has reached the configured per-user daily budget, even though the global budget is fine", async () => {
+      const { service } = makeService({ globalBudget: 100, globalSpend: 1, perUserBudget: 1, userSpend: 1 });
+      await expect(service.assertWithinBudget("user-1")).rejects.toThrow(ServiceUnavailableException);
+    });
+
+    it("checks the per-user spend for the exact user passed in, not a global aggregate", async () => {
+      const { service, prisma } = makeService({ perUserBudget: 5, userSpend: 1 });
+      await service.assertWithinBudget("user-42");
+      expect(prisma.client.aIUsage.aggregate).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ userId: "user-42" }) }),
+      );
     });
   });
 

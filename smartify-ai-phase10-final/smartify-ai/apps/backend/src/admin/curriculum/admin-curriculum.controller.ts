@@ -7,6 +7,7 @@ import { UserRole } from "@smartify/shared-types";
 import { AdminCurriculumService } from "./admin-curriculum.service";
 import { updateCurriculumSchema, updateGradeSchema, updatePricingPlanSchema, updateSubjectSchema } from "@smartify/validation";
 import { parseBody } from "../../common/validation/parse-body";
+import { uploadOptions } from "./upload-options";
 
 // Curriculum/content CRUD: CONTENT_MANAGER can fully manage content but
 // NOT pricing — pricing endpoints are further restricted to SUPER_ADMIN/
@@ -68,8 +69,9 @@ export class AdminCurriculumController {
   }
 
   @Post("materials")
-  @UseInterceptors(FileInterceptor("file"))
+  @UseInterceptors(FileInterceptor("file", uploadOptions))
   uploadMaterial(@UploadedFile() file: { originalname: string; mimetype: string; size: number; buffer: Buffer }, @Body("topicId") topicId: string) {
+    if (file?.mimetype === "application/pdf") return this.service.importSubjectMaterial(file as never, file);
     if (!file) throw new BadRequestException("Upload a text material file.");
     const allowed = ["text/plain", "text/markdown", "application/json"];
     if (!allowed.includes(file.mimetype)) throw new BadRequestException("Only TXT, Markdown, or JSON text files are supported; images are ignored.");
@@ -83,6 +85,15 @@ export class AdminCurriculumController {
       try { JSON.parse(text); } catch { throw new BadRequestException("JSON material must contain valid JSON."); }
     }
     return this.service.createMaterial(topicId, file);
+  }
+
+  @Post("subject-materials")
+  @UseInterceptors(FileInterceptor("file", uploadOptions))
+  uploadSubjectMaterial(@UploadedFile() file: { originalname: string; mimetype: string; size: number; buffer: Buffer }, @Body("subjectId") subjectId: string) {
+    if (!file || !subjectId) throw new BadRequestException("Choose a subject and upload a PDF.");
+    if (file.mimetype !== "application/pdf") throw new BadRequestException("Only PDF subject materials are supported.");
+    if (file.size > 25 * 1024 * 1024) throw new BadRequestException("PDF must be smaller than 25 MB.");
+    return this.service.importSubjectMaterial(subjectId, file);
   }
 
   @Delete("materials/:id")

@@ -147,7 +147,7 @@ export function PricingTeaser({ locale, copy }: { locale: Locale; copy: Marketin
         <p className="mx-auto mt-4 max-w-2xl text-neutral-600">{copy.pricing.body}</p>
         <p className="mx-auto mt-2 max-w-2xl text-sm text-neutral-500">{copy.pricing.note}</p>
         <Link href={`/${locale}/pricing`} className="mt-8 inline-block">
-          <SmartifyButton variant="secondary">{copy.nav.pricing}</SmartifyButton>
+          <SmartifyButton variant="ai">{copy.pricing.ctaLabel}</SmartifyButton>
         </Link>
       </SmartifyContainer>
     </section>

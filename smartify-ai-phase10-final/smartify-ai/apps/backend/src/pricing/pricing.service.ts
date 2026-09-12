@@ -26,6 +26,7 @@ export class PricingService {
         nameEn: c.nameEn,
         nameAr: c.nameAr,
         tiers: c.pricingPlans.map((p) => ({
+          id: p.id, // lets the frontend carry the selected plan into checkout without the student re-picking it
           levelEn: p.levelCodeEn,
           levelAr: p.levelCodeAr,
           monthlyPriceEGP: p.monthlyPriceEGP,

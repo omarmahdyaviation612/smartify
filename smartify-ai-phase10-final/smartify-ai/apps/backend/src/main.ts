@@ -15,6 +15,12 @@ async function bootstrap() {
   // the exact raw bytes, not JSON re-serialized by Nest's default parser.
   const app = await NestFactory.create(AppModule, { bodyParser: false });
 
+  // Without this, Nest never listens for SIGTERM/SIGINT, so
+  // PrismaService.onModuleDestroy() (which disconnects the DB client)
+  // never runs on a container stop/restart — the process would be killed
+  // mid-request instead of draining first.
+  app.enableShutdownHooks();
+
   app.use(helmet()); // baseline security headers (CSP, HSTS, X-Frame-Options, etc.)
   app.use("/webhooks/clerk", express.raw({ type: "application/json" }));
   app.use("/webhooks/billing", express.raw({ type: "application/json" }));

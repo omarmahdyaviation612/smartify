@@ -1,0 +1,190 @@
+{
+    "initialSignedIn":  true,
+    "routes":  [
+                   {
+                       "path":  "/en/onboarding/profile",
+                       "status":  200,
+                       "destination":  "https://localhost:3443/en/onboarding/profile",
+                       "signedIn":  true,
+                       "lang":  "en",
+                       "dir":  "ltr"
+                   },
+                   {
+                       "path":  "/ar/onboarding/profile",
+                       "status":  200,
+                       "destination":  "https://localhost:3443/ar/onboarding/profile",
+                       "signedIn":  true,
+                       "lang":  "ar",
+                       "dir":  "rtl"
+                   },
+                   {
+                       "phase":  "afterLogout",
+                       "path":  "/en/onboarding/profile",
+                       "status":  200,
+                       "destination":  "https://localhost:3443/en/sign-in",
+                       "signedIn":  false
+                   },
+                   {
+                       "phase":  "afterLogout",
+                       "path":  "/ar/onboarding/profile",
+                       "status":  200,
+                       "destination":  "https://localhost:3443/ar/sign-in",
+                       "signedIn":  false
+                   }
+               ],
+    "navigation":  [
+                       {
+                           "url":  "https://localhost:3443/en/onboarding/profile",
+                           "status":  200
+                       },
+                       {
+                           "url":  "https://localhost:3443/ar/onboarding/profile",
+                           "status":  200
+                       },
+                       {
+                           "url":  "https://localhost:3443/en/onboarding/profile",
+                           "status":  307,
+                           "location":  "/en/sign-in",
+                           "authStatus":  "signed-out",
+                           "authReason":  "session-token-and-uat-missing"
+                       },
+                       {
+                           "url":  "https://localhost:3443/en/sign-in",
+                           "status":  307,
+                           "location":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake",
+                           "authStatus":  "handshake",
+                           "authReason":  "dev-browser-sync"
+                       },
+                       {
+                           "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake",
+                           "status":  307,
+                           "location":  "https://localhost:3443/en/sign-in"
+                       },
+                       {
+                           "url":  "https://localhost:3443/en/sign-in",
+                           "status":  307,
+                           "location":  "https://localhost:3443/en/sign-in",
+                           "authStatus":  "signed-out",
+                           "authReason":  "session-token-missing"
+                       },
+                       {
+                           "url":  "https://localhost:3443/en/sign-in",
+                           "status":  200,
+                           "authStatus":  "signed-out",
+                           "authReason":  "session-token-and-uat-missing"
+                       },
+                       {
+                           "url":  "https://localhost:3443/ar/onboarding/profile",
+                           "status":  307,
+                           "location":  "/ar/sign-in",
+                           "authStatus":  "signed-out",
+                           "authReason":  "session-token-and-uat-missing"
+                       },
+                       {
+                           "url":  "https://localhost:3443/ar/sign-in",
+                           "status":  307,
+                           "location":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake",
+                           "authStatus":  "handshake",
+                           "authReason":  "dev-browser-sync"
+                       },
+                       {
+                           "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake",
+                           "status":  307,
+                           "location":  "https://localhost:3443/ar/sign-in"
+                       },
+                       {
+                           "url":  "https://localhost:3443/ar/sign-in",
+                           "status":  307,
+                           "location":  "https://localhost:3443/ar/sign-in",
+                           "authStatus":  "signed-out",
+                           "authReason":  "session-token-missing"
+                       },
+                       {
+                           "url":  "https://localhost:3443/ar/sign-in",
+                           "status":  200,
+                           "authStatus":  "signed-out",
+                           "authReason":  "session-token-and-uat-missing"
+                       }
+                   ],
+    "runtimeErrors":  [
+                          "An error occurred in the Server Components render. The specific message is omitted in production builds to avoid leaking sensitive details. A digest property is included on this error instance which may provide additional details about the nature of the error."
+                      ],
+    "cookies":  [
+                    {
+                        "name":  "__clerk_db_jwt",
+                        "domain":  "localhost",
+                        "path":  "/",
+                        "secure":  true,
+                        "httpOnly":  false,
+                        "sameSite":  "Lax"
+                    },
+                    {
+                        "name":  "__clerk_db_jwt_OXxIthpx",
+                        "domain":  "localhost",
+                        "path":  "/",
+                        "secure":  true,
+                        "httpOnly":  false,
+                        "sameSite":  "Lax"
+                    },
+                    {
+                        "name":  "__refresh_OXxIthpx",
+                        "domain":  "localhost",
+                        "path":  "/",
+                        "secure":  true,
+                        "httpOnly":  true,
+                        "sameSite":  "None"
+                    },
+                    {
+                        "name":  "clerk_active_context",
+                        "domain":  "localhost",
+                        "path":  "/",
+                        "secure":  true,
+                        "httpOnly":  false,
+                        "sameSite":  "Lax"
+                    },
+                    {
+                        "name":  "sf_locale",
+                        "domain":  "localhost",
+                        "path":  "/",
+                        "secure":  false,
+                        "httpOnly":  false,
+                        "sameSite":  "Lax"
+                    },
+                    {
+                        "name":  "__session",
+                        "domain":  "localhost",
+                        "path":  "/",
+                        "secure":  true,
+                        "httpOnly":  false,
+                        "sameSite":  "Lax"
+                    },
+                    {
+                        "name":  "__session_OXxIthpx",
+                        "domain":  "localhost",
+                        "path":  "/",
+                        "secure":  true,
+                        "httpOnly":  false,
+                        "sameSite":  "Lax"
+                    },
+                    {
+                        "name":  "__client_uat_OXxIthpx",
+                        "domain":  "localhost",
+                        "path":  "/",
+                        "secure":  true,
+                        "httpOnly":  false,
+                        "sameSite":  "Strict"
+                    },
+                    {
+                        "name":  "__client_uat",
+                        "domain":  "localhost",
+                        "path":  "/",
+                        "secure":  true,
+                        "httpOnly":  false,
+                        "sameSite":  "Strict"
+                    }
+                ],
+    "logout":  {
+                   "destination":  "https://localhost:3443/en/sign-in",
+                   "signedIn":  false
+               }
+}

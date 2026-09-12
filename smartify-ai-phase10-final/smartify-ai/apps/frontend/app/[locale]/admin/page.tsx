@@ -17,10 +17,15 @@ interface RevenueSummary {
   note: string;
 }
 
-function AdminNavCard({ href, title, body }: { href: string; title: string; body: string }) {
+function AdminNavCard({ href, title, body, badge }: { href: string; title: string; body: string; badge?: number }) {
   return (
     <Link href={href} className="block rounded-sf-lg border border-neutral-200 bg-white p-6 hover:border-sf-blue-500">
-      <h3 className="font-semibold text-navy-900">{title}</h3>
+      <div className="flex items-center gap-2">
+        <h3 className="font-semibold text-navy-900">{title}</h3>
+        {Boolean(badge) && (
+          <span className="rounded-full bg-error-500 px-2 py-0.5 text-xs font-semibold text-white">{badge}</span>
+        )}
+      </div>
       <p className="mt-1 text-sm text-neutral-500">{body}</p>
     </Link>
   );
@@ -31,11 +36,15 @@ export default function AdminOverviewPage() {
   const { apiFetch } = useApiClient();
   const [summary, setSummary] = useState<RevenueSummary | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  const [pendingInstapay, setPendingInstapay] = useState(0);
 
   useEffect(() => {
     apiFetch<RevenueSummary>("/admin/revenue/summary")
       .then(setSummary)
       .catch(() => setForbidden(true));
+    apiFetch<{ count: number }>("/admin/instapay/pending-count")
+      .then((res) => setPendingInstapay(res.count))
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -79,6 +88,12 @@ export default function AdminOverviewPage() {
               href={`/${locale}/admin/platform`}
               title="Platform Config"
               body="AI provider, payment provider, and system settings (Super Admin only)."
+            />
+            <AdminNavCard
+              href={`/${locale}/admin/instapay`}
+              title="InstaPay Payments"
+              body="Review and confirm manual InstaPay payment submissions."
+              badge={pendingInstapay}
             />
           </div>
         </SmartifyContainer>

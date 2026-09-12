@@ -9,6 +9,14 @@ export interface AIGenerateRequest {
   systemPrompt: string;
   messages: Array<{ role: "user" | "assistant"; content: string }>;
   maxOutputTokens?: number;
+  /**
+   * "json_object" forces the provider to return a single valid JSON
+   * object as the entire response — used by the Interactive Lesson
+   * engine's check-evaluation turn so the caller can deterministically
+   * parse intent/correctness rather than trusting free-form prose.
+   * Omitted (default) preserves normal free-text behavior everywhere else.
+   */
+  responseFormat?: "text" | "json_object";
 }
 
 export interface AIGenerateResult {

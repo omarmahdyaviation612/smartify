@@ -20,6 +20,19 @@ export interface OnboardingDraft {
 
 const KEY = "sf_onboarding_draft";
 
+export function getOnboardingPrerequisite(
+  draft: OnboardingDraft,
+  step: "curriculum" | "grade-subjects",
+): "profile" | "curriculum" | null {
+  if (!draft.fullName?.trim() || !draft.country?.trim() || !Number.isInteger(draft.age) || draft.age! < 4 || draft.age! > 25) {
+    return "profile";
+  }
+  if (step === "grade-subjects" && (!draft.curriculumId || !draft.curriculumCode)) {
+    return "curriculum";
+  }
+  return null;
+}
+
 export function readDraft(): OnboardingDraft {
   if (typeof window === "undefined") return {};
   try {

@@ -9,13 +9,14 @@ export function generateStaticParams() {
   return [{ locale: "ar" }, { locale: "en" }];
 }
 
-export default function ForParentsPage({ params }: { params: { locale: Locale } }) {
-  const nav = getMarketingCopy(params.locale);
-  const copy = getForParentsCopy(params.locale);
+export default async function ForParentsPage({ params }: { params: Promise<{ locale: string }> }) {
+  const locale = (await params).locale as Locale;
+  const nav = getMarketingCopy(locale);
+  const copy = getForParentsCopy(locale);
 
   return (
     <>
-      <Navbar locale={params.locale} copy={nav} />
+      <Navbar locale={locale} copy={nav} />
       <main>
         <section className="bg-[--sf-bg-subtle] py-20 text-center">
           <SmartifyContainer>
@@ -61,14 +62,14 @@ export default function ForParentsPage({ params }: { params: { locale: Locale } 
           <SmartifyContainer className="flex flex-col items-center gap-4">
             <h2 className="text-3xl font-bold text-navy-900">{copy.cta.title}</h2>
             <p className="max-w-xl text-neutral-600">{copy.cta.body}</p>
-            <Link href={`/${params.locale}/sign-up`}>
+            <Link href={`/${locale}/sign-up`}>
               <SmartifyButton variant="ai">{copy.cta.buttonLabel}</SmartifyButton>
             </Link>
             <p className="max-w-md text-xs text-neutral-400">{copy.cta.disclaimer}</p>
           </SmartifyContainer>
         </section>
       </main>
-      <Footer locale={params.locale} copy={nav} />
+      <Footer locale={locale} copy={nav} />
     </>
   );
 }

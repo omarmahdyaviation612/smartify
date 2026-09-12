@@ -2,8 +2,10 @@ import { getMarketingCopy, type Locale } from "@/content/marketing";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { SmartifyContainer } from "@smartify/ui";
+import { SubscribeNowButton } from "@/components/SubscribeNowButton";
 
 interface PricingTier {
+  id: string;
   levelEn: string;
   levelAr: string;
   monthlyPriceEGP: string;
@@ -39,14 +41,15 @@ async function getPricing(): Promise<PricingResponse | null> {
   }
 }
 
-export default async function PricingPage({ params }: { params: { locale: Locale } }) {
-  const copy = getMarketingCopy(params.locale);
+export default async function PricingPage({ params }: { params: Promise<{ locale: string }> }) {
+  const locale = (await params).locale as Locale;
+  const copy = getMarketingCopy(locale);
   const pricing = await getPricing();
-  const isAr = params.locale === "ar";
+  const isAr = locale === "ar";
 
   return (
     <>
-      <Navbar locale={params.locale} copy={copy} />
+      <Navbar locale={locale} copy={copy} />
       <main className="py-20">
         <SmartifyContainer>
           <div className="text-center">
@@ -91,6 +94,12 @@ export default async function PricingPage({ params }: { params: { locale: Locale
                             ? `${tier.additionalSubjectPriceEGP} ج.م لكل مادة إضافية`
                             : `${tier.additionalSubjectPriceEGP} EGP per additional subject`}
                         </p>
+                        <SubscribeNowButton
+                          locale={locale}
+                          planId={tier.id}
+                          label={copy.pricing.ctaLabel}
+                          notSignedInMessage={isAr ? "يجب عليك التسجيل أولاً" : "You must sign up first"}
+                        />
                       </div>
                     ))}
                   </div>
@@ -100,7 +109,7 @@ export default async function PricingPage({ params }: { params: { locale: Locale
           )}
         </SmartifyContainer>
       </main>
-      <Footer locale={params.locale} copy={copy} />
+      <Footer locale={locale} copy={copy} />
     </>
   );
 }

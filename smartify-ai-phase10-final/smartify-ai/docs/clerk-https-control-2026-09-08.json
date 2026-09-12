@@ -1,0 +1,579 @@
+[
+  {
+    "base": "https://localhost:3443",
+    "versions": {
+      "next": "15.5.21",
+      "clerk": "5.7.6"
+    },
+    "tlsVerification": true,
+    "navigation": [
+      {
+        "url": "https://localhost:3443/",
+        "status": 307,
+        "location": "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake?redirect_url=https%3A%2F%2Flocalhost%3A3443%2F&suffixed_cookies=%5BREDACTED%5D&__clerk_hs_reason=%5BREDACTED%5D",
+        "authStatus": "handshake",
+        "authReason": "dev-browser-missing",
+        "origin": "Clerk SDK middleware handshake"
+      },
+      {
+        "url": "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake?redirect_url=https%3A%2F%2Flocalhost%3A3443%2F&suffixed_cookies=%5BREDACTED%5D&__clerk_hs_reason=%5BREDACTED%5D",
+        "status": 307,
+        "location": "https://localhost:3443/?__clerk_handshake=%5BREDACTED%5D",
+        "origin": "Clerk Frontend API"
+      },
+      {
+        "url": "https://localhost:3443/?__clerk_handshake=%5BREDACTED%5D",
+        "status": 307,
+        "location": "https://localhost:3443/",
+        "authStatus": "signed-out",
+        "authReason": "session-token-missing",
+        "origin": "Clerk SDK middleware handshake"
+      },
+      {
+        "url": "https://localhost:3443/",
+        "status": 307,
+        "location": "https://localhost:3443/ar",
+        "authStatus": "signed-out",
+        "authReason": "session-token-and-uat-missing",
+        "origin": "Smartify locale/protection middleware"
+      },
+      {
+        "url": "https://localhost:3443/ar",
+        "status": 200,
+        "location": null,
+        "authStatus": "signed-out",
+        "authReason": "session-token-and-uat-missing",
+        "origin": "Next page"
+      },
+      {
+        "url": "https://localhost:3443/en/onboarding/profile",
+        "status": 307,
+        "location": "https://localhost:3443/en/sign-in?redirect_url=https%3A%2F%2Flocalhost%3A3000%2Fen%2Fonboarding%2Fprofile&__clerk_db_jwt=%5BREDACTED%5D",
+        "authStatus": "signed-out",
+        "authReason": "session-token-and-uat-missing",
+        "origin": "Smartify locale/protection middleware"
+      },
+      {
+        "url": "https://localhost:3443/en/sign-in?redirect_url=https%3A%2F%2Flocalhost%3A3000%2Fen%2Fonboarding%2Fprofile&__clerk_db_jwt=%5BREDACTED%5D",
+        "status": 307,
+        "location": "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake?redirect_url=https%3A%2F%2Flocalhost%3A3443%2Fen%2Fsign-in%3Fredirect_url%3Dhttps%253A%252F%252Flocalhost%253A3000%252Fen%252Fonboarding%252Fprofile&suffixed_cookies=%5BREDACTED%5D&__clerk_hs_reason=%5BREDACTED%5D&__clerk_db_jwt=%5BREDACTED%5D",
+        "authStatus": "handshake",
+        "authReason": "dev-browser-sync",
+        "origin": "Clerk SDK middleware handshake"
+      },
+      {
+        "url": "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake?redirect_url=https%3A%2F%2Flocalhost%3A3443%2Fen%2Fsign-in%3Fredirect_url%3Dhttps%253A%252F%252Flocalhost%253A3000%252Fen%252Fonboarding%252Fprofile&suffixed_cookies=%5BREDACTED%5D&__clerk_hs_reason=%5BREDACTED%5D&__clerk_db_jwt=%5BREDACTED%5D",
+        "status": 307,
+        "location": "https://localhost:3443/en/sign-in?__clerk_handshake=%5BREDACTED%5D&redirect_url=https%3A%2F%2Flocalhost%3A3000%2Fen%2Fonboarding%2Fprofile",
+        "origin": "Clerk Frontend API"
+      },
+      {
+        "url": "https://localhost:3443/en/sign-in?__clerk_handshake=%5BREDACTED%5D&redirect_url=https%3A%2F%2Flocalhost%3A3000%2Fen%2Fonboarding%2Fprofile",
+        "status": 307,
+        "location": "https://localhost:3443/en/sign-in?redirect_url=https%3A%2F%2Flocalhost%3A3000%2Fen%2Fonboarding%2Fprofile",
+        "authStatus": "signed-out",
+        "authReason": "session-token-missing",
+        "origin": "Clerk SDK middleware handshake"
+      },
+      {
+        "url": "https://localhost:3443/en/sign-in?redirect_url=https%3A%2F%2Flocalhost%3A3000%2Fen%2Fonboarding%2Fprofile",
+        "status": 200,
+        "location": null,
+        "authStatus": "signed-out",
+        "authReason": "session-token-and-uat-missing",
+        "origin": "Next page"
+      }
+    ],
+    "setCookies": [
+      {
+        "response": "https://localhost:3443/",
+        "status": 307,
+        "name": "__clerk_redirect_count",
+        "sameSite": "Lax",
+        "secure": false,
+        "httpOnly": true,
+        "domain": "localhost",
+        "hostOnly": true,
+        "path": "/",
+        "maxAge": "3"
+      },
+      {
+        "response": "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake?redirect_url=https%3A%2F%2Flocalhost%3A3443%2F&suffixed_cookies=%5BREDACTED%5D&__clerk_hs_reason=%5BREDACTED%5D",
+        "status": 307,
+        "name": "__cf_bm",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": true,
+        "domain": ".prime-kingfish-3595.clerk.accounts.dev",
+        "hostOnly": false,
+        "path": "/",
+        "expires": "Tue, 08-Sep-26 21:26:42 GMT"
+      },
+      {
+        "response": "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake?redirect_url=https%3A%2F%2Flocalhost%3A3443%2F&suffixed_cookies=%5BREDACTED%5D&__clerk_hs_reason=%5BREDACTED%5D",
+        "status": 307,
+        "name": "_cfuvid",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": true,
+        "domain": ".prime-kingfish-3595.clerk.accounts.dev",
+        "hostOnly": false,
+        "path": "/"
+      },
+      {
+        "response": "https://localhost:3443/?__clerk_handshake=%5BREDACTED%5D",
+        "status": 307,
+        "name": "__client_uat",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": false,
+        "domain": "localhost",
+        "hostOnly": true,
+        "path": "/",
+        "expires": "Thu, 01 Jan 1970 00:00:00 GMT"
+      },
+      {
+        "response": "https://localhost:3443/?__clerk_handshake=%5BREDACTED%5D",
+        "status": 307,
+        "name": "__client_uat",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": false,
+        "domain": "localhost",
+        "hostOnly": false,
+        "path": "/",
+        "maxAge": "315360000"
+      },
+      {
+        "response": "https://localhost:3443/?__clerk_handshake=%5BREDACTED%5D",
+        "status": 307,
+        "name": "__session",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": false,
+        "domain": "localhost",
+        "hostOnly": true,
+        "path": "/",
+        "expires": "Thu, 01 Jan 1970 00:00:00 GMT"
+      },
+      {
+        "response": "https://localhost:3443/?__clerk_handshake=%5BREDACTED%5D",
+        "status": 307,
+        "name": "__clerk_db_jwt",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": false,
+        "domain": "localhost",
+        "hostOnly": true,
+        "path": "/",
+        "expires": "Wed, 08 Sep 2027 20:56:42 GMT"
+      },
+      {
+        "response": "https://localhost:3443/ar",
+        "status": 200,
+        "name": "sf_locale",
+        "sameSite": "unspecified",
+        "secure": false,
+        "httpOnly": false,
+        "domain": "localhost",
+        "hostOnly": true,
+        "path": "/",
+        "expires": "Wed, 08 Sep 2027 20:56:43 GMT",
+        "maxAge": "31536000"
+      },
+      {
+        "response": "https://prime-kingfish-3595.clerk.accounts.dev/npm/@clerk/clerk-js@5/dist/clerk.browser.js",
+        "status": 307,
+        "name": "__cf_bm",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": true,
+        "domain": ".prime-kingfish-3595.clerk.accounts.dev",
+        "hostOnly": false,
+        "path": "/",
+        "expires": "Tue, 08-Sep-26 21:26:43 GMT"
+      },
+      {
+        "response": "https://localhost:3443/ar/curricula?_rsc=%5BREDACTED%5D",
+        "status": 200,
+        "name": "sf_locale",
+        "sameSite": "unspecified",
+        "secure": false,
+        "httpOnly": false,
+        "domain": "localhost",
+        "hostOnly": true,
+        "path": "/",
+        "expires": "Wed, 08 Sep 2027 20:56:43 GMT",
+        "maxAge": "31536000"
+      },
+      {
+        "response": "https://localhost:3443/ar/pricing?_rsc=%5BREDACTED%5D",
+        "status": 200,
+        "name": "sf_locale",
+        "sameSite": "unspecified",
+        "secure": false,
+        "httpOnly": false,
+        "domain": "localhost",
+        "hostOnly": true,
+        "path": "/",
+        "expires": "Wed, 08 Sep 2027 20:56:43 GMT",
+        "maxAge": "31536000"
+      },
+      {
+        "response": "https://localhost:3443/ar/for-parents?_rsc=%5BREDACTED%5D",
+        "status": 200,
+        "name": "sf_locale",
+        "sameSite": "unspecified",
+        "secure": false,
+        "httpOnly": false,
+        "domain": "localhost",
+        "hostOnly": true,
+        "path": "/",
+        "expires": "Wed, 08 Sep 2027 20:56:43 GMT",
+        "maxAge": "31536000"
+      },
+      {
+        "response": "https://localhost:3443/ar/sign-in?_rsc=%5BREDACTED%5D",
+        "status": 200,
+        "name": "sf_locale",
+        "sameSite": "unspecified",
+        "secure": false,
+        "httpOnly": false,
+        "domain": "localhost",
+        "hostOnly": true,
+        "path": "/",
+        "expires": "Wed, 08 Sep 2027 20:56:43 GMT",
+        "maxAge": "31536000"
+      },
+      {
+        "response": "https://localhost:3443/ar/sign-up?_rsc=%5BREDACTED%5D",
+        "status": 200,
+        "name": "sf_locale",
+        "sameSite": "unspecified",
+        "secure": false,
+        "httpOnly": false,
+        "domain": "localhost",
+        "hostOnly": true,
+        "path": "/",
+        "expires": "Wed, 08 Sep 2027 20:56:43 GMT",
+        "maxAge": "31536000"
+      },
+      {
+        "response": "https://prime-kingfish-3595.clerk.accounts.dev/npm/@clerk/clerk-js@5.127.2/dist/clerk.browser.js",
+        "status": 200,
+        "name": "__cf_bm",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": true,
+        "domain": ".prime-kingfish-3595.clerk.accounts.dev",
+        "hostOnly": false,
+        "path": "/",
+        "expires": "Tue, 08-Sep-26 21:26:43 GMT"
+      },
+      {
+        "response": "https://prime-kingfish-3595.clerk.accounts.dev/v1/client?__clerk_api_version=%5BREDACTED%5D&_clerk_js_version=%5BREDACTED%5D&__clerk_db_jwt=%5BREDACTED%5D",
+        "status": 200,
+        "name": "_cfuvid",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": true,
+        "domain": "clerkprod-cloudflare.net",
+        "hostOnly": false,
+        "path": "/"
+      },
+      {
+        "response": "https://prime-kingfish-3595.clerk.accounts.dev/v1/environment?__clerk_api_version=%5BREDACTED%5D&_clerk_js_version=%5BREDACTED%5D&_method=%5BREDACTED%5D&__clerk_db_jwt=%5BREDACTED%5D",
+        "status": 200,
+        "name": "_cfuvid",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": true,
+        "domain": "clerkprod-cloudflare.net",
+        "hostOnly": false,
+        "path": "/"
+      },
+      {
+        "response": "https://localhost:3443/en/sign-in?redirect_url=https%3A%2F%2Flocalhost%3A3000%2Fen%2Fonboarding%2Fprofile&__clerk_db_jwt=%5BREDACTED%5D",
+        "status": 307,
+        "name": "__clerk_redirect_count",
+        "sameSite": "Lax",
+        "secure": false,
+        "httpOnly": true,
+        "domain": "localhost",
+        "hostOnly": true,
+        "path": "/",
+        "maxAge": "3"
+      },
+      {
+        "response": "https://localhost:3443/en/sign-in?__clerk_handshake=%5BREDACTED%5D&redirect_url=https%3A%2F%2Flocalhost%3A3000%2Fen%2Fonboarding%2Fprofile",
+        "status": 307,
+        "name": "__client_uat",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": false,
+        "domain": "localhost",
+        "hostOnly": true,
+        "path": "/",
+        "expires": "Thu, 01 Jan 1970 00:00:00 GMT"
+      },
+      {
+        "response": "https://localhost:3443/en/sign-in?__clerk_handshake=%5BREDACTED%5D&redirect_url=https%3A%2F%2Flocalhost%3A3000%2Fen%2Fonboarding%2Fprofile",
+        "status": 307,
+        "name": "__client_uat",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": false,
+        "domain": "localhost",
+        "hostOnly": false,
+        "path": "/",
+        "maxAge": "315360000"
+      },
+      {
+        "response": "https://localhost:3443/en/sign-in?__clerk_handshake=%5BREDACTED%5D&redirect_url=https%3A%2F%2Flocalhost%3A3000%2Fen%2Fonboarding%2Fprofile",
+        "status": 307,
+        "name": "__client_uat_OXxIthpx",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": false,
+        "domain": "localhost",
+        "hostOnly": false,
+        "path": "/",
+        "maxAge": "315360000"
+      },
+      {
+        "response": "https://localhost:3443/en/sign-in?__clerk_handshake=%5BREDACTED%5D&redirect_url=https%3A%2F%2Flocalhost%3A3000%2Fen%2Fonboarding%2Fprofile",
+        "status": 307,
+        "name": "__session_OXxIthpx",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": false,
+        "domain": "localhost",
+        "hostOnly": true,
+        "path": "/",
+        "expires": "Thu, 01 Jan 1970 00:00:00 GMT"
+      },
+      {
+        "response": "https://localhost:3443/en/sign-in?__clerk_handshake=%5BREDACTED%5D&redirect_url=https%3A%2F%2Flocalhost%3A3000%2Fen%2Fonboarding%2Fprofile",
+        "status": 307,
+        "name": "__clerk_db_jwt",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": false,
+        "domain": "localhost",
+        "hostOnly": true,
+        "path": "/",
+        "expires": "Wed, 08 Sep 2027 20:56:44 GMT"
+      },
+      {
+        "response": "https://localhost:3443/en/sign-in?__clerk_handshake=%5BREDACTED%5D&redirect_url=https%3A%2F%2Flocalhost%3A3000%2Fen%2Fonboarding%2Fprofile",
+        "status": 307,
+        "name": "__clerk_db_jwt_OXxIthpx",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": false,
+        "domain": "localhost",
+        "hostOnly": true,
+        "path": "/",
+        "expires": "Wed, 08 Sep 2027 20:56:44 GMT"
+      },
+      {
+        "response": "https://localhost:3443/en/sign-in?redirect_url=https%3A%2F%2Flocalhost%3A3000%2Fen%2Fonboarding%2Fprofile",
+        "status": 200,
+        "name": "sf_locale",
+        "sameSite": "unspecified",
+        "secure": false,
+        "httpOnly": false,
+        "domain": "localhost",
+        "hostOnly": true,
+        "path": "/",
+        "expires": "Wed, 08 Sep 2027 20:56:45 GMT",
+        "maxAge": "31536000"
+      },
+      {
+        "response": "https://prime-kingfish-3595.clerk.accounts.dev/npm/@clerk/clerk-js@5/dist/clerk.browser.js",
+        "status": 307,
+        "name": "__cf_bm",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": true,
+        "domain": ".prime-kingfish-3595.clerk.accounts.dev",
+        "hostOnly": false,
+        "path": "/",
+        "expires": "Tue, 08-Sep-26 21:26:44 GMT"
+      },
+      {
+        "response": "https://prime-kingfish-3595.clerk.accounts.dev/v1/client?__clerk_api_version=%5BREDACTED%5D&_clerk_js_version=%5BREDACTED%5D&__clerk_db_jwt=%5BREDACTED%5D",
+        "status": 200,
+        "name": "_cfuvid",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": true,
+        "domain": "clerkprod-cloudflare.net",
+        "hostOnly": false,
+        "path": "/"
+      },
+      {
+        "response": "https://prime-kingfish-3595.clerk.accounts.dev/v1/environment?__clerk_api_version=%5BREDACTED%5D&_clerk_js_version=%5BREDACTED%5D&_method=%5BREDACTED%5D&__clerk_db_jwt=%5BREDACTED%5D",
+        "status": 200,
+        "name": "_cfuvid",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": true,
+        "domain": "clerkprod-cloudflare.net",
+        "hostOnly": false,
+        "path": "/"
+      },
+      {
+        "response": "https://img.clerk.com/static/google.svg?width=%5BREDACTED%5D",
+        "status": 200,
+        "name": "__cf_bm",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": true,
+        "domain": "img.clerk.com",
+        "hostOnly": false,
+        "path": "/",
+        "expires": "Tue, 08 Sep 2026 21:26:45 GMT"
+      }
+    ],
+    "rejectedCookies": [
+      {
+        "response": "https://prime-kingfish-3595.clerk.accounts.dev/v1/client?__clerk_api_version=%5BREDACTED%5D&_clerk_js_version=%5BREDACTED%5D&__clerk_db_jwt=%5BREDACTED%5D",
+        "name": "_cfuvid",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": true,
+        "domain": "clerkprod-cloudflare.net",
+        "hostOnly": false,
+        "path": "/",
+        "reasons": [
+          "InvalidDomain"
+        ]
+      },
+      {
+        "response": "https://prime-kingfish-3595.clerk.accounts.dev/v1/environment?__clerk_api_version=%5BREDACTED%5D&_clerk_js_version=%5BREDACTED%5D&_method=%5BREDACTED%5D&__clerk_db_jwt=%5BREDACTED%5D",
+        "name": "_cfuvid",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": true,
+        "domain": "clerkprod-cloudflare.net",
+        "hostOnly": false,
+        "path": "/",
+        "reasons": [
+          "InvalidDomain"
+        ]
+      },
+      {
+        "response": "https://prime-kingfish-3595.clerk.accounts.dev/v1/client?__clerk_api_version=%5BREDACTED%5D&_clerk_js_version=%5BREDACTED%5D&__clerk_db_jwt=%5BREDACTED%5D",
+        "name": "_cfuvid",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": true,
+        "domain": "clerkprod-cloudflare.net",
+        "hostOnly": false,
+        "path": "/",
+        "reasons": [
+          "InvalidDomain"
+        ]
+      },
+      {
+        "response": "https://prime-kingfish-3595.clerk.accounts.dev/v1/environment?__clerk_api_version=%5BREDACTED%5D&_clerk_js_version=%5BREDACTED%5D&_method=%5BREDACTED%5D&__clerk_db_jwt=%5BREDACTED%5D",
+        "name": "_cfuvid",
+        "sameSite": "None",
+        "secure": true,
+        "httpOnly": true,
+        "domain": "clerkprod-cloudflare.net",
+        "hostOnly": false,
+        "path": "/",
+        "reasons": [
+          "InvalidDomain"
+        ]
+      }
+    ],
+    "console": [
+      {
+        "type": "warning",
+        "text": "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+      },
+      {
+        "type": "warning",
+        "text": "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+      },
+      {
+        "type": "warning",
+        "text": "Clerk: Redirect URL https://localhost:3000/en/onboarding/profile is not on one of the allowedRedirectOrigins, falling back to the default redirect URL."
+      }
+    ],
+    "runtimeErrors": [],
+    "requestsFailed": [],
+    "finalUrl": "https://localhost:3443/ar",
+    "clerkLoaded": true,
+    "cookies": [
+      {
+        "name": "__clerk_redirect_count",
+        "domain": "localhost",
+        "path": "/",
+        "secure": false,
+        "httpOnly": true,
+        "sameSite": "Lax"
+      },
+      {
+        "name": "__cf_bm",
+        "domain": ".prime-kingfish-3595.clerk.accounts.dev",
+        "path": "/",
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "None"
+      },
+      {
+        "name": "_cfuvid",
+        "domain": ".prime-kingfish-3595.clerk.accounts.dev",
+        "path": "/",
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "None"
+      },
+      {
+        "name": "__clerk_db_jwt",
+        "domain": "localhost",
+        "path": "/",
+        "secure": true,
+        "httpOnly": false,
+        "sameSite": "Lax"
+      },
+      {
+        "name": "sf_locale",
+        "domain": "localhost",
+        "path": "/",
+        "secure": false,
+        "httpOnly": false,
+        "sameSite": "Lax"
+      },
+      {
+        "name": "__clerk_db_jwt_OXxIthpx",
+        "domain": "localhost",
+        "path": "/",
+        "secure": true,
+        "httpOnly": false,
+        "sameSite": "Lax"
+      },
+      {
+        "name": "__client_uat_OXxIthpx",
+        "domain": "localhost",
+        "path": "/",
+        "secure": true,
+        "httpOnly": false,
+        "sameSite": "Strict"
+      },
+      {
+        "name": "__client_uat",
+        "domain": "localhost",
+        "path": "/",
+        "secure": true,
+        "httpOnly": false,
+        "sameSite": "Strict"
+      }
+    ],
+    "signedOutProtectedDestination": "https://localhost:3443/en/sign-in?redirect_url=https%3A%2F%2Flocalhost%3A3000%2Fen%2Fonboarding%2Fprofile"
+  }
+]

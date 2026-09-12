@@ -62,6 +62,7 @@ export interface MarketingCopy {
     title: string;
     body: string;
     note: string; // clarifies pricing is fetched live, this section just introduces it
+    ctaLabel: string; // "Subscribe Now" — distinct from the generic nav "Pricing" label
   };
   // Alternative to fabricated testimonials — see Testimonials component notes.
   learningJourneys: {
@@ -150,6 +151,7 @@ const en: MarketingCopy = {
     title: "Simple, Subject-Based Pricing",
     body: "Pricing is set per curriculum and education level, in Egyptian Pounds, with a set number of subjects included and clear pricing for each additional subject.",
     note: "Every subject includes a daily allowance of AI questions. Need more? Configurable question packages will be available soon.",
+    ctaLabel: "Subscribe Now",
   },
   learningJourneys: {
     title: "Built for Every Learning Journey",
@@ -242,6 +244,7 @@ const ar: MarketingCopy = {
     title: "أسعار بسيطة حسب المادة",
     body: "يتم تحديد السعر حسب المنهج والمرحلة التعليمية، بالجنيه المصري، مع عدد محدد من المواد المشمولة وسعر واضح لكل مادة إضافية.",
     note: "كل مادة تشمل عددًا يوميًا من أسئلة الذكاء الاصطناعي. تحتاج المزيد؟ باقات أسئلة إضافية قابلة للتفعيل ستكون متاحة قريبًا.",
+    ctaLabel: "اشترك الآن",
   },
   learningJourneys: {
     title: "مصمم لكل رحلة تعلم",

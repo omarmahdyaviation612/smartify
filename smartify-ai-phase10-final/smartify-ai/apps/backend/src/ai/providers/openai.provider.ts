@@ -28,6 +28,7 @@ export class OpenAIProvider implements AIProvider {
     const completion = await this.client.chat.completions.create({
       model: this.model,
       max_tokens: request.maxOutputTokens ?? 600,
+      ...(request.responseFormat === "json_object" ? { response_format: { type: "json_object" as const } } : {}),
       messages: [
         { role: "system", content: request.systemPrompt },
         ...request.messages.map((m) => ({ role: m.role, content: m.content })),

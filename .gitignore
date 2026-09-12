@@ -1,0 +1,10 @@
+# Private, read-only curriculum reference library (Ministry of Education
+# textbook PDFs). These are internal reference sources only — never to be
+# committed, distributed, or exposed. See
+# smartify-ai-phase10-final/smartify-ai/curriculum-pilot/ for the
+# copyright-safe curriculum structure extracted FROM these sources.
+curriculum-sources/
+
+# Local browser-automation QA artifacts (snapshots/screenshots/console logs) —
+# session debris from manual testing, not project content.
+.playwright-cli/

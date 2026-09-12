@@ -1,0 +1,494 @@
+[
+  {
+    "route": "/",
+    "finalPath": "/ar",
+    "expected": "/ar",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/",
+      "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake",
+      "http://localhost:3001/",
+      "http://localhost:3001/",
+      "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake",
+      "http://localhost:3001/",
+      "http://localhost:3001/",
+      "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake",
+      "http://localhost:3001/",
+      "http://localhost:3001/",
+      "http://localhost:3001/ar"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "ar",
+    "dir": "rtl"
+  },
+  {
+    "route": "/pricing",
+    "finalPath": "/ar/pricing",
+    "expected": "/ar/pricing",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/pricing",
+      "http://localhost:3001/ar/pricing"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "ar",
+    "dir": "rtl"
+  },
+  {
+    "route": "/curricula",
+    "finalPath": "/ar/curricula",
+    "expected": "/ar/curricula",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/curricula",
+      "http://localhost:3001/ar/curricula"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "ar",
+    "dir": "rtl"
+  },
+  {
+    "route": "/sign-in",
+    "finalPath": "/ar/sign-in",
+    "expected": "/ar/sign-in",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/sign-in",
+      "http://localhost:3001/ar/sign-in"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "ar",
+    "dir": "rtl"
+  },
+  {
+    "route": "/sign-up",
+    "finalPath": "/ar/sign-up",
+    "expected": "/ar/sign-up",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/sign-up",
+      "http://localhost:3001/ar/sign-up"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "ar",
+    "dir": "rtl"
+  },
+  {
+    "route": "/ar",
+    "finalPath": "/ar",
+    "expected": "/ar",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/ar"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "ar",
+    "dir": "rtl"
+  },
+  {
+    "route": "/ar/pricing",
+    "finalPath": "/ar/pricing",
+    "expected": "/ar/pricing",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/ar/pricing"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "ar",
+    "dir": "rtl"
+  },
+  {
+    "route": "/ar/curricula",
+    "finalPath": "/ar/curricula",
+    "expected": "/ar/curricula",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/ar/curricula"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "ar",
+    "dir": "rtl"
+  },
+  {
+    "route": "/ar/sign-in",
+    "finalPath": "/ar/sign-in",
+    "expected": "/ar/sign-in",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/ar/sign-in"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "ar",
+    "dir": "rtl"
+  },
+  {
+    "route": "/ar/sign-up",
+    "finalPath": "/ar/sign-up",
+    "expected": "/ar/sign-up",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/ar/sign-up"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "ar",
+    "dir": "rtl"
+  },
+  {
+    "route": "/ar/onboarding/profile",
+    "finalPath": "/ar/sign-in",
+    "expected": "/ar/sign-in",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/ar/onboarding/profile",
+      "http://localhost:3001/ar/sign-in"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "ar",
+    "dir": "rtl"
+  },
+  {
+    "route": "/ar/onboarding/curriculum",
+    "finalPath": "/ar/sign-in",
+    "expected": "/ar/sign-in",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/ar/onboarding/curriculum",
+      "http://localhost:3001/ar/sign-in"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "ar",
+    "dir": "rtl"
+  },
+  {
+    "route": "/ar/onboarding/grade-subjects",
+    "finalPath": "/ar/sign-in",
+    "expected": "/ar/sign-in",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/ar/onboarding/grade-subjects",
+      "http://localhost:3001/ar/sign-in"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "ar",
+    "dir": "rtl"
+  },
+  {
+    "route": "/ar/onboarding/diagnostic",
+    "finalPath": "/ar/sign-in",
+    "expected": "/ar/sign-in",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/ar/onboarding/diagnostic",
+      "http://localhost:3001/ar/sign-in"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "ar",
+    "dir": "rtl"
+  },
+  {
+    "route": "/ar/onboarding/plan-ready",
+    "finalPath": "/ar/sign-in",
+    "expected": "/ar/sign-in",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/ar/onboarding/plan-ready",
+      "http://localhost:3001/ar/sign-in"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "ar",
+    "dir": "rtl"
+  },
+  {
+    "route": "/ar/dashboard",
+    "finalPath": "/ar/sign-in",
+    "expected": "/ar/sign-in",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/ar/dashboard",
+      "http://localhost:3001/ar/sign-in"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "ar",
+    "dir": "rtl"
+  },
+  {
+    "route": "/ar/admin",
+    "finalPath": "/ar/sign-in",
+    "expected": "/ar/sign-in",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/ar/admin",
+      "http://localhost:3001/ar/sign-in"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "ar",
+    "dir": "rtl"
+  },
+  {
+    "route": "/en",
+    "finalPath": "/en",
+    "expected": "/en",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/en"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "en",
+    "dir": "ltr"
+  },
+  {
+    "route": "/en/pricing",
+    "finalPath": "/en/pricing",
+    "expected": "/en/pricing",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/en/pricing"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "en",
+    "dir": "ltr"
+  },
+  {
+    "route": "/en/curricula",
+    "finalPath": "/en/curricula",
+    "expected": "/en/curricula",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/en/curricula"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "en",
+    "dir": "ltr"
+  },
+  {
+    "route": "/en/sign-in",
+    "finalPath": "/en/sign-in",
+    "expected": "/en/sign-in",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/en/sign-in"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "en",
+    "dir": "ltr"
+  },
+  {
+    "route": "/en/sign-up",
+    "finalPath": "/en/sign-up",
+    "expected": "/en/sign-up",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/en/sign-up"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "en",
+    "dir": "ltr"
+  },
+  {
+    "route": "/en/onboarding/profile",
+    "finalPath": "/en/sign-in",
+    "expected": "/en/sign-in",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/en/onboarding/profile",
+      "http://localhost:3001/en/sign-in"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "en",
+    "dir": "ltr"
+  },
+  {
+    "route": "/en/onboarding/curriculum",
+    "finalPath": "/en/sign-in",
+    "expected": "/en/sign-in",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/en/onboarding/curriculum",
+      "http://localhost:3001/en/sign-in"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "en",
+    "dir": "ltr"
+  },
+  {
+    "route": "/en/onboarding/grade-subjects",
+    "finalPath": "/en/sign-in",
+    "expected": "/en/sign-in",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/en/onboarding/grade-subjects",
+      "http://localhost:3001/en/sign-in"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "en",
+    "dir": "ltr"
+  },
+  {
+    "route": "/en/onboarding/diagnostic",
+    "finalPath": "/en/sign-in",
+    "expected": "/en/sign-in",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/en/onboarding/diagnostic",
+      "http://localhost:3001/en/sign-in"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "en",
+    "dir": "ltr"
+  },
+  {
+    "route": "/en/onboarding/plan-ready",
+    "finalPath": "/en/sign-in",
+    "expected": "/en/sign-in",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/en/onboarding/plan-ready",
+      "http://localhost:3001/en/sign-in"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "en",
+    "dir": "ltr"
+  },
+  {
+    "route": "/en/dashboard",
+    "finalPath": "/en/sign-in",
+    "expected": "/en/sign-in",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/en/dashboard",
+      "http://localhost:3001/en/sign-in"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "en",
+    "dir": "ltr"
+  },
+  {
+    "route": "/en/admin",
+    "finalPath": "/en/sign-in",
+    "expected": "/en/sign-in",
+    "status": 200,
+    "redirectChain": [
+      "http://localhost:3001/en/admin",
+      "http://localhost:3001/en/sign-in"
+    ],
+    "errors": [],
+    "warnings": [
+      "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview"
+    ],
+    "failures": [],
+    "lang": "en",
+    "dir": "ltr"
+  }
+]

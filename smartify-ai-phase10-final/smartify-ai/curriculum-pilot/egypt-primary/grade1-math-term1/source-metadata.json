@@ -1,0 +1,27 @@
+{
+  "curriculumSystem": "Egyptian Ministry of Education and Technical Education (وزارة التربية والتعليم والتعليم الفني)",
+  "programNote": "The book's own introduction states it was produced as part of Egypt Vision 2030's curriculum modernization effort, developed through collaboration between the Egyptian and Japanese sides on mathematics curriculum design. Recorded here as factual provenance only — no introduction text was copied.",
+  "stage": "Primary (ابتدائي)",
+  "grade": "Grade 1 Primary (الصف الأول الابتدائي)",
+  "subject": "Mathematics (الرياضيات)",
+  "language": "Arabic",
+  "term": "First Term / First Semester (الفصل الدراسي الأول)",
+  "academicYear": "UNKNOWN / NEEDS REVIEW — the embedded PDF metadata shows a 2026 creation/export date, which is a file-processing timestamp from the document's production pipeline, not a printed academic year. No explicit academic year is printed on the cover or front-matter pages that were reviewed.",
+  "bookTitle": {
+    "ar": "الرياضيات - الصف الأول الابتدائي - الفصل الدراسي الأول (كتاب الطالب)",
+    "en": "Mathematics - Grade 1 Primary - First Term (Student Book)"
+  },
+  "sourceFilename": "Math_Ar_prim1_t1.pdf",
+  "sourceDirectory": "D:\\samrtify website\\curriculum-sources\\egypt moe\\grade 1\\ (external, private, read-only reference library — not part of this repository, not Git-tracked)",
+  "sourceUrl": "UNKNOWN — not recorded locally alongside the file",
+  "totalPages": 96,
+  "fileSizeBytes": 31860919,
+  "extractionMethod": "The PDF has no extractable text layer (it is a prepress/PDF-X export with flattened/outlined content), so no automated text-extraction or OCR bulk process was used or was even possible. Structure was identified by rendering specific pages to images (via a throwaway, network-isolated Docker container running poppler-utils, mounting the source folder read-only) and reading them visually.",
+  "pagesActuallyViewed": "Cover, introduction, character-introduction, and table-of-contents pages (PDF pages 1-6), plus Unit 3 'Addition' (PDF pages 36-45) for the pilot lesson. The remaining ~85 pages of this single book were not opened.",
+  "confidence": {
+    "curriculum_stage_grade_subject_language_term": "HIGH — read directly from the book's own cover page and table of contents.",
+    "unit_and_lesson_titles_for_unit_3": "HIGH — read directly from each lesson's own printed section header.",
+    "unit_titles_for_units_1_2_4_9": "HIGH for the title text itself (read from the table of contents), but internal lesson-level breakdown for these units was NOT opened this pass — marked accordingly in curriculum-map.json.",
+    "academic_year": "UNKNOWN, see above."
+  }
+}

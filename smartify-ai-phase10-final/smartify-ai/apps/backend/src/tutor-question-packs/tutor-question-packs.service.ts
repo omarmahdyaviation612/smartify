@@ -1,4 +1,5 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { AIUsageService } from "../ai/usage/ai-usage.service";
 import { PaymentProviderFactory } from "../payments/payment-provider.factory";
@@ -70,11 +71,16 @@ export class TutorQuestionPacksService {
     });
   }
 
-  async startPurchase(userId: string, subjectId: string) {
+  private async createPendingPurchase(userId: string, subjectId: string) {
     const profile = await this.getStudentSubject(userId, subjectId);
     const purchase = await this.prisma.client.tutorQuestionPackPurchase.create({
       data: { studentId: profile.id, subjectId, quantity: PACK_SIZE, amountEGP: PACK_PRICE_EGP, status: "pending" },
     });
+    return purchase;
+  }
+
+  async startPurchase(userId: string, subjectId: string) {
+    const purchase = await this.createPendingPurchase(userId, subjectId);
     const { provider, providerKey } = await this.providerFactory.getActiveProvider();
     const env = loadBackendEnv();
     const session = await provider.createCheckoutSession({
@@ -91,6 +97,30 @@ export class TutorQuestionPacksService {
       data: { paymentProvider: providerKey, externalSessionId: session.externalSessionId },
     });
     return { checkoutUrl: session.checkoutUrl };
+  }
+
+  /** Manual InstaPay counterpart to startPurchase — see BillingService.startInstapayCheckout for the shared rationale. */
+  async startInstapayPurchase(userId: string, subjectId: string) {
+    const env = loadBackendEnv();
+    if (!env.INSTAPAY_RECIPIENT_NAME || !env.INSTAPAY_RECIPIENT_HANDLE) {
+      throw new ServiceUnavailableException("InstaPay is not configured on this environment yet.");
+    }
+    const purchase = await this.createPendingPurchase(userId, subjectId);
+    // "P-" prefix distinguishes this from a subscription reference so
+    // InstapayService can resolve which table to query without ambiguity.
+    const referenceId = `SMAI-P-${randomUUID().slice(0, 8).toUpperCase()}`;
+    await this.prisma.client.tutorQuestionPackPurchase.update({
+      where: { id: purchase.id },
+      data: { paymentProvider: "instapay", externalSessionId: referenceId },
+    });
+    return {
+      referenceId,
+      expectedAmountEGP: PACK_PRICE_EGP,
+      recipientName: env.INSTAPAY_RECIPIENT_NAME,
+      recipientHandle: env.INSTAPAY_RECIPIENT_HANDLE,
+      instructionsEn: env.INSTAPAY_INSTRUCTIONS_EN ?? "",
+      instructionsAr: env.INSTAPAY_INSTRUCTIONS_AR ?? "",
+    };
   }
 
   async applyPaidPurchase(providerKey: string, purchaseId: string, externalEventId: string) {

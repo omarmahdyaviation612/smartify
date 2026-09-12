@@ -19,6 +19,7 @@ export interface DashboardCopy {
     recentActivity: { title: string; empty: string; correct: string; incorrect: string };
     achievements: { title: string; body: string };
     upcomingExams: { title: string; body: string };
+    pilotLessons: { title: string; empty: string; start: string; continueLabel: string; completed: string };
   };
 }
 
@@ -45,6 +46,13 @@ const en: DashboardCopy = {
     recentActivity: { title: "Recent Activity", empty: "No activity yet.", correct: "Correct", incorrect: "Incorrect" },
     achievements: { title: "Achievements", body: "Badges and milestones are coming in a future phase." },
     upcomingExams: { title: "Upcoming Exams", body: "Exam scheduling isn't live yet." },
+    pilotLessons: {
+      title: "Interactive Lessons (Pilot)",
+      empty: "No interactive lessons available yet.",
+      start: "Start",
+      continueLabel: "Continue",
+      completed: "Completed",
+    },
   },
 };
 
@@ -71,6 +79,13 @@ const ar: DashboardCopy = {
     recentActivity: { title: "النشاط الأخير", empty: "لا يوجد نشاط بعد.", correct: "إجابة صحيحة", incorrect: "إجابة خاطئة" },
     achievements: { title: "الإنجازات", body: "الشارات والإنجازات قادمة في مرحلة لاحقة." },
     upcomingExams: { title: "الاختبارات القادمة", body: "جدولة الاختبارات غير مفعّلة بعد." },
+    pilotLessons: {
+      title: "الدروس التفاعلية (تجريبي)",
+      empty: "لا توجد دروس تفاعلية متاحة بعد.",
+      start: "ابدأ",
+      continueLabel: "متابعة",
+      completed: "مكتمل",
+    },
   },
 };
 

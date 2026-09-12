@@ -1,0 +1,122 @@
+{
+  "identity": {
+    "lessonCode": "3-1",
+    "officialTitleAr": "الجمع (الجزء الأول)",
+    "officialTitleEn": "Addition (Part 1)",
+    "smartifyInternalTitle": "Putting Two Groups Together",
+    "unit": "Addition",
+    "grade": 1,
+    "subject": "Mathematics",
+    "approximateAgeRange": "6-7",
+    "sourcePage": 36,
+    "whyThisLessonWasSelected": "It is the FIRST lesson in the Addition unit, so it has no dependency on any other lesson in the same unit — a clean, self-contained starting point. It teaches exactly one foundational idea (what addition means and how to read/write it) rather than mixing multiple skills, matching the pedagogical-segment principle rather than a page-count principle. Its length (2 source pages: concept + guided practice + independent practice) is compact enough to fully design without over-scoping this pilot, while still being substantial enough to meaningfully exercise the future interactive lesson engine (concept introduction, guided practice, and independent practice all appear in the source lesson's own structure)."
+  },
+
+  "learningObjectives": [
+    "Explain what it means to add two groups of objects together.",
+    "Read and write a simple addition sentence using + and = for sums up to 10.",
+    "Match a picture showing two groups of objects to the addition sentence it represents."
+  ],
+
+  "prerequisiteConcepts": [
+    "Counting a group of objects accurately up to 10 (Unit 1).",
+    "Recognizing and reading the numerals 0-10 (Unit 1).",
+    "One-to-one correspondence between physical objects and their spoken count (Unit 1)."
+  ],
+
+  "keyConcepts": [
+    "Addition means combining two separate groups into one group and finding the new total.",
+    "The '+' symbol means 'combined with' / 'put together with'; the '=' symbol means 'is the same amount as'.",
+    "An addition sentence has three numbers: two starting amounts (addends) and one total (sum) — e.g. 2 + 3 = 5.",
+    "The order the two groups are counted in does not change the total (introduced informally here; the formal zero/commutative rules belong to later lessons 3-2/3-3, not repeated here)."
+  ],
+
+  "orderedTeachingSteps": [
+    {
+      "step": 1,
+      "kind": "greeting_and_framing",
+      "purpose": "One brief, personal greeting merged directly into the lesson opening — no filler question, no 'are you ready'. Immediately frames today's idea in one concrete, everyday image (not necessarily the book's own picture) so the student has something to picture before any symbols appear.",
+      "aiShouldNotDo": "Ask 'How are you' / 'Are you ready' / wait for a reply before teaching begins."
+    },
+    {
+      "step": 2,
+      "kind": "core_concept",
+      "purpose": "Introduce the '+' and '=' signs in plain words, and read ONE short worked example aloud end-to-end (e.g. two small groups combining to a total within 10), modeling exactly how to say an addition sentence out loud.",
+      "targetsObjective": "Read and write a simple addition sentence using + and = for sums up to 10."
+    },
+    {
+      "step": "check-1",
+      "kind": "understanding_check",
+      "question_purpose": "Verify the student grasps what '+' and '=' MEAN before moving on to computing sums themselves — e.g. ask them to say in their own words what happens when two groups are 'added', or to point out which sign means 'the total is'.",
+      "why_needed": "This is the conceptual gate for the whole lesson. If a student doesn't yet understand 'combining', practicing sums next would become rote symbol manipulation rather than understanding — exactly the outcome this lesson exists to prevent.",
+      "measures": "Understanding of what addition represents (not yet computational fluency)."
+    },
+    {
+      "step": 3,
+      "kind": "applied_example",
+      "purpose": "Walk through one or two NEW original worked examples of finding a sum within 10 (an original Smartify scenario, not a copy of the book's own bird/pencil pictures), demonstrating counting-on or counting-all to reach the total.",
+      "targetsObjective": "Match a picture (or a described scenario) showing two groups of objects to the addition sentence it represents."
+    },
+    {
+      "step": "check-2",
+      "kind": "understanding_check",
+      "question_purpose": "Have the student compute one new simple sum themselves (a value not already used in the taught examples), or choose which of two short scenarios matches a given addition sentence.",
+      "why_needed": "This verifies the actual target skill of the lesson — performing the addition — not just recognizing the vocabulary/symbols from Check 1.",
+      "measures": "Computational application of the core concept."
+    },
+    {
+      "step": 4,
+      "kind": "adaptive_branch",
+      "purpose": "Conditional, not always spoken: if Check 2 revealed a struggle, give one concise hint or a simpler restatement using fewer objects, then allow one retry — never immediately reveal the answer. If Check 2 showed clear understanding, skip straight to the review; do not add an unnecessary extra example.",
+      "designNote": "This step is the one place lesson length legitimately varies per student — everything else in this map is a fixed backbone."
+    },
+    {
+      "step": 5,
+      "kind": "short_review",
+      "purpose": "One or two sentences recapping what addition means and what '+' / '=' represent — not a restatement of every example used."
+    },
+    {
+      "step": 6,
+      "kind": "completion",
+      "purpose": "Acknowledge completion briefly and record the outcome; no drawn-out closing speech."
+    }
+  ],
+
+  "understandingChecksSummary": [
+    { "id": "check-1", "concept": "meaning of + and =", "type": "conceptual/verbal" },
+    { "id": "check-2", "concept": "computing a sum within 10", "type": "applied/computational" }
+  ],
+
+  "optionalMiniActivity": {
+    "description": "If the session allows for it (e.g., the student is engaged and time/turns permit), invite the student to make up their own tiny 'two groups' example from something near them (fingers, siblings, toys) and say the addition sentence for it out loud. Optional and skippable — never required for completion.",
+    "purpose": "Light creative-application bridge toward lesson 3-4 (Addition Stories) without duplicating that later lesson's actual content."
+  },
+
+  "completionCriteria": [
+    "Steps 1-3 were taught (concept framing, core concept, applied example).",
+    "Check 1 was attempted, or the transcript shows the student already demonstrated this understanding earlier in the same session (e.g., via a spontaneous correct remark) — do not force a redundant check.",
+    "Check 2 was answered correctly, either on the first attempt or after at most one hint/retry.",
+    "A short review was given.",
+    "Lesson status transitions to completed; if Check 2 was never answered correctly after a reasonable retry, status transitions to in_progress (not completed) so the student can resume rather than lose the record of partial progress."
+  ],
+
+  "estimatedInteractionPattern": {
+    "approximateAiTeachingTurns": "5-6 (greeting+framing combined as one turn, core concept, check-1 prompt, applied example, check-2 prompt, review+completion combined as one turn)",
+    "approximateStudentRequiredTurns": "2 mandatory (answering check-1 and check-2); any student-initiated interruption questions are additional and open-ended, not counted against this baseline",
+    "approximateTtsSegments": "5-6, one per AI teaching turn, each kept to roughly one to three short sentences"
+  },
+
+  "tokenAndTtsEfficiencyRationale": [
+    "No filler turns ('how are you', 'ready?', 'shall we begin?') — the greeting and the first teaching content are a single turn.",
+    "Exactly 2 understanding checks for a short Grade-1 lesson, at the low end of the product's 2-4 range, matching the rule that younger grades and shorter lessons need fewer checks.",
+    "The adaptive branch (step 4) only speaks when needed — a student who already understands never receives a forced extra explanation or a redundant check, directly saving both an LLM call and a TTS call.",
+    "Each teaching turn targets exactly one concept; nothing is re-explained once a check confirms understanding of it.",
+    "Interruption questions are answered concisely and the lesson resumes at the same step rather than restating everything taught so far, keeping the interruption itself cheap."
+  ],
+
+  "interruptionAndResumeDesign": {
+    "principle": "A student question during any step is answered directly using the Tutor's existing safe/curriculum-scoped answering behavior, then the lesson continues from the SAME step it was on — the question is not treated as ending the lesson or starting a new one.",
+    "requiredState": "The engine must know, at all times: which lessonId is active, which step (by index/id from orderedTeachingSteps) is current, and whether each understanding check for this run has already been passed/attempted. This is exactly the gap identified as MISSING in the current schema (see schema-compatibility assessment) — a persistent 'lesson session' record, not just a free-form AIConversation.",
+    "notInScope": "Implementing this behavior is explicitly deferred to the next phase; this section only records the design constraint the future schema/engine must satisfy."
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "curriculum": "Egyptian Ministry of Education — Primary Mathematics",
+  "grade": "Grade 1",
+  "term": "Term 1",
+  "subject": "Mathematics",
+  "units": [
+    { "order": 1, "titleAr": "الأعداد حتى ١٠", "titleEn": "Numbers up to 10", "sourcePage": 6, "detailExtracted": false },
+    { "order": 2, "titleAr": "ما هو الموقع؟", "titleEn": "What is Position?", "sourcePage": 32, "detailExtracted": false },
+    {
+      "order": 3,
+      "titleAr": "الجمع",
+      "titleEn": "Addition",
+      "sourcePage": 36,
+      "detailExtracted": true,
+      "lessons": [
+        {
+          "order": 1,
+          "code": "3-1",
+          "titleAr": "الجمع (الجزء الأول)",
+          "titleEn": "Addition (Part 1)",
+          "sourcePage": 36,
+          "conceptsCovered": [
+            "Meaning of addition as combining two groups into one",
+            "The plus (+) and equals (=) signs",
+            "Reading an addition sentence aloud",
+            "Finding sums within 10 using pictured groups of objects"
+          ],
+          "learningObjectives": [
+            "Explain what it means to add two groups of objects together.",
+            "Read and write a simple addition sentence using + and = for sums up to 10.",
+            "Match a picture showing two groups of objects to the addition sentence it represents."
+          ]
+        },
+        {
+          "order": 2,
+          "code": "3-2",
+          "titleAr": "الجمع (الجزء الثاني)",
+          "titleEn": "Addition (Part 2)",
+          "sourcePage": 38,
+          "conceptsCovered": [
+            "Addition word problems ('how many in total', 'how many after adding more')",
+            "Writing a full number sentence together with a labeled answer"
+          ],
+          "learningObjectives": [
+            "Solve a simple addition word problem and express the answer with the correct label (e.g., '5 pencils')."
+          ]
+        },
+        {
+          "order": 3,
+          "code": "3-3",
+          "titleAr": "الجمع مع العدد صفر",
+          "titleEn": "Addition with zero",
+          "sourcePage": 40,
+          "conceptsCovered": [
+            "Adding zero to any number leaves that number unchanged",
+            "Addition order does not matter (0 + n = n + 0)"
+          ],
+          "learningObjectives": [
+            "State and apply the rule that adding zero to a number does not change its value."
+          ]
+        },
+        {
+          "order": 4,
+          "code": "3-4",
+          "titleAr": "قصص الجمع",
+          "titleEn": "Addition stories",
+          "sourcePage": 42,
+          "conceptsCovered": [
+            "Creating an original word problem/story that matches a given addition sentence"
+          ],
+          "learningObjectives": [
+            "Invent an original short scenario that correctly matches a given addition sentence (e.g., 2 + 3 = 5)."
+          ]
+        }
+      ]
+    },
+    { "order": 4, "titleAr": "الطرح", "titleEn": "Subtraction", "sourcePage": 44, "detailExtracted": false },
+    { "order": 5, "titleAr": "مقارنة الأطوال", "titleEn": "Comparing Lengths", "sourcePage": 54, "detailExtracted": false },
+    { "order": 6, "titleAr": "تمثيل البيانات", "titleEn": "Representing Data", "sourcePage": 60, "detailExtracted": false },
+    { "order": 7, "titleAr": "الأعداد الأكبر من ١٠", "titleEn": "Numbers greater than 10", "sourcePage": 72, "detailExtracted": false },
+    { "order": 8, "titleAr": "قراءة الساعة", "titleEn": "Reading the Clock", "sourcePage": 86, "detailExtracted": false },
+    { "order": 9, "titleAr": "العمليات التي تتضمن ٣ أعداد", "titleEn": "Operations involving 3 numbers", "sourcePage": 88, "detailExtracted": false }
+  ],
+  "provenanceNote": "Unit titles and their starting page numbers are taken directly from the book's own printed table of contents (page 5). Unit 3 (Addition) lesson titles and page numbers are taken directly from each lesson's own printed section header. The 'conceptsCovered' and 'learningObjectives' fields for Unit 3 are ORIGINAL Smartify summaries of what each lesson visibly teaches, written independently — no sentence, exercise, story, or illustration description was copied from the source book. Units 1, 2, 4-9 are recorded at title-only depth; their internal lessons were not opened this pass.",
+  "copyrightSafetyNote": "This file intentionally contains no textbook prose, no copied exercises, no copied story text, and no copied question banks. It exists solely as a structural index of what to teach and in what order."
+}

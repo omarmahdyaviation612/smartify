@@ -1,12 +1,13 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getOnboardingCopy } from "@/content/onboarding";
 import { OnboardingStepper } from "@/components/OnboardingStepper";
-import { useApiClient } from "@/lib/api-client";
+import { ApiError, useApiClient } from "@/lib/api-client";
 import { clearDraft } from "@/lib/onboarding-draft";
 import type { Locale } from "@/content/marketing";
 
@@ -31,19 +32,32 @@ export default function OnboardingPlanReadyPage() {
   const isAr = locale === "ar";
   const copy = getOnboardingCopy(locale);
   const { apiFetch } = useApiClient();
+  const router = useRouter();
+  const { isLoaded, isSignedIn } = useAuth();
 
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      router.replace(`/${locale}/sign-in`);
+      return;
+    }
     apiFetch<Summary>("/onboarding/summary")
       .then((data) => {
         setSummary(data);
         clearDraft(); // onboarding is complete — the backend is now the source of truth
       })
-      .catch(() => setError(true));
+      .catch((loadError: unknown) => {
+        if (loadError instanceof ApiError && loadError.status === 404) {
+          router.replace(`/${locale}/onboarding/profile`);
+          return;
+        }
+        setError(true);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isLoaded, isSignedIn, locale]);
 
   return (
     <>

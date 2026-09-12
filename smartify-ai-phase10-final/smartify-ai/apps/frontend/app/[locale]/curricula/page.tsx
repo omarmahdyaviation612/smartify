@@ -19,10 +19,11 @@ interface StructureSample {
   topics: Array<{ nameEn: string; nameAr: string; lessons: Array<{ nameEn: string; nameAr: string }> }>;
 }
 
-export default async function CurriculaPage({ params }: { params: { locale: Locale } }) {
-  const nav = getMarketingCopy(params.locale);
-  const copy = getCurriculaPageCopy(params.locale);
-  const isAr = params.locale === "ar";
+export default async function CurriculaPage({ params }: { params: Promise<{ locale: string }> }) {
+  const locale = (await params).locale as Locale;
+  const nav = getMarketingCopy(locale);
+  const copy = getCurriculaPageCopy(locale);
+  const isAr = locale === "ar";
 
   // Both the catalog and the structure sample come straight from the
   // database (via the backend) — nothing about curricula, grades,
@@ -33,7 +34,7 @@ export default async function CurriculaPage({ params }: { params: { locale: Loca
 
   return (
     <>
-      <Navbar locale={params.locale} copy={nav} />
+      <Navbar locale={locale} copy={nav} />
       <main>
         <section className="bg-[--sf-bg-subtle] py-20 text-center">
           <SmartifyContainer>
@@ -125,19 +126,19 @@ export default async function CurriculaPage({ params }: { params: { locale: Loca
           </SmartifyContainer>
         </section>
 
-        {catalog.length > 0 && <CurriculumExplorer locale={params.locale} copy={copy.discovery} catalog={catalog} />}
+        {catalog.length > 0 && <CurriculumExplorer locale={locale} copy={copy.discovery} catalog={catalog} />}
 
         <section className="bg-ai-gradient py-20 text-center text-white">
           <SmartifyContainer>
             <h2 className="text-3xl font-bold">{copy.cta.title}</h2>
             <p className="mx-auto mt-4 max-w-xl text-white/90">{copy.cta.body}</p>
-            <Link href={`/${params.locale}/onboarding/profile`} className="mt-8 inline-block">
+            <Link href={`/${locale}/onboarding/profile`} className="mt-8 inline-block">
               <SmartifyButton variant="secondary">{copy.cta.buttonLabel}</SmartifyButton>
             </Link>
           </SmartifyContainer>
         </section>
       </main>
-      <Footer locale={params.locale} copy={nav} />
+      <Footer locale={locale} copy={nav} />
     </>
   );
 }

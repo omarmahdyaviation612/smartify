@@ -34,6 +34,14 @@ interface ActivityItem {
   isCorrect: boolean;
   attemptedAt: string;
 }
+interface PilotLesson {
+  topicId: string;
+  nameEn: string;
+  nameAr: string;
+  unitNameEn: string;
+  unitNameAr: string;
+  status: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
+}
 interface DashboardSummary {
   fullName: string;
   curriculum: { nameEn: string; nameAr: string };
@@ -48,6 +56,7 @@ interface DashboardSummary {
   achievements: unknown[];
   upcomingExams: unknown[];
   aiTutorAvailable: boolean;
+  pilotLessons: PilotLesson[];
 }
 
 function getGreetingKey(): "greetingMorning" | "greetingAfternoon" | "greetingEvening" {
@@ -155,6 +164,36 @@ export default function DashboardPage() {
           ) : (
             <ComingSoonCard title={copy.sections.aiTutor.title} body={copy.sections.aiTutor.body} badgeLabel={copy.comingSoon} />
           )}
+          {/* Interactive Lessons pilot — real, from teachingStepsJson topics + this student's own LessonSession status */}
+          <div className="rounded-sf-lg border border-neutral-200 bg-white p-6 lg:col-span-2">
+            <h2 className="mb-4 font-semibold text-navy-900">{copy.sections.pilotLessons.title}</h2>
+            {summary.pilotLessons.length > 0 ? (
+              <ul className="space-y-3">
+                {summary.pilotLessons.map((lesson) => (
+                  <li key={lesson.topicId} className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm text-neutral-700">{isAr ? lesson.nameAr : lesson.nameEn}</p>
+                      <p className="text-xs text-neutral-400">{isAr ? lesson.unitNameAr : lesson.unitNameEn}</p>
+                    </div>
+                    {lesson.status === "COMPLETED" ? (
+                      <span className="rounded-full bg-success-100 px-3 py-1 text-xs font-medium text-success-500">
+                        {copy.sections.pilotLessons.completed}
+                      </span>
+                    ) : (
+                      <Link href={`/${locale}/lesson/${lesson.topicId}`}>
+                        <SmartifyButton variant="ai">
+                          {lesson.status === "IN_PROGRESS" ? copy.sections.pilotLessons.continueLabel : copy.sections.pilotLessons.start}
+                        </SmartifyButton>
+                      </Link>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-neutral-500">{copy.sections.pilotLessons.empty}</p>
+            )}
+          </div>
+
           <ComingSoonCard title={copy.sections.streak.title} body={copy.sections.streak.body} badgeLabel={copy.comingSoon} />
           <ComingSoonCard title={copy.sections.weeklyTime.title} body={copy.sections.weeklyTime.body} badgeLabel={copy.comingSoon} />
 

@@ -10,5 +10,6 @@ import { TutorQuestionPacksModule } from "../tutor-question-packs/tutor-question
   imports: [AuthModule, PaymentsModule, TutorQuestionPacksModule],
   controllers: [BillingController, BillingWebhookController],
   providers: [BillingService],
+  exports: [BillingService],
 })
 export class BillingModule {}

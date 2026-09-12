@@ -35,6 +35,22 @@ export class TutorService {
     return profile;
   }
 
+  /**
+   * The single authoritative quota-state endpoint for the tutor UI, for
+   * BOTH free-trial and subscribed students. Previously the frontend
+   * called TutorQuestionPacksService's endpoint instead, which has no
+   * concept of the free trial at all (it reads the daily-usage counter,
+   * which free-trial students never touch — reserveFreeTrial/
+   * releaseFreeTrial operate on FreeTutorTrial.questionsUsed, a separate
+   * counter). That mismatch is what produced the misleading "10 daily
+   * questions left" display for an exhausted free-trial account: the
+   * counter the old endpoint read was simply never decremented for them.
+   * Delegating to TutorQuestionPacksService.getRemaining() for the
+   * subscribed branch (rather than returning AIUsageService's bare
+   * {used,limit,remaining} shape as before) keeps this the ONE place that
+   * computes remaining-quota shape, so the frontend never has to guess
+   * which fields exist for which account state.
+   */
   async getRemainingToday(userId: string, subjectId: string) {
     const profile = await this.getProfileOrThrow(userId);
     const subscription = await this.prisma.client.subscription.findUnique({ where: { studentId: profile.id } });
@@ -47,15 +63,20 @@ export class TutorService {
         totalRemaining: trialRemaining,
         packPriceEGP: 50,
         packSize: 10,
-        freeTrialRemaining: trialRemaining,
-        trialSubjectId: trial?.subjectId ?? null,
         isFreeTrial: true,
+        freeTrialExhausted: trialRemaining === 0,
+        trialSubjectId: trial?.subjectId ?? null,
       };
     }
-    return this.usageService.getRemainingToday(profile.id, subjectId);
+    const packState = await this.questionPacks.getRemaining(userId, subjectId);
+    return { ...packState, isFreeTrial: false, freeTrialExhausted: false, trialSubjectId: null };
   }
 
-  private async reserveFreeTrial(studentId: string, subjectId: string) {
+  // Public: reused by the Interactive Lesson engine (LessonSessionService),
+  // which reserves exactly one free-trial unit per lesson SESSION start
+  // (not per teaching turn) using this exact same entitlement path — never
+  // a separate/parallel trial mechanism.
+  async reserveFreeTrial(studentId: string, subjectId: string) {
     const trial = await this.prisma.client.freeTutorTrial.upsert({
       where: { studentId },
       create: { studentId, subjectId, questionsUsed: 0 },
@@ -74,7 +95,7 @@ export class TutorService {
     return { source: "free-trial" as const };
   }
 
-  private async releaseFreeTrial(studentId: string, subjectId: string) {
+  async releaseFreeTrial(studentId: string, subjectId: string) {
     await this.prisma.client.freeTutorTrial.updateMany({
       where: { studentId, subjectId, questionsUsed: { gt: 0 }, completedAt: null },
       data: { questionsUsed: { decrement: 1 }, completedAt: null },
@@ -153,6 +174,10 @@ export class TutorService {
     if (trimmed.length > MAX_MESSAGE_CHARS) {
       throw new BadRequestException(`Message is too long (max ${MAX_MESSAGE_CHARS} characters).`);
     }
+
+    // --- Global/per-user spend circuit breaker (cheap, no cost/slot
+    // consumed yet — see AIUsageService.assertWithinBudget) ---
+    await this.usageService.assertWithinBudget(userId);
 
     // --- Subscription/trial gate (cheap, no cost/slot consumed yet) ---
     // Active subscribers use the normal daily/extra-question allowance.

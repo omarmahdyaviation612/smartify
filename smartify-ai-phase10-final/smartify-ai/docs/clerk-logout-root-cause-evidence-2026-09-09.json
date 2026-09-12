@@ -1,0 +1,139 @@
+{
+    "returnComparison":  [
+                             {
+                                 "version":  "14.2.35",
+                                 "returnType":  "undefined",
+                                 "isSameCookieStore":  false,
+                                 "plainObject":  null
+                             },
+                             {
+                                 "version":  "15.5.21",
+                                 "returnType":  "object",
+                                 "constructor":  "bound ResponseCookies",
+                                 "isSameCookieStore":  true,
+                                 "plainObject":  false
+                             }
+                         ],
+    "stack":  {
+                  "status":  200,
+                  "digests":  [
+                                  "4175692332",
+                                  "$undefined"
+                              ],
+                  "evidence":  [
+                                   {
+                                       "exception":  "Error: Only plain objects, and a few built-ins, can be passed to Client Components from Server Components. Classes or null prototypes are not supported.\n  {}\n    at eN (D:\\samrtify website\\smartify-ai-phase10-final\\smartify-ai\\node_modules\\.pnpm\\next@15.5.21_react-dom@18.3.1_react@18.3.1__react@18.3.1\\node_modules\\next\\dist\\compiled\\next-server\\app-page.runtime.prod.js:5:44265)\n    at ez (D:\\samrtify website\\smartify-ai-phase10-final\\smartify-ai\\node_modules\\.pnpm\\next@15.5.21_react-dom@18.3.1_react@18.3.1__react@18.3.1\\node_modules\\next\\dist\\compiled\\next-server\\app-page.runtime.prod.js:5:48328)\n    at eW (D:\\samrtify website\\smartify-ai-phase10-final\\smartify-ai\\node_modules\\.pnpm\\next@15.5.21_react-dom@18.3.1_react@18.3.1__react@18.3.1\\node_modules\\next\\dist\\compiled\\next-server\\app-page.runtime.prod.js:5:49036)\n    at D:\\samrtify website\\smartify-ai-phase10-final\\smartify-ai\\node_modules\\.pnpm\\next@15.5.21_react-dom@18.3.1_react@18.3.1__react@18.3.1\\node_modules\\next\\dist\\compiled\\next-server\\app-page.runtime.prod.js:5:35936\n    at node:internal/process/task_queues:151:7\n    at AsyncResource.runInAsyncScope (node:async_hooks:227:14)\n    at AsyncResource.runMicrotask (node:internal/process/task_queues:148:8)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)",
+                                       "frames":  [
+                                                      {
+                                                          "function":  "eN",
+                                                          "url":  "",
+                                                          "location":  {
+                                                                           "scriptId":  "594",
+                                                                           "lineNumber":  4,
+                                                                           "columnNumber":  44258
+                                                                       }
+                                                      },
+                                                      {
+                                                          "function":  "ez",
+                                                          "url":  "",
+                                                          "location":  {
+                                                                           "scriptId":  "594",
+                                                                           "lineNumber":  4,
+                                                                           "columnNumber":  48327
+                                                                       }
+                                                      },
+                                                      {
+                                                          "function":  "eW",
+                                                          "url":  "",
+                                                          "location":  {
+                                                                           "scriptId":  "594",
+                                                                           "lineNumber":  4,
+                                                                           "columnNumber":  49035
+                                                                       }
+                                                      },
+                                                      {
+                                                          "function":  "",
+                                                          "url":  "",
+                                                          "location":  {
+                                                                           "scriptId":  "594",
+                                                                           "lineNumber":  4,
+                                                                           "columnNumber":  35935
+                                                                       }
+                                                      },
+                                                      {
+                                                          "function":  "",
+                                                          "url":  "",
+                                                          "location":  {
+                                                                           "scriptId":  "32",
+                                                                           "lineNumber":  150,
+                                                                           "columnNumber":  6
+                                                                       }
+                                                      },
+                                                      {
+                                                          "function":  "runInAsyncScope",
+                                                          "url":  "",
+                                                          "location":  {
+                                                                           "scriptId":  "35",
+                                                                           "lineNumber":  226,
+                                                                           "columnNumber":  13
+                                                                       }
+                                                      },
+                                                      {
+                                                          "function":  "runMicrotask",
+                                                          "url":  "",
+                                                          "location":  {
+                                                                           "scriptId":  "32",
+                                                                           "lineNumber":  147,
+                                                                           "columnNumber":  7
+                                                                       }
+                                                      },
+                                                      {
+                                                          "function":  "processTicksAndRejections",
+                                                          "url":  "",
+                                                          "location":  {
+                                                                           "scriptId":  "32",
+                                                                           "lineNumber":  103,
+                                                                           "columnNumber":  4
+                                                                       }
+                                                      }
+                                                  ]
+                                   }
+                               ]
+              },
+    "actionId":  "7fe4f059b50fe4fbdbad430c8f9c9f33437d773a6d",
+    "matrix":  {
+                   "value":  [
+                                 {
+                                     "url":  "http://localhost:3000/en/sign-in",
+                                     "status":  200,
+                                     "digest4175692332":  true
+                                 },
+                                 {
+                                     "url":  "http://localhost:3000/ar",
+                                     "status":  200,
+                                     "digest4175692332":  true
+                                 },
+                                 {
+                                     "url":  "http://localhost:3000/en/pricing",
+                                     "status":  200,
+                                     "digest4175692332":  true
+                                 },
+                                 {
+                                     "url":  "https://localhost:3443/en/sign-in",
+                                     "status":  200,
+                                     "digest4175692332":  true
+                                 },
+                                 {
+                                     "url":  "https://localhost:3443/ar",
+                                     "status":  200,
+                                     "digest4175692332":  true
+                                 },
+                                 {
+                                     "url":  "https://localhost:3443/en/pricing",
+                                     "status":  200,
+                                     "digest4175692332":  true
+                                 }
+                             ],
+                   "Count":  6
+               }
+}

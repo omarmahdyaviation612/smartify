@@ -61,6 +61,37 @@ export class DashboardService {
       attemptedAt: a.attemptedAt,
     }));
 
+    // Phase 4: the small multi-topic Interactive Lesson pilot. Every
+    // interactive topic in the system today belongs to this one pilot (a
+    // handful of rows total), so listing them all directly is correct and
+    // far simpler than wiring proper StudentSubject-based scoping for a
+    // set this small — that scoping belongs to a later phase once
+    // interactive topics actually span more than one pilot subject.
+    // Prisma's JSON-column null filters need the Prisma.JsonNull sentinel,
+    // not a plain `null`, to distinguish SQL NULL from a JSON "null" value —
+    // simplest to just filter in JS instead of fighting that at the query
+    // level; ~50 topics total at this pilot's scale, cheap either way.
+    const allTopics = await this.prisma.client.topic.findMany({
+      include: { unit: true },
+      orderBy: [{ unit: { order: "asc" } }, { order: "asc" }],
+    });
+    const interactiveTopics = allTopics.filter((t) => t.teachingStepsJson !== null);
+    const interactiveTopicIds = interactiveTopics.map((t) => t.id);
+    const sessions = interactiveTopicIds.length
+      ? await this.prisma.client.lessonSession.findMany({
+          where: { studentId: profile.id, topicId: { in: interactiveTopicIds } },
+        })
+      : [];
+    const sessionByTopic = new Map(sessions.map((s) => [s.topicId, s]));
+    const pilotLessons = interactiveTopics.map((t) => ({
+      topicId: t.id,
+      nameEn: t.nameEn,
+      nameAr: t.nameAr,
+      unitNameEn: t.unit.nameEn,
+      unitNameAr: t.unit.nameAr,
+      status: sessionByTopic.get(t.id)?.status ?? "NOT_STARTED",
+    }));
+
     return {
       fullName: profile.fullName,
       curriculum: { nameEn: profile.curriculum.nameEn, nameAr: profile.curriculum.nameAr },
@@ -70,6 +101,7 @@ export class DashboardService {
       recommendedFocus: (profile.learningPlans[0]?.planJson as any)?.recommendedFocus ?? null,
       weakTopics,
       recentActivity,
+      pilotLessons,
       // Explicitly not-yet-implemented — see class docstring.
       streak: null,
       weeklyStudyMinutes: null,

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { clerkMiddleware } from "@clerk/nextjs/server";
 
 const SUPPORTED_LOCALES = ["ar", "en"] as const;
@@ -16,21 +16,10 @@ function isSupportedLocale(value: string): value is SupportedLocale {
 
 function isPublicPath(pathWithoutLocale: string): boolean {
   if (PUBLIC_SUFFIXES.includes(pathWithoutLocale)) return true;
-  return PUBLIC_PREFIXES.some((p) => pathWithoutLocale.startsWith(p));
+  return PUBLIC_PREFIXES.some((p) => pathWithoutLocale === p || pathWithoutLocale.startsWith(`${p}/`));
 }
 
-const authMiddleware = clerkMiddleware((auth, req) => {
-  const { pathname } = req.nextUrl;
-  const segments = pathname.split("/").filter(Boolean);
-  const withoutLocale = "/" + segments.slice(1).join("/");
-  const normalized = withoutLocale === "/" ? "/" : withoutLocale.replace(/\/$/, "");
-
-  if (!isPublicPath(normalized || "/")) {
-    auth().protect();
-  }
-});
-
-export default function middleware(req: NextRequest) {
+export default clerkMiddleware((auth, req) => {
   const { pathname } = req.nextUrl;
   const segments = pathname.split("/").filter(Boolean);
   const firstSegment = segments[0];
@@ -40,13 +29,15 @@ export default function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Already locale-prefixed: persist the choice, then hand off to Clerk auth gating.
-  // NOTE: clerkMiddleware's callback form is designed to be the top-level
-  // export; composing it inline like this is a pragmatic MVP wiring and
-  // should be revisited if Clerk's API for composition changes.
+  // Let Clerk return its authentication headers and redirects to Next.js.
   if (firstSegment && isSupportedLocale(firstSegment)) {
-    const res = (authMiddleware as any)(req);
-    const response = res instanceof NextResponse ? res : NextResponse.next();
+    const withoutLocale = "/" + segments.slice(1).join("/");
+    if (!isPublicPath(withoutLocale)) {
+      const signInUrl = new URL(`/${firstSegment}/sign-in`, req.url);
+      signInUrl.searchParams.set("redirect_url", req.url);
+      auth().protect({ unauthenticatedUrl: signInUrl.toString() });
+    }
+    const response = NextResponse.next();
     response.cookies.set(LOCALE_COOKIE, firstSegment, { maxAge: 60 * 60 * 24 * 365, path: "/" });
     return response;
   }
@@ -60,7 +51,7 @@ export default function middleware(req: NextRequest) {
   const url = req.nextUrl.clone();
   url.pathname = `/${targetLocale}${pathname === "/" ? "" : pathname}`;
   return NextResponse.redirect(url);
-}
+});
 
 export const config = {
   matcher: ["/((?!_next|.*\\..*).*)"],

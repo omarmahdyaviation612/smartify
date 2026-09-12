@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getOnboardingCopy } from "@/content/onboarding";
 import { OnboardingStepper } from "@/components/OnboardingStepper";
-import { readDraft, writeDraft } from "@/lib/onboarding-draft";
+import { getOnboardingPrerequisite, readDraft, writeDraft } from "@/lib/onboarding-draft";
 import { API_URL } from "@/lib/api";
 import type { Locale } from "@/content/marketing";
 import type { CurriculumCatalogEntry } from "@/components/CurriculumExplorer";
@@ -22,6 +22,11 @@ export default function OnboardingCurriculumPage() {
   const [selectedId, setSelectedId] = useState(existing.curriculumId ?? "");
 
   useEffect(() => {
+    const previousStep = getOnboardingPrerequisite(readDraft(), "curriculum");
+    if (previousStep) {
+      router.replace(`/${locale}/onboarding/${previousStep}`);
+      return;
+    }
     fetch(`${API_URL}/curricula`)
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((data: CurriculumCatalogEntry[]) => {

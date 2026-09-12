@@ -12,7 +12,7 @@
     "@clerk/nextjs": "^5.5.2",
     "@smartify/shared-types": "workspace:*",
     "@smartify/ui": "workspace:*",
-    "next": "^14.2.5",
+    "next": "14.2.35",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

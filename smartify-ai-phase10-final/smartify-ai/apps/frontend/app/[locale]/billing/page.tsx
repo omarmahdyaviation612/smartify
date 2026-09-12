@@ -1,9 +1,10 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getBillingCopy } from "@/content/billing";
+import { getInstapayCopy } from "@/content/instapay";
 import { getMarketingCopy } from "@/content/marketing";
 import { Navbar } from "@/components/Navbar";
 import { ApiError, useApiClient } from "@/lib/api-client";
@@ -31,8 +32,11 @@ interface Subscription {
 export default function BillingPage() {
   const { locale } = useParams<{ locale: Locale }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedPlanId = searchParams.get("planId");
   const isAr = locale === "ar";
   const copy = getBillingCopy(locale);
+  const instapayCopy = getInstapayCopy(locale);
   const navCopy = getMarketingCopy(locale);
   const { apiFetch } = useApiClient();
 
@@ -53,6 +57,15 @@ export default function BillingPage() {
         setPlans(planData);
         setSubscription(subData);
         if (planData[0]) {
+          // A plan carried forward from the public pricing page (?planId=)
+          // wins only if it's genuinely one of THIS student's own curriculum
+          // plans — never trusted blindly, just a convenience default so
+          // they don't have to re-pick what they already chose.
+          const requested = requestedPlanId ? planData.find((plan) => plan.id === requestedPlanId) : undefined;
+          if (requested) {
+            setSelectedPlanId(requested.id);
+            return;
+          }
           const level = planData[0].gradeLevel ?? 7;
           const selected = planData.find((plan) => {
             const code = plan.levelCodeEn.toLowerCase();
@@ -167,6 +180,15 @@ export default function BillingPage() {
 
           {loadingPlans && <p className="mt-8 text-sm text-neutral-500">{isAr ? "جاري تحميل الباقات..." : "Loading plans..."}</p>}
 
+          {error && (
+            <div role="alert" className="mt-4 text-sm text-error-500">
+              <p>{error}</p>
+              <SmartifyButton variant="secondary" onClick={loadBillingData} className="mt-3">
+                {isAr ? "إعادة المحاولة" : "Try again"}
+              </SmartifyButton>
+            </div>
+          )}
+
           {!loadingPlans && plans?.length === 0 && (
             <div className="mt-8 rounded-sf-lg border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
               <p>{isAr ? "لا توجد باقات نشطة لهذا المنهج حاليًا." : "No active plans are available for this curriculum."}</p>
@@ -220,10 +242,20 @@ export default function BillingPage() {
                 </div>
               </div>
 
-              {error && <p className="mt-4 text-sm text-error-500">{error}</p>}
 
               <SmartifyButton variant="ai" className="mt-6 w-full" disabled>
                 {isAr ? "الدفع عبر فوري قريبًا" : "Fawry payment coming soon"}
+              </SmartifyButton>
+              <SmartifyButton
+                variant="secondary"
+                className="mt-3 w-full"
+                onClick={() => {
+                  const params = new URLSearchParams({ kind: "subscription", pricingPlanId: selectedPlanId });
+                  if (extraSubjectIds.length > 0) params.set("subjectIds", extraSubjectIds.join(","));
+                  router.push(`/${locale}/billing/instapay?${params.toString()}`);
+                }}
+              >
+                {instapayCopy.payWithInstapay}
               </SmartifyButton>
             </div>
           )}

@@ -1,0 +1,86 @@
+[
+  {
+    "name": "__client_uat",
+    "reasons": [
+      "SameSiteNoneInsecure"
+    ]
+  },
+  {
+    "name": "__client_uat",
+    "reasons": [
+      "SameSiteNoneInsecure"
+    ]
+  },
+  {
+    "name": "__session",
+    "reasons": [
+      "SameSiteNoneInsecure"
+    ]
+  },
+  {
+    "name": "__clerk_db_jwt",
+    "reasons": [
+      "SameSiteNoneInsecure"
+    ]
+  },
+  {
+    "name": "__client_uat",
+    "reasons": [
+      "SameSiteNoneInsecure"
+    ]
+  },
+  {
+    "name": "__client_uat",
+    "reasons": [
+      "SameSiteNoneInsecure"
+    ]
+  },
+  {
+    "name": "__session",
+    "reasons": [
+      "SameSiteNoneInsecure"
+    ]
+  },
+  {
+    "name": "__clerk_db_jwt",
+    "reasons": [
+      "SameSiteNoneInsecure"
+    ]
+  },
+  {
+    "name": "__client_uat",
+    "reasons": [
+      "SameSiteNoneInsecure"
+    ]
+  },
+  {
+    "name": "__client_uat",
+    "reasons": [
+      "SameSiteNoneInsecure"
+    ]
+  },
+  {
+    "name": "__session",
+    "reasons": [
+      "SameSiteNoneInsecure"
+    ]
+  },
+  {
+    "name": "__clerk_db_jwt",
+    "reasons": [
+      "SameSiteNoneInsecure"
+    ]
+  },
+  {
+    "name": "_cfuvid",
+    "reasons": [
+      "InvalidDomain"
+    ]
+  },
+  {
+    "name": "_cfuvid",
+    "reasons": [
+      "InvalidDomain"
+    ]
+  }
+]

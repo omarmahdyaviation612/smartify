@@ -1,0 +1,599 @@
+{
+    "requests":  [
+                     {
+                         "url":  "http://localhost:4000/users/me",
+                         "method":  "GET",
+                         "hasAuthorization":  true,
+                         "contentType":  "application/json",
+                         "hasCookie":  false
+                     },
+                     {
+                         "url":  "http://localhost:4000/dashboard/summary",
+                         "method":  "GET",
+                         "hasAuthorization":  true,
+                         "contentType":  "application/json",
+                         "hasCookie":  false
+                     },
+                     {
+                         "url":  "http://localhost:4000/users/me",
+                         "method":  "OPTIONS",
+                         "origin":  "https://localhost:3443",
+                         "hasAuthorization":  false,
+                         "hasCookie":  false
+                     },
+                     {
+                         "url":  "http://localhost:4000/dashboard/summary",
+                         "method":  "OPTIONS",
+                         "origin":  "https://localhost:3443",
+                         "hasAuthorization":  false,
+                         "hasCookie":  false
+                     },
+                     {
+                         "url":  "http://localhost:4000/users/me",
+                         "method":  "OPTIONS",
+                         "origin":  "https://localhost:3443",
+                         "hasAuthorization":  false,
+                         "hasCookie":  false
+                     },
+                     {
+                         "url":  "http://localhost:4000/users/me",
+                         "method":  "GET",
+                         "hasAuthorization":  true,
+                         "contentType":  "application/json",
+                         "hasCookie":  false
+                     },
+                     {
+                         "url":  "http://localhost:4000/dashboard/summary",
+                         "method":  "GET",
+                         "hasAuthorization":  true,
+                         "contentType":  "application/json",
+                         "hasCookie":  false
+                     },
+                     {
+                         "url":  "http://localhost:4000/dashboard/summary",
+                         "method":  "OPTIONS",
+                         "origin":  "https://localhost:3443",
+                         "hasAuthorization":  false,
+                         "hasCookie":  false
+                     }
+                 ],
+    "responses":  [
+                      {
+                          "url":  "http://localhost:4000/dashboard/summary",
+                          "status":  204,
+                          "headers":  {
+                                          "Access-Control-Allow-Credentials":  "true",
+                                          "Access-Control-Allow-Headers":  "authorization,content-type",
+                                          "Access-Control-Allow-Methods":  "GET,HEAD,PUT,PATCH,POST,DELETE",
+                                          "Access-Control-Allow-Origin":  "http://localhost:3000",
+                                          "X-Content-Type-Options":  "nosniff"
+                                      }
+                      },
+                      {
+                          "url":  "http://localhost:4000/users/me",
+                          "status":  204,
+                          "headers":  {
+                                          "Access-Control-Allow-Credentials":  "true",
+                                          "Access-Control-Allow-Headers":  "authorization,content-type",
+                                          "Access-Control-Allow-Methods":  "GET,HEAD,PUT,PATCH,POST,DELETE",
+                                          "Access-Control-Allow-Origin":  "http://localhost:3000",
+                                          "X-Content-Type-Options":  "nosniff"
+                                      }
+                      },
+                      {
+                          "url":  "http://localhost:4000/dashboard/summary",
+                          "status":  204,
+                          "headers":  {
+                                          "Access-Control-Allow-Credentials":  "true",
+                                          "Access-Control-Allow-Headers":  "authorization,content-type",
+                                          "Access-Control-Allow-Methods":  "GET,HEAD,PUT,PATCH,POST,DELETE",
+                                          "Access-Control-Allow-Origin":  "http://localhost:3000",
+                                          "X-Content-Type-Options":  "nosniff"
+                                      }
+                      },
+                      {
+                          "url":  "http://localhost:4000/users/me",
+                          "status":  204,
+                          "headers":  {
+                                          "Access-Control-Allow-Credentials":  "true",
+                                          "Access-Control-Allow-Headers":  "authorization,content-type",
+                                          "Access-Control-Allow-Methods":  "GET,HEAD,PUT,PATCH,POST,DELETE",
+                                          "Access-Control-Allow-Origin":  "http://localhost:3000",
+                                          "X-Content-Type-Options":  "nosniff"
+                                      }
+                      }
+                  ],
+    "failures":  [
+                     {
+                         "url":  "https://localhost:3443/ar",
+                         "error":  "net::ERR_ABORTED"
+                     },
+                     {
+                         "url":  "https://localhost:3443/ar/curricula",
+                         "error":  "net::ERR_ABORTED"
+                     },
+                     {
+                         "url":  "https://localhost:3443/ar/pricing",
+                         "error":  "net::ERR_ABORTED"
+                     },
+                     {
+                         "url":  "https://localhost:3443/ar/for-parents",
+                         "error":  "net::ERR_ABORTED"
+                     },
+                     {
+                         "url":  "https://localhost:3443/ar/dashboard",
+                         "error":  "net::ERR_ABORTED"
+                     },
+                     {
+                         "url":  "http://localhost:4000/dashboard/summary",
+                         "error":  "net::ERR_FAILED",
+                         "corsErrorStatus":  {
+                                                 "corsError":  "PreflightAllowOriginMismatch",
+                                                 "failedParameter":  "http://localhost:3000"
+                                             }
+                     },
+                     {
+                         "url":  "http://localhost:4000/users/me",
+                         "error":  "net::ERR_FAILED",
+                         "corsErrorStatus":  {
+                                                 "corsError":  "PreflightAllowOriginMismatch",
+                                                 "failedParameter":  "http://localhost:3000"
+                                             }
+                     },
+                     {
+                         "url":  "https://localhost:3443/ar",
+                         "error":  "net::ERR_ABORTED"
+                     },
+                     {
+                         "url":  "https://localhost:3443/ar/curricula",
+                         "error":  "net::ERR_ABORTED"
+                     },
+                     {
+                         "url":  "https://localhost:3443/ar/pricing",
+                         "error":  "net::ERR_ABORTED"
+                     },
+                     {
+                         "url":  "https://localhost:3443/ar/for-parents",
+                         "error":  "net::ERR_ABORTED"
+                     },
+                     {
+                         "url":  "http://localhost:4000/dashboard/summary",
+                         "error":  "net::ERR_FAILED",
+                         "corsErrorStatus":  {
+                                                 "corsError":  "PreflightAllowOriginMismatch",
+                                                 "failedParameter":  "http://localhost:3000"
+                                             }
+                     },
+                     {
+                         "url":  "http://localhost:4000/users/me",
+                         "error":  "net::ERR_FAILED",
+                         "corsErrorStatus":  {
+                                                 "corsError":  "PreflightAllowOriginMismatch",
+                                                 "failedParameter":  "http://localhost:3000"
+                                             }
+                     },
+                     {
+                         "url":  "https://localhost:3443/ar/sign-in",
+                         "error":  "net::ERR_ABORTED"
+                     }
+                 ],
+    "blockedCookies":  [
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/sign_ins",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://clerk.shared.lcl.dev/v1/oauth_callback",
+                               "name":  "__ck_csrf_token",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/oauth_callback",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/environment",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/sessions/[SESSION_ID_REDACTED]/tokens",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/sessions/[SESSION_ID_REDACTED]/tokens",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/sessions/[SESSION_ID_REDACTED]/tokens",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/sessions/[SESSION_ID_REDACTED]/tokens",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/sessions/[SESSION_ID_REDACTED]/tokens",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/sessions/[SESSION_ID_REDACTED]/tokens",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/sessions/[SESSION_ID_REDACTED]/tokens",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/sessions/[SESSION_ID_REDACTED]/tokens",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/environment",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/environment",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/environment",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/sessions",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/environment",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/environment",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           },
+                           {
+                               "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/environment",
+                               "name":  "_cfuvid",
+                               "reasons":  [
+                                               "InvalidDomain"
+                                           ]
+                           }
+                       ],
+    "navigation":  [
+                       {
+                           "url":  "https://accounts.google.com/o/oauth2/auth",
+                           "status":  302,
+                           "location":  "https://accounts.google.com/v3/signin/identifier"
+                       },
+                       {
+                           "url":  "https://accounts.google.com/v3/signin/identifier",
+                           "status":  200,
+                           "location":  null
+                       },
+                       {
+                           "url":  "https://accounts.google.com/_/bscframe",
+                           "status":  200,
+                           "location":  null
+                       },
+                       {
+                           "url":  "https://accounts.youtube.com/accounts/CheckConnection",
+                           "status":  200,
+                           "location":  null
+                       },
+                       {
+                           "url":  "https://accounts.google.com/CheckCookie",
+                           "status":  302,
+                           "location":  "https://accounts.youtube.com/accounts/SetSID"
+                       },
+                       {
+                           "url":  "https://accounts.youtube.com/accounts/SetSID",
+                           "status":  302,
+                           "location":  "https://accounts.google.com.eg/accounts/SetSID"
+                       },
+                       {
+                           "url":  "https://accounts.google.com.eg/accounts/SetSID",
+                           "status":  200,
+                           "location":  null
+                       },
+                       {
+                           "url":  "https://accounts.google.com/signin/oauth/v3/consent",
+                           "status":  302,
+                           "location":  "https://clerk.shared.lcl.dev/v1/oauth_callback"
+                       },
+                       {
+                           "url":  "https://clerk.shared.lcl.dev/v1/oauth_callback",
+                           "status":  307,
+                           "location":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/oauth_callback"
+                       },
+                       {
+                           "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/oauth_callback",
+                           "status":  200,
+                           "location":  null
+                       },
+                       {
+                           "url":  "https://localhost:3443/ar/free-trial",
+                           "status":  307,
+                           "location":  "https://localhost:3443/ar/free-trial"
+                       },
+                       {
+                           "url":  "https://localhost:3443/ar/free-trial",
+                           "status":  200,
+                           "location":  null
+                       },
+                       {
+                           "url":  "https://localhost:3443/ar/onboarding/profile",
+                           "status":  200,
+                           "location":  null
+                       },
+                       {
+                           "url":  "https://localhost:3443/en/onboarding/profile",
+                           "status":  200,
+                           "location":  null
+                       },
+                       {
+                           "url":  "https://localhost:3443/ar/dashboard",
+                           "status":  200,
+                           "location":  null
+                       },
+                       {
+                           "url":  "https://localhost:3443/ar/onboarding/profile",
+                           "status":  307,
+                           "location":  "/ar/sign-in",
+                           "authStatus":  "signed-out",
+                           "authReason":  "session-token-and-uat-missing"
+                       },
+                       {
+                           "url":  "https://localhost:3443/ar/sign-in",
+                           "status":  307,
+                           "location":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake",
+                           "authStatus":  "handshake",
+                           "authReason":  "dev-browser-sync"
+                       },
+                       {
+                           "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake",
+                           "status":  307,
+                           "location":  "https://localhost:3443/ar/sign-in"
+                       },
+                       {
+                           "url":  "https://localhost:3443/ar/sign-in",
+                           "status":  307,
+                           "location":  "https://localhost:3443/ar/sign-in",
+                           "authStatus":  "signed-out",
+                           "authReason":  "session-token-missing"
+                       },
+                       {
+                           "url":  "https://localhost:3443/ar/sign-in",
+                           "status":  200,
+                           "location":  null,
+                           "authStatus":  "signed-out",
+                           "authReason":  "session-token-and-uat-missing"
+                       },
+                       {
+                           "url":  "https://localhost:3443/en/onboarding/profile",
+                           "status":  307,
+                           "location":  "/en/sign-in",
+                           "authStatus":  "signed-out",
+                           "authReason":  "session-token-and-uat-missing"
+                       },
+                       {
+                           "url":  "https://localhost:3443/en/sign-in",
+                           "status":  307,
+                           "location":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake",
+                           "authStatus":  "handshake",
+                           "authReason":  "dev-browser-sync"
+                       },
+                       {
+                           "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake",
+                           "status":  307,
+                           "location":  "https://localhost:3443/en/sign-in"
+                       },
+                       {
+                           "url":  "https://localhost:3443/en/sign-in",
+                           "status":  307,
+                           "location":  "https://localhost:3443/en/sign-in",
+                           "authStatus":  "signed-out",
+                           "authReason":  "session-token-missing"
+                       },
+                       {
+                           "url":  "https://localhost:3443/en/sign-in",
+                           "status":  200,
+                           "location":  null,
+                           "authStatus":  "signed-out",
+                           "authReason":  "session-token-and-uat-missing"
+                       },
+                       {
+                           "url":  "https://localhost:3443/ar/dashboard",
+                           "status":  307,
+                           "location":  "/ar/sign-in",
+                           "authStatus":  "signed-out",
+                           "authReason":  "session-token-and-uat-missing"
+                       },
+                       {
+                           "url":  "https://localhost:3443/ar/sign-in",
+                           "status":  307,
+                           "location":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake",
+                           "authStatus":  "handshake",
+                           "authReason":  "dev-browser-sync"
+                       },
+                       {
+                           "url":  "https://prime-kingfish-3595.clerk.accounts.dev/v1/client/handshake",
+                           "status":  307,
+                           "location":  "https://localhost:3443/ar/sign-in"
+                       },
+                       {
+                           "url":  "https://localhost:3443/ar/sign-in",
+                           "status":  307,
+                           "location":  "https://localhost:3443/ar/sign-in",
+                           "authStatus":  "signed-out",
+                           "authReason":  "session-token-missing"
+                       },
+                       {
+                           "url":  "https://localhost:3443/ar/sign-in",
+                           "status":  200,
+                           "location":  null,
+                           "authStatus":  "signed-out",
+                           "authReason":  "session-token-and-uat-missing"
+                       }
+                   ],
+    "runtimeErrors":  [
+                          {
+                              "url":  "https://localhost:3443/ar/dashboard",
+                              "message":  "An error occurred in the Server Components render. The specific message is omitted in production builds to avoid leaking sensitive details. A digest property is included on this error instance which may provide additional details about the nature of the error."
+                          }
+                      ],
+    "protectedChecks":  [
+                            {
+                                "path":  "/ar/onboarding/profile",
+                                "status":  200,
+                                "destination":  "https://localhost:3443/ar/onboarding/profile",
+                                "signedIn":  true,
+                                "heading":  [
+                                                "????? ???? ??????"
+                                            ],
+                                "applicationError":  0
+                            },
+                            {
+                                "path":  "/en/onboarding/profile",
+                                "status":  200,
+                                "destination":  "https://localhost:3443/en/onboarding/profile",
+                                "signedIn":  true,
+                                "heading":  [
+                                                "Let\u0027s set up your profile"
+                                            ],
+                                "applicationError":  0
+                            },
+                            {
+                                "path":  "/ar/dashboard",
+                                "status":  200,
+                                "destination":  "https://localhost:3443/ar/dashboard",
+                                "signedIn":  true,
+                                "heading":  [
+
+                                            ],
+                                "applicationError":  0
+                            }
+                        ],
+    "logout":  {
+                   "signedIn":  false,
+                   "destination":  "https://localhost:3443/ar/sign-in"
+               },
+    "afterLogout":  [
+                        {
+                            "path":  "/ar/onboarding/profile",
+                            "destination":  "https://localhost:3443/ar/sign-in",
+                            "signedIn":  false
+                        },
+                        {
+                            "path":  "/en/onboarding/profile",
+                            "destination":  "https://localhost:3443/en/sign-in",
+                            "signedIn":  false
+                        },
+                        {
+                            "path":  "/ar/dashboard",
+                            "destination":  "https://localhost:3443/ar/sign-in",
+                            "signedIn":  false
+                        }
+                    ]
+}

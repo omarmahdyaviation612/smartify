@@ -22,7 +22,16 @@ export interface CheckoutSession {
 
 export interface WebhookEvent {
   type: "subscription.activated" | "subscription.canceled" | "payment.failed" | "question_pack.paid" | "unknown";
+  /** The CHECKOUT SESSION id (e.g. Stripe "cs_..."). Only ever populated for "subscription.activated" — that's the only event correlatable by it. */
   externalSubscriptionId?: string;
+  /**
+   * The provider's own SUBSCRIPTION id (e.g. Stripe "sub_...") — a
+   * DIFFERENT identifier than the checkout session above. Populated for
+   * "subscription.activated" (once known, from the completed session) and
+   * for subscription-level lifecycle events ("subscription.canceled",
+   * "payment.failed"), which never carry a checkout session id at all.
+   */
+  externalProviderSubscriptionId?: string;
   purchaseId?: string;
   /**
    * The provider's own unique event ID (e.g. Stripe's "evt_..."). Used by
@@ -37,6 +46,13 @@ export interface WebhookEvent {
 }
 
 export interface PaymentProvider {
+  /** Read-only verification of a checkout persisted by our backend. */
+  verifyCheckoutSession?(expected: {
+    externalSessionId: string;
+    studentUserId: string;
+    subscriptionId: string;
+    amountEGP: number;
+  }): Promise<"paid" | "pending" | "failed" | "unverified">;
   createCheckoutSession(params: CreateCheckoutParams): Promise<CheckoutSession>;
   /**
    * Verifies and parses an incoming webhook. Takes the FULL headers object

@@ -3,7 +3,6 @@ import type { Locale } from "./marketing";
 export interface TutorCopy {
   title: string;
   subjectLabel: string;
-  aiGeneratedBadge: string;
   inputPlaceholder: string;
   sendLabel: string;
   remainingToday: (dailyRemaining: number, extraRemaining: number) => string;
@@ -17,12 +16,26 @@ export interface TutorCopy {
   genericError: string;
   emptyState: string;
   noSubjects: string;
+  micStart: string;
+  micStop: string;
+  listening: string;
+  micPermissionDenied: string;
+  micNoSpeech: string;
+  transcriptionFailed: string;
+  autoPlayOn: string;
+  autoPlayOff: string;
+  playReply: string;
+  replayReply: string;
+  pauseReply: string;
+  resumeReply: string;
+  stopReply: string;
+  loadingReply: string;
+  ttsUnavailable: string;
 }
 
 const en: TutorCopy = {
   title: "AI Tutor",
   subjectLabel: "Subject",
-  aiGeneratedBadge: "AI-generated",
   inputPlaceholder: "Ask about your current topic...",
   sendLabel: "Send",
   remainingToday: (daily, extra) => `${daily} daily + ${extra} extra questions left for this subject`,
@@ -36,12 +49,26 @@ const en: TutorCopy = {
   genericError: "Something went wrong. Please try again.",
   emptyState: "Ask a question about your current lesson to get started.",
   noSubjects: "You haven't selected any subjects yet — complete onboarding first.",
+  micStart: "Speak your question",
+  micStop: "Stop recording",
+  listening: "Listening...",
+  micPermissionDenied: "Microphone access was denied. You can still type your question.",
+  micNoSpeech: "No speech detected. Try again or type your question.",
+  transcriptionFailed: "Couldn't recognize speech. Try again or type your question.",
+  autoPlayOn: "Voice replies: on",
+  autoPlayOff: "Voice replies: off",
+  playReply: "Play",
+  replayReply: "Replay",
+  pauseReply: "Pause",
+  resumeReply: "Resume",
+  stopReply: "Stop",
+  loadingReply: "Loading voice...",
+  ttsUnavailable: "Voice playback isn't available right now.",
 };
 
 const ar: TutorCopy = {
   title: "المعلم الذكي",
   subjectLabel: "المادة",
-  aiGeneratedBadge: "محتوى مولّد بالذكاء الاصطناعي",
   inputPlaceholder: "اسأل عن موضوعك الحالي...",
   sendLabel: "إرسال",
   remainingToday: (daily, extra) => `${daily} يومية + ${extra} إضافية متبقية لهذه المادة`,
@@ -55,6 +82,21 @@ const ar: TutorCopy = {
   genericError: "حدث خطأ ما. حاول مرة أخرى.",
   emptyState: "اطرح سؤالًا عن درسك الحالي للبدء.",
   noSubjects: "لم تختر أي مواد بعد — أكمل التسجيل أولًا.",
+  micStart: "اسأل بصوتك",
+  micStop: "إيقاف التسجيل",
+  listening: "جاري الاستماع...",
+  micPermissionDenied: "تم رفض إذن الميكروفون. لا يزال بإمكانك كتابة سؤالك.",
+  micNoSpeech: "لم يتم رصد أي كلام. حاول مرة أخرى أو اكتب سؤالك.",
+  transcriptionFailed: "تعذّر التعرف على الكلام. حاول مرة أخرى أو اكتب سؤالك.",
+  autoPlayOn: "الردود الصوتية: مفعّلة",
+  autoPlayOff: "الردود الصوتية: متوقفة",
+  playReply: "تشغيل",
+  replayReply: "إعادة الاستماع",
+  pauseReply: "إيقاف مؤقت",
+  resumeReply: "متابعة",
+  stopReply: "إيقاف",
+  loadingReply: "جاري تجهيز الصوت...",
+  ttsUnavailable: "تشغيل الصوت غير متاح حاليًا.",
 };
 
 const copyByLocale: Record<Locale, TutorCopy> = { en, ar };

@@ -40,9 +40,7 @@ function MaterialsSection() {
   const [curricula, setCurricula] = useState<Curriculum[]>([]);
   const [grades, setGrades] = useState<Grade[]>([]);
   const [subjects, setSubjects] = useState<{ id: string; nameEn: string }[]>([]);
-  const [topics, setTopics] = useState<Topic[]>([]);
   const [subjectId, setSubjectId] = useState("");
-  const [topicId, setTopicId] = useState("");
   const [curriculumId, setCurriculumId] = useState("");
   const [gradeId, setGradeId] = useState("");
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -50,27 +48,25 @@ function MaterialsSection() {
 
   useEffect(() => { apiFetch<Curriculum[]>("/admin/curriculum/curricula").then(setCurricula); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    setGrades([]); setGradeId(""); setSubjects([]); setSubjectId(""); setTopics([]); setTopicId("");
+    setGrades([]); setGradeId(""); setSubjects([]); setSubjectId("");
     if (curriculumId) apiFetch<Grade[]>(`/admin/curriculum/grades?curriculumId=${curriculumId}`).then(setGrades);
   }, [curriculumId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    setSubjects([]); setSubjectId(""); setTopics([]); setTopicId("");
+    setSubjects([]); setSubjectId("");
     if (gradeId) apiFetch<{ id: string; nameEn: string }[]>(`/admin/curriculum/subjects?gradeId=${gradeId}`).then(setSubjects);
   }, [gradeId]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (subjectId) apiFetch<Topic[]>(`/admin/curriculum/topics?subjectId=${subjectId}`).then(setTopics); }, [subjectId]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (topicId) apiFetch<Material[]>(`/admin/curriculum/materials?topicId=${topicId}`).then(setMaterials); }, [topicId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function upload(file: File) {
-    if (!curriculumId || !gradeId || !subjectId || !topicId) return setMessage("Choose a curriculum, grade, subject, and topic first.");
-    const form = new FormData(); form.append("file", file); form.append("topicId", topicId);
+    if (!curriculumId || !gradeId || !subjectId) return setMessage("Choose a curriculum, grade, and subject first.");
+    const form = new FormData(); form.append("file", file); form.append("subjectId", subjectId);
     const token = await getToken();
     const response = await fetch(`${API_URL}/admin/curriculum/materials`, { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form });
     if (!response.ok) { const body = await response.json().catch(() => ({})); return setMessage(body.message ?? "Upload failed."); }
-    setMessage("Material uploaded."); setMaterials(await apiFetch<Material[]>(`/admin/curriculum/materials?topicId=${topicId}`));
+    setMessage("PDF uploaded. AI topics were created for this subject.");
   }
   return <div className="mt-6 rounded-sf-lg border border-neutral-200 bg-white p-6">
-    <h2 className="font-semibold text-navy-900">Upload text materials</h2>
-    <p className="mt-1 text-sm text-neutral-500">TXT, Markdown, or JSON only. Images are never extracted or shown.</p>
+    <h2 className="font-semibold text-navy-900">Upload whole subject PDF</h2>
+    <p className="mt-1 text-sm text-neutral-500">Text only; images are never used. AI divides the subject into topics.</p>
     <div className="mt-4 grid gap-3 sm:grid-cols-2">
       <select className="rounded-sf border p-2" value={curriculumId} onChange={e => setCurriculumId(e.target.value)}>
         <option value="">Choose curriculum</option>{curricula.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
@@ -78,14 +74,11 @@ function MaterialsSection() {
       <select className="rounded-sf border p-2" value={gradeId} onChange={e => setGradeId(e.target.value)} disabled={!curriculumId}>
         <option value="">Choose grade</option>{grades.map(g => <option key={g.id} value={g.id}>{g.nameEn}</option>)}
       </select>
-      <select className="rounded-sf border p-2" value={subjectId} onChange={e => { setSubjectId(e.target.value); setTopicId(""); }} disabled={!gradeId}>
+      <select className="rounded-sf border p-2" value={subjectId} onChange={e => setSubjectId(e.target.value)} disabled={!gradeId}>
         <option value="">Choose subject</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.nameEn}</option>)}
       </select>
-      <select className="rounded-sf border p-2" value={topicId} onChange={e => setTopicId(e.target.value)} disabled={!subjectId}>
-        <option value="">Choose topic</option>{topics.map(t => <option key={t.id} value={t.id}>{t.unit.nameEn} — {t.nameEn}</option>)}
-      </select>
     </div>
-    <input className="mt-4" type="file" accept=".txt,.md,.json,text/plain,text/markdown,application/json" onChange={e => e.target.files?.[0] && upload(e.target.files[0])} />
+    <input className="mt-4" type="file" accept=".pdf,application/pdf" onChange={e => e.target.files?.[0] && upload(e.target.files[0])} />
     {message && <p className="mt-2 text-sm text-neutral-600">{message}</p>}
     <ul className="mt-4 space-y-2 text-sm">{materials.map(m => <li key={m.id} className="rounded border p-2">{m.originalName} ({Math.ceil(m.sizeBytes / 1024)} KB)</li>)}</ul>
   </div>;

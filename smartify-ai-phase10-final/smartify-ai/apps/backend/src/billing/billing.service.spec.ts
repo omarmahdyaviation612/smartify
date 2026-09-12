@@ -28,13 +28,14 @@ describe("BillingService", () => {
   });
 
   function makePrismaMock(overrides: Partial<{ plan: any; subscriptionUpsert: jest.Mock; subscriptionFindFirst: any; webhookEventLogCreate: jest.Mock }> = {}) {
-    return {
+    const prisma = {
       client: {
         studentProfile: { findUnique: jest.fn().mockResolvedValue(studentProfile) },
         pricingPlan: { findUnique: jest.fn().mockResolvedValue(overrides.plan) },
         subscription: {
           upsert: overrides.subscriptionUpsert ?? jest.fn().mockResolvedValue({ id: "sub-1" }),
           update: jest.fn().mockResolvedValue({}),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           findUnique: jest.fn(),
           findFirst: jest.fn().mockResolvedValue(overrides.subscriptionFindFirst ?? { id: "sub-1", externalSubscriptionId: "sess_1" }),
         },
@@ -43,6 +44,8 @@ describe("BillingService", () => {
         },
       },
     } as any;
+    prisma.client.$transaction = (callback: any) => callback(prisma.client);
+    return prisma;
   }
 
   function makeProviderFactoryMock() {
@@ -98,6 +101,65 @@ describe("BillingService", () => {
     expect(upsertArgs.create.monthlyTotalEGP).toBe(300);
   });
 
+  describe("cancelSubscription", () => {
+    function makeCancelPrisma(subscription: any) {
+      const prisma = makePrismaMock();
+      prisma.client.subscription.findUnique = jest.fn().mockResolvedValue(subscription);
+      return prisma;
+    }
+
+    it("cancels an InstaPay-paid subscription locally without calling any payment provider", async () => {
+      const prisma = makeCancelPrisma({ id: "sub-1", status: "active", paymentProvider: "instapay", externalSubscriptionId: "SMAI-S-ABC" });
+      const providerFactory = makeProviderFactoryMock();
+      const service = new BillingService(prisma, providerFactory, { applyPaidPurchase: jest.fn() } as any);
+
+      await service.cancelSubscription("user-1");
+
+      expect(providerFactory.getProviderByKey).not.toHaveBeenCalled();
+      expect(prisma.client.subscription.update).toHaveBeenCalledWith({
+        where: { id: "sub-1" },
+        data: { status: "canceled" },
+        include: { pricingPlan: true },
+      });
+    });
+
+    it("falls back to the checkout session id for a historical Stripe subscription with no stored provider subscription id", async () => {
+      const prisma = makeCancelPrisma({ id: "sub-1", status: "active", paymentProvider: "stripe", externalSubscriptionId: "sess_1" });
+      const cancelSubscription = jest.fn().mockResolvedValue(undefined);
+      const providerFactory = makeProviderFactoryMock();
+      providerFactory.getProviderByKey.mockResolvedValue({ cancelSubscription });
+      const service = new BillingService(prisma, providerFactory, { applyPaidPurchase: jest.fn() } as any);
+
+      await service.cancelSubscription("user-1");
+
+      expect(providerFactory.getProviderByKey).toHaveBeenCalledWith("stripe");
+      expect(cancelSubscription).toHaveBeenCalledWith("sess_1");
+      expect(prisma.client.subscription.update).toHaveBeenCalledWith(expect.objectContaining({ include: { pricingPlan: true } }));
+    });
+
+    it("prefers the real Stripe subscription id over the checkout session id when both are known", async () => {
+      const prisma = makeCancelPrisma({
+        id: "sub-1",
+        status: "active",
+        paymentProvider: "stripe",
+        externalSubscriptionId: "sess_1",
+        externalProviderSubscriptionId: "sub_stripe_real",
+      });
+      const cancelSubscription = jest.fn().mockResolvedValue(undefined);
+      const providerFactory = makeProviderFactoryMock();
+      providerFactory.getProviderByKey.mockResolvedValue({ cancelSubscription });
+      const service = new BillingService(prisma, providerFactory, { applyPaidPurchase: jest.fn() } as any);
+
+      await service.cancelSubscription("user-1");
+
+      // Stripe's cancel API expects its own subscription id, not the
+      // checkout session id — passing the wrong one would fail against
+      // the real Stripe API.
+      expect(cancelSubscription).toHaveBeenCalledWith("sub_stripe_real");
+      expect(cancelSubscription).not.toHaveBeenCalledWith("sess_1");
+    });
+  });
+
   describe("applyWebhookEvent — idempotency (Phase 10)", () => {
     it("applies the subscription-activated effect on first delivery of an event", async () => {
       const prisma = makePrismaMock();
@@ -112,7 +174,7 @@ describe("BillingService", () => {
       expect(prisma.client.webhookEventLog.create).toHaveBeenCalledWith({
         data: { provider: "stripe", externalEventId: "evt_123", eventType: "subscription.activated" },
       });
-      expect(prisma.client.subscription.update).toHaveBeenCalledWith(
+      expect(prisma.client.subscription.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ status: "active" }) }),
       );
     });
@@ -134,6 +196,7 @@ describe("BillingService", () => {
       // this is what prevents a duplicate delivery from resetting
       // currentPeriodStart/End a second time.
       expect(prisma.client.subscription.update).not.toHaveBeenCalled();
+      expect(prisma.client.subscription.updateMany).not.toHaveBeenCalled();
       expect(prisma.client.subscription.findFirst).not.toHaveBeenCalled();
     });
 
@@ -159,6 +222,89 @@ describe("BillingService", () => {
       await expect(
         service.applyWebhookEvent("stripe", { type: "unknown", externalEventId: "evt_789" }),
       ).resolves.toBeUndefined();
+    });
+
+    // FIXED (previously a confirmed gap): "subscription.canceled"/
+    // "payment.failed" are now looked up by externalProviderSubscriptionId
+    // (the real Stripe subscription id), never externalSubscriptionId (the
+    // checkout session id) — see billing-lifecycle-webhook.spec.ts for the
+    // full lifecycle regression suite. This test covers the remaining
+    // defensive edge case: if a lifecycle event somehow arrives with
+    // NEITHER identifier, it must still be a safe, silent no-op rather
+    // than an error or a crash.
+    it.each(["subscription.canceled", "payment.failed"])(
+      "a %s event with no externalProviderSubscriptionId at all is a silent no-op — it never reaches the DB",
+      async (type) => {
+        const prisma = makePrismaMock();
+        const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any);
+
+        await expect(
+          service.applyWebhookEvent("stripe", { type, externalEventId: `evt_${type}` }),
+        ).resolves.toBeUndefined();
+        expect(prisma.client.webhookEventLog.create).not.toHaveBeenCalled();
+        expect(prisma.client.subscription.update).not.toHaveBeenCalled();
+        expect(prisma.client.subscription.updateMany).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  describe("checkout session substitution safety", () => {
+    it("cannot activate at an earlier (abandoned) checkout session's price after the student starts a second, different checkout", async () => {
+      // Student starts checkout for Plan A (cheap) — row now points at session "cs_planA".
+      const planA = { id: "plan-a", curriculumId: "curriculum-A", isActive: true, monthlyPriceEGP: 300, additionalSubjectPriceEGP: 100, levelCodeEn: "Primary", includedSubjects: 3 };
+      const planB = { id: "plan-b", curriculumId: "curriculum-A", isActive: true, monthlyPriceEGP: 900, additionalSubjectPriceEGP: 100, levelCodeEn: "Secondary", includedSubjects: 3 };
+      let currentPlan = planA;
+      let externalSubscriptionId = "";
+      const prisma = makePrismaMock({
+        plan: undefined,
+        subscriptionUpsert: jest.fn().mockImplementation(async () => ({ id: "sub-1" })),
+      });
+      prisma.client.pricingPlan.findUnique = jest.fn().mockImplementation(async () => currentPlan);
+      prisma.client.subscription.update = jest.fn().mockImplementation(async ({ data }: any) => {
+        if (data.externalSubscriptionId) externalSubscriptionId = data.externalSubscriptionId;
+      });
+      prisma.client.subscription.findFirst = jest.fn().mockImplementation(async ({ where }: any) =>
+        where.externalSubscriptionId === externalSubscriptionId ? { id: "sub-1", status: "pending" } : null,
+      );
+      prisma.client.subscription.updateMany = jest.fn().mockImplementation(async ({ where }: any) =>
+        where.externalSubscriptionId === externalSubscriptionId ? { count: 1 } : { count: 0 },
+      );
+
+      const providerFactory = {
+        getActiveProvider: jest.fn().mockImplementation(async () => ({
+          provider: { createCheckoutSession: jest.fn().mockResolvedValue({ checkoutUrl: "https://example.test/a", externalSessionId: "cs_planA" }) },
+          providerKey: "stripe",
+        })),
+        getProviderByKey: jest.fn(),
+      };
+      const service = new BillingService(prisma, providerFactory as any, { applyPaidPurchase: jest.fn() } as any);
+      await service.startCheckout("user-1", { pricingPlanId: "plan-a" });
+      expect(externalSubscriptionId).toBe("cs_planA");
+
+      // Student changes their mind and starts checkout for Plan B instead —
+      // the SAME Subscription row (by studentId) now points at "cs_planB".
+      currentPlan = planB;
+      providerFactory.getActiveProvider.mockResolvedValueOnce({
+        provider: { createCheckoutSession: jest.fn().mockResolvedValue({ checkoutUrl: "https://example.test/b", externalSessionId: "cs_planB" }) },
+        providerKey: "stripe",
+      });
+      await service.startCheckout("user-1", { pricingPlanId: "plan-b" });
+      expect(externalSubscriptionId).toBe("cs_planB");
+
+      // The abandoned Plan A checkout is later completed anyway (e.g. the
+      // student never closed that browser tab). Its webhook must NOT
+      // activate anything — the row it would need to match no longer
+      // points at that session (it now points at "cs_planB"), so this
+      // safely fails closed (NotFoundException, requesting a retry) rather
+      // than activating Plan A's price on a row that has since moved on.
+      await expect(
+        service.applyWebhookEvent("stripe", {
+          type: "subscription.activated",
+          externalSubscriptionId: "cs_planA",
+          externalEventId: "evt_planA",
+        }),
+      ).rejects.toThrow();
+      expect(prisma.client.subscription.updateMany).not.toHaveBeenCalled();
     });
   });
 });

@@ -25,27 +25,28 @@ export function generateStaticParams() {
 // Replace with a real data fetch once submissions exist.
 const REAL_TESTIMONIALS: Testimonial[] = [];
 
-export default function HomePage({ params }: { params: { locale: Locale } }) {
-  const copy = getMarketingCopy(params.locale);
+export default async function HomePage({ params }: { params: Promise<{ locale: string }> }) {
+  const locale = (await params).locale as Locale;
+  const copy = getMarketingCopy(locale);
 
   return (
     <>
-      <Navbar locale={params.locale} copy={copy} />
+      <Navbar locale={locale} copy={copy} />
       <main>
-        <Hero locale={params.locale} copy={copy} />
+        <Hero locale={locale} copy={copy} />
         <TrustedLearning copy={copy} />
         <CurriculaSection copy={copy} />
         <HowItWorksSection copy={copy} />
         <AIPersonalizationSection copy={copy} />
         <PracticeAssessmentSection copy={copy} />
         <ProgressTrackingSection copy={copy} />
-        <ParentInsightsSection locale={params.locale} copy={copy} />
-        <PricingTeaser locale={params.locale} copy={copy} />
-        <Testimonials testimonials={REAL_TESTIMONIALS} title={params.locale === "ar" ? "قصص طلابنا" : "Student Stories"} />
+        <ParentInsightsSection locale={locale} copy={copy} />
+        <PricingTeaser locale={locale} copy={copy} />
+        <Testimonials testimonials={REAL_TESTIMONIALS} title={locale === "ar" ? "قصص طلابنا" : "Student Stories"} />
         <LearningJourneysSection copy={copy} />
-        <FinalCtaSection locale={params.locale} copy={copy} />
+        <FinalCtaSection locale={locale} copy={copy} />
       </main>
-      <Footer locale={params.locale} copy={copy} />
+      <Footer locale={locale} copy={copy} />
     </>
   );
 }
