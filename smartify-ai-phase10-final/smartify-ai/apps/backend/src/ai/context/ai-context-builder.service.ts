@@ -324,4 +324,77 @@ export class AIContextBuilderService {
       .filter(Boolean)
       .join("\n");
   }
+
+  /**
+   * System prompt for the Phase 5 lesson content-generation PIPELINE — a
+   * DIFFERENT concern from buildLessonTeachingPrompt above. That prompt
+   * teaches a student one already-approved step at runtime; this one asks
+   * the model to PLAN a full lesson's step structure (matching
+   * teachingStepsJson exactly) for human review before anything is
+   * published. It must output structural planning metadata only — never
+   * full teaching scripts, matching the "AI generates wording at runtime,
+   * never pre-written speech" principle already established for the
+   * Interactive Lesson engine.
+   */
+  buildLessonDraftGenerationPrompt(
+    ctx: {
+      curriculumNameEn: string;
+      gradeNameEn: string;
+      subjectNameEn: string;
+      unitNameEn: string;
+      topicNameEn: string;
+      topicNameAr: string;
+      learningObjectives: string[];
+      preferredLang: "ar" | "en";
+      studentAgeRange: string;
+    },
+    retryFeedback?: string[],
+  ): string {
+    const retrySection = retryFeedback?.length
+      ? [
+          "PREVIOUS ATTEMPT WAS REJECTED — fix ONLY the issues below and output the complete corrected JSON again (not just the fixed parts):",
+          ...retryFeedback.map((e) => `- ${e}`),
+          "",
+        ]
+      : [];
+
+    return [
+      "You are Smartify's lesson-structure planning assistant. You do NOT teach the student directly — you design the ORDERED STEP STRUCTURE for one lesson, for a human curriculum reviewer to approve before it is ever shown to any student.",
+      "",
+      `Curriculum: ${ctx.curriculumNameEn}. Grade: ${ctx.gradeNameEn}. Subject: ${ctx.subjectNameEn}. Unit: ${ctx.unitNameEn}.`,
+      `Topic to plan: "${ctx.topicNameEn}" (${ctx.topicNameAr}). Student age range: ${ctx.studentAgeRange}.`,
+      "Original Smartify learning objectives for this topic (a map of what to teach — not textbook text):",
+      ...ctx.learningObjectives.map((o) => `- ${o}`),
+      "",
+      ...retrySection,
+      "TASK: produce an ordered array of teaching steps compatible with the Interactive Lesson engine's teachingStepsJson format — the SAME format already used for the validated Addition/Subtraction/Comparing-Numbers pilot lessons.",
+      "",
+      "Respond with ONLY a single JSON object, no other text, in exactly this shape:",
+      '{"topicNameEn": "<must exactly match the topic given above>", "steps": [ { "id": "s1", "type": "INTRO", "order": 1, "objective": "...", "conceptKey": "..." }, ... ]}',
+      "",
+      "STEP RULES:",
+      '- "type" must be one of exactly: INTRO, EXPLAIN, EXAMPLE, CHECK, REVIEW, COMPLETE.',
+      '- "order" must equal the step\'s 1-based position in the array (the engine progresses by array order, not by this field, but they must always agree).',
+      '- "id" must be a short unique string per step (e.g. "s1", "s2", ...).',
+      '- "objective" is a PLANNING INSTRUCTION describing WHAT that step must accomplish (one or two sentences) — NEVER the actual scripted teacher speech. The runtime teacher generates the real wording separately, per student, at lesson time.',
+      '- Target this approximate structure unless the topic genuinely needs otherwise: INTRO, EXPLAIN, CHECK, EXAMPLE, CHECK, REVIEW, COMPLETE (roughly 6-8 steps total).',
+      '- Exactly one CHECK step\'s type per check is required at minimum; include a "checkType" of "conceptual" or "applied" on each CHECK step.',
+      '- COMPLETE must always be the LAST step.',
+      '- Include "conceptKey" (a short snake_case label) on steps where it clarifies what specific idea that step targets.',
+      "",
+      "DETERMINISTIC-CHECK AWARENESS: the runtime engine can automatically, deterministically grade a CHECK step's answer (never trusting the AI's own judgment alone) when the question is a simple addition, subtraction, numeric equality, or greater/less comparison. When a CHECK step's objective naturally fits one of these (e.g. this topic's own arithmetic rule), phrase its objective so the runtime question will likely be a single clean computable fact — this makes grading more reliable. Do NOT force a conceptual question into a fake arithmetic shape just to trigger this; a genuinely conceptual check should stay conceptual and will be graded by the AI instead, which is fully supported.",
+      "",
+      'VISUAL PLANNING ONLY: at most ONE step may carry a "visual" field, and only if a simple visual would genuinely help this concept. If included, it MUST be exactly: {"type": "VISUALIZE_LEARNING", "status": "NOT_GENERATED", "prompt": "<a safe, original, textbook-free image prompt>", "url": null}. NEVER claim an image already exists, never invent a URL, and do not include a visual field at all if it would not add real value. No image is generated in this phase regardless.',
+      "",
+      ...this.formattingRules(),
+      "",
+      ...this.safetyRules(),
+      "",
+      ...this.contentOriginalityRules(ctx.subjectNameEn),
+      "- The curriculum/topic/objectives above are a map of WHAT to teach only. Every objective, example concept, and check idea you plan must be your own original design — never copy, closely paraphrase, or imitate a specific textbook page, exercise, or illustration.",
+      "- Never mention or imply a source file, PDF, page number, or Ministry endorsement anywhere in your output.",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
 }

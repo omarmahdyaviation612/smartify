@@ -214,6 +214,7 @@ model Unit {
   term      Term?
 
   topics Topic[]
+  lessonDrafts LessonDraft[]
 
   @@index([subjectId])
 }
@@ -261,6 +262,31 @@ model LessonVisualAsset {
   createdAt DateTime @default(now())
 
   @@unique([topicId, stepId])
+}
+
+// Phase 5: an AI-generated lesson draft awaiting human review — NEVER a
+// real Topic row, deliberately. Nothing in the app queries LessonDraft (the
+// student dashboard/lesson engine only ever read real Topic rows), so a
+// draft existing here can never leak to students regardless of its
+// `status`. Becoming real, student-facing curriculum content is a
+// SEPARATE, explicit publish step for a later phase (create a real Topic
+// from an "approved" draft) — this table only holds the pre-publish state.
+model LessonDraft {
+  id                     String    @id @default(cuid())
+  targetUnitId           String? // the existing Unit this would publish under, if approved — informational only, no cascading behavior
+  targetUnit             Unit?     @relation(fields: [targetUnitId], references: [id])
+  topicNameEn            String
+  topicNameAr            String
+  learningObjectivesJson Json
+  teachingStepsJson      Json
+  status                 String    @default("pending_review") // "pending_review" | "approved" | "rejected"
+  aiProvider             String
+  aiModel                String
+  createdAt              DateTime  @default(now())
+  reviewedAt             DateTime?
+  reviewedByUserId       String?
+
+  @@index([status])
 }
 
 model LearningMaterial {
