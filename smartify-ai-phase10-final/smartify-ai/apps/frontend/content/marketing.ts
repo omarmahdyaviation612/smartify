@@ -79,6 +79,8 @@ export interface MarketingCopy {
   footer: {
     tagline: string;
     rights: string;
+    privacyPolicy: string;
+    termsOfService: string;
   };
 }
 
@@ -172,6 +174,8 @@ const en: MarketingCopy = {
   footer: {
     tagline: "Learn • Practice • Achieve",
     rights: "All rights reserved.",
+    privacyPolicy: "Privacy Policy",
+    termsOfService: "Terms of Service",
   },
 };
 
@@ -265,6 +269,8 @@ const ar: MarketingCopy = {
   footer: {
     tagline: "تعلّم • تدرّب • حقق إنجازك",
     rights: "جميع الحقوق محفوظة.",
+    privacyPolicy: "سياسة الخصوصية",
+    termsOfService: "شروط الخدمة",
   },
 };
 

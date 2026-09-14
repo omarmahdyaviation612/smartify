@@ -7,7 +7,7 @@ const DEFAULT_LOCALE: SupportedLocale = "ar"; // Arabic-first, per product requi
 const LOCALE_COOKIE = "sf_locale";
 
 // Path suffixes (locale stripped) that don't require sign-in.
-const PUBLIC_SUFFIXES = ["/", "/pricing", "/curricula", "/for-parents"];
+const PUBLIC_SUFFIXES = ["/", "/pricing", "/curricula", "/for-parents", "/privacy", "/terms"];
 const PUBLIC_PREFIXES = ["/sign-in", "/sign-up"];
 
 function isSupportedLocale(value: string): value is SupportedLocale {

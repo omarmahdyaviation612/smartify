@@ -26,7 +26,7 @@ function request(route, cookie) {
   return { url: String(url), nextUrl: Object.assign(url, { clone: () => new URL(url) }), cookies: { get: () => cookie ? { value: cookie } : undefined } };
 }
 for (const locale of ['ar', 'en']) {
-  for (const route of ['', '/pricing', '/curricula', '/sign-in', '/sign-up']) {
+  for (const route of ['', '/pricing', '/curricula', '/sign-in', '/sign-up', '/privacy', '/terms']) {
     test(`${locale}${route}: public path does not invoke protection`, async () => {
       const result = await middleware(async () => { throw Error('unexpected auth call'); }, request(`/${locale}${route}`));
       assert.equal(result.kind, 'next');

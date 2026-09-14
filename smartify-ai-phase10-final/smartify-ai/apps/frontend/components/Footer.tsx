@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { SmartifyContainer } from "@smartify/ui";
 import type { Locale, MarketingCopy } from "@/content/marketing";
 
@@ -8,6 +9,14 @@ export function Footer({ locale, copy }: { locale: Locale; copy: MarketingCopy }
       <SmartifyContainer className="flex flex-col items-center gap-4 text-center">
         <Image src="/brand/smartify-logo.png" alt="Smartify AI" width={48} height={48} />
         <p className="text-sm tracking-wide">{copy.footer.tagline}</p>
+        <nav className="flex items-center gap-4 text-xs text-neutral-400">
+          <Link href={`/${locale}/privacy`} className="hover:text-neutral-200">
+            {copy.footer.privacyPolicy}
+          </Link>
+          <Link href={`/${locale}/terms`} className="hover:text-neutral-200">
+            {copy.footer.termsOfService}
+          </Link>
+        </nav>
         <p className="text-xs text-neutral-500">
           © {new Date().getFullYear()} Smartify AI. {copy.footer.rights}
         </p>
