@@ -241,6 +241,7 @@ model Topic {
   materials LearningMaterial[]
   lessonSessions LessonSession[]
   visualAssets   LessonVisualAsset[]
+  publishedFromDraft LessonDraft?
 
   @@index([unitId])
 }
@@ -285,6 +286,15 @@ model LessonDraft {
   createdAt              DateTime  @default(now())
   reviewedAt             DateTime?
   reviewedByUserId       String?
+
+  // Phase 6: the reliable draft <-> published-Topic linkage Part E
+  // requires — never rely on matching names. `publishedTopicId` is unique
+  // so at most one draft can ever claim to have published a given Topic,
+  // and re-publishing the same already-published draft is a safe no-op
+  // (see LessonPublishService) rather than creating a duplicate Topic.
+  publishedTopicId String?   @unique
+  publishedTopic   Topic?    @relation(fields: [publishedTopicId], references: [id])
+  publishedAt      DateTime?
 
   @@index([status])
 }
@@ -685,6 +695,7 @@ model LessonSession {
   status           String         @default("IN_PROGRESS") // "IN_PROGRESS" | "COMPLETED"
   currentStepIndex Int            @default(0)
   stepResultsJson  Json? // [{ stepId, delivered, attempts, correct, hintGiven }] — fine-grained record for THIS run
+  nonProgressTurns Int            @default(0) // Phase 9.4B spend guard — interruptions/non-answer CHECK messages, never deterministic answer attempts. See NON_PROGRESS_TURN_LIMIT.
   startedAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
   completedAt      DateTime?

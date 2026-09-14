@@ -7,6 +7,8 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "db:migrate": "pnpm --filter @smartify/database exec prisma migrate dev",
+    "db:migrate:safe": "pnpm --filter @smartify/database exec tsx prisma/migrate-safe.ts",
+    "db:backup": "pnpm --filter @smartify/database exec tsx prisma/backup-guard.ts",
     "db:deploy": "pnpm --filter @smartify/database exec prisma migrate deploy",
     "db:generate": "pnpm --filter @smartify/database exec prisma generate",
     "db:seed": "pnpm --filter @smartify/database exec prisma db seed",

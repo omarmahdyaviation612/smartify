@@ -1,4 +1,5 @@
 import { AIContextBuilderService } from "./ai-context-builder.service";
+import { strategyGuidance } from "../../interactive-lesson/teaching-strategy.util";
 
 /**
  * Locks in the copyright-safe guardrails (Phase 5 hardening): curriculum
@@ -133,6 +134,79 @@ describe("AIContextBuilderService.buildTutorSystemPrompt", () => {
         expect(prompt).toMatch(/never use latex or other math markup/i);
       }
     });
+  });
+});
+
+describe("AIContextBuilderService.buildLessonTeachingPrompt — teaching strategy (Phase 8.1)", () => {
+  // Regression: the live Phase 8 pilot showed the model kept using an
+  // apples/objects example in its actual replies even after the
+  // deterministic switch to NUMBER_LINE was persisted. Root cause: the
+  // CHECK step's own stored `objective` text hardcodes a concrete-object
+  // example, and it sits in the SAME instruction block as the (previously
+  // weak) strategy line, with no stated precedence between the two. These
+  // tests lock in the stronger NUMBER_LINE guidance and the explicit
+  // WHAT-vs-HOW override rule that resolves that conflict in the prompt
+  // text itself — what the model actually does with it is a real-call
+  // concern, verified separately (not a unit test).
+  const service = new AIContextBuilderService();
+  const baseCtx = {
+    studentFirstName: "Kenda",
+    age: 7,
+    preferredLang: "ar" as const,
+    subjectNameEn: "Mathematics",
+    lessonTitleEn: "Addition with Zero",
+    currentStep: {
+      type: "CHECK",
+      objective: 'Ask the child: "If you have 4 apples and add zero more apples, how many apples do you have? Why?"',
+      conceptKey: "additive_identity",
+      checkType: "conceptual",
+    },
+  };
+
+  it("includes the objective text verbatim (WHAT to teach is unaffected)", () => {
+    const prompt = service.buildLessonTeachingPrompt({ ...baseCtx, mode: "deliver", teachingStrategy: "NUMBER_LINE", teachingStrategyGuidance: "guidance-text" });
+    expect(prompt).toContain("4 apples and add zero more apples");
+  });
+
+  it("states the WHAT-vs-HOW hierarchy and that strategy overrides the objective's own example on conflict", () => {
+    const prompt = service.buildLessonTeachingPrompt({ ...baseCtx, mode: "deliver", teachingStrategy: "NUMBER_LINE", teachingStrategyGuidance: "guidance-text" });
+    expect(prompt).toMatch(/never dictates HOW to represent it/i);
+    expect(prompt).toMatch(/teaching strategy instruction ALWAYS wins/i);
+  });
+
+  it("omits the strategy/override block entirely when no strategy applies to this step (e.g. INTRO/REVIEW/COMPLETE)", () => {
+    const prompt = service.buildLessonTeachingPrompt({ ...baseCtx, mode: "deliver", teachingStrategy: undefined, teachingStrategyGuidance: undefined });
+    expect(prompt).not.toMatch(/STRATEGY OVERRIDE RULE/i);
+    expect(prompt).not.toMatch(/Current teaching strategy/i);
+  });
+
+  it("carries the strengthened NUMBER_LINE ban on object examples into evaluate_check mode (the mode used for wrong-answer/hint turns)", () => {
+    const numberLineGuidance = strategyGuidance("NUMBER_LINE");
+    const prompt = service.buildLessonTeachingPrompt({
+      ...baseCtx,
+      mode: "evaluate_check",
+      studentMessage: "5",
+      hintAlreadyGivenThisStep: false,
+      teachingStrategy: "NUMBER_LINE",
+      teachingStrategyGuidance: numberLineGuidance,
+    });
+    expect(prompt).toMatch(/do not use/i);
+    expect(prompt).toMatch(/apples/i);
+    expect(prompt).toMatch(/number line/i);
+    expect(prompt).toMatch(/zero (movement|steps)/i);
+    expect(prompt).toMatch(/STRATEGY OVERRIDE RULE/i);
+  });
+
+  it("still carries CONCRETE_OBJECTS guidance unchanged into the prompt", () => {
+    const concreteGuidance = strategyGuidance("CONCRETE_OBJECTS");
+    const prompt = service.buildLessonTeachingPrompt({
+      ...baseCtx,
+      mode: "deliver",
+      teachingStrategy: "CONCRETE_OBJECTS",
+      teachingStrategyGuidance: concreteGuidance,
+    });
+    expect(prompt).toContain(concreteGuidance);
+    expect(prompt).toMatch(/STRATEGY OVERRIDE RULE/i); // hierarchy line now present for every strategy, harmless for CONCRETE_OBJECTS
   });
 });
 

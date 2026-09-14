@@ -242,6 +242,65 @@ async function main() {
     },
   });
 
+  // Phase 9.4A found these two budget keys had never been created, so the
+  // USD-denominated circuit breaker in AIUsageService.assertWithinBudget
+  // was fully dormant. Phase 9.4B sets the owner-approved initial
+  // soft-launch caps — editable afterward from Admin > Platform Config >
+  // AI Spending Controls, never by editing this seed again.
+  await prisma.systemConfig.upsert({
+    where: { key: "global_daily_ai_budget_usd" },
+    update: {},
+    create: {
+      key: "global_daily_ai_budget_usd",
+      value: 5.0,
+      description: "Maximum combined AI/TTS spend allowed per day, across all students.",
+    },
+  });
+  await prisma.systemConfig.upsert({
+    where: { key: "per_user_daily_ai_budget_usd" },
+    update: {},
+    create: {
+      key: "per_user_daily_ai_budget_usd",
+      value: 0.25,
+      description: "Maximum AI/TTS spend one student may consume per day.",
+    },
+  });
+
+  // Phase 9.4B — owner-selected MVP voice (marin, on gpt-4o-mini-tts) from
+  // the Stage A bake-off. See tts-config.util.ts for the canonical
+  // DEFAULT_TTS_CONFIG/SMARTIFY_TTS_INSTRUCTIONS this mirrors; duplicated
+  // here as a literal only because normalizeTtsConfig() already falls back
+  // to those exact defaults on its own if this row is ever missing — this
+  // upsert just makes the row's presence and description visible/editable
+  // from the Admin Panel from day one, matching the AIProviderConfig seed
+  // pattern just above.
+  await prisma.systemConfig.upsert({
+    where: { key: "tts_config" },
+    update: {},
+    create: {
+      key: "tts_config",
+      value: {
+        provider: "openai",
+        model: "gpt-4o-mini-tts",
+        voice: "marin",
+        speed: 0.94,
+        instructions:
+          "Speak in warm, natural Egyptian Arabic (Masri), not Modern Standard Arabic, unless the text itself is formal. " +
+          "Personality: a kind, encouraging elementary-school teacher talking directly to a young child — human and " +
+          "conversational, never an announcer or narrator. Warm and genuinely encouraging without sounding childish, " +
+          "cartoonish, or exaggerated/theatrical. Pronounce Arabic words and numbers clearly and precisely. When " +
+          "explaining a math step or reading an equation, slow down slightly and add a short natural pause right around " +
+          "the numbers and the equals sign, as a real teacher would when making sure a child follows along. When the " +
+          "text expresses praise for a correct answer, sound genuinely pleased and warm, not over-the-top. When the text " +
+          "is calming/supportive after a mistake, sound patient and reassuring, never disappointed or flat. Avoid a " +
+          "robotic, flat, or metronomic cadence — vary pacing and warmth like a real person speaking to a child they " +
+          "care about. Do not change, add, or omit any words, numbers, or mathematical content from the given text — " +
+          "speak exactly what is written.",
+      },
+      description: "Active TTS provider/model/voice/speaking-style config — see admin-ai-config.service.ts.",
+    },
+  });
+
   // AI provider config — approximate published OpenAI pricing for a
   // small/cheap model, meant to be corrected from the Admin Panel once
   // real usage data exists. Marked isActive so the AIProviderFactory has
@@ -271,12 +330,17 @@ async function main() {
   //  - instapay: planned future provider, deliberately hidden from the
   //    admin panel's provider list until its integration requirements exist.
   //  - paymob: earlier-phase option, not the current production target.
+  //  - paypal: reserved stub (PayPalProvider throws "not implemented yet"
+  //    for every method) — see 08-phase8-decisions.md. Recognized by
+  //    PaymentProviderFactory.getProviderByKey alongside the other four,
+  //    so it needs a config row like the rest.
   // See 10-phase10-decisions.md for the full classification.
   const paymentProviders: Array<{ providerKey: string; publicConfig: Record<string, unknown> }> = [
     { providerKey: "stripe", publicConfig: { role: "development_test_only", productionApproved: false } },
     { providerKey: "fawry", publicConfig: { role: "planned_production_provider", productionApproved: false } },
     { providerKey: "instapay", publicConfig: { role: "planned_future_provider", hidden: true, productionApproved: false } },
     { providerKey: "paymob", publicConfig: { role: "not_current_target", productionApproved: false } },
+    { providerKey: "paypal", publicConfig: { role: "not_current_target", productionApproved: false } },
   ];
   for (const p of paymentProviders) {
     await prisma.paymentProviderConfig.upsert({

@@ -68,13 +68,26 @@ describe("InteractiveLessonService", () => {
           }),
           create: jest.fn().mockImplementation(async ({ data }: any) => {
             const id = `session-${++sessCounter}`;
-            const session = { id, ...data };
+            // nonProgressTurns defaults to 0 in the real schema (@default(0));
+            // this mock has no column-default machinery, so it's applied here.
+            const session = { nonProgressTurns: 0, id, ...data };
             state.sessions[`${data.studentId}:${data.topicId}`] = session;
             return session;
           }),
           update: jest.fn().mockImplementation(async ({ where: { id }, data }: any) => {
             const key = Object.keys(state.sessions).find((k) => state.sessions[k].id === id)!;
-            state.sessions[key] = { ...state.sessions[key], ...data };
+            // Resolve Prisma's `{ increment: N }` field-update shape the way
+            // real Postgres/Prisma would, so consumeNonProgressBudget's
+            // counter actually increments in this mock instead of being
+            // overwritten with the raw operator object.
+            const resolved: Record<string, unknown> = {};
+            for (const [field, value] of Object.entries(data)) {
+              resolved[field] =
+                value && typeof value === "object" && "increment" in (value as any)
+                  ? (state.sessions[key][field] ?? 0) + (value as any).increment
+                  : value;
+            }
+            state.sessions[key] = { ...state.sessions[key], ...resolved };
             return state.sessions[key];
           }),
         },
@@ -284,15 +297,18 @@ describe("InteractiveLessonService", () => {
     expect(advanced.currentStepIndex).toBe(3);
   });
 
-  it("H: no infinite retry — after one hint, a second incorrect answer is force-resolved rather than looping", async () => {
+  it("H: no infinite retry — on a conceptual check, a third incorrect answer (after the Phase 8 strategy switch) is force-resolved rather than looping forever", async () => {
     const h = makeHarness({
       generateImpl: async () => ({ content: JSON.stringify({ intent: "answer", isCorrect: false, say: "still not right" }), inputTokens: 5, outputTokens: 5, model: "gpt-4o-mini" }),
     });
     await h.service.advance("user-1", "topic-1");
     await h.service.advance("user-1", "topic-1");
-    await h.service.advance("user-1", "topic-1"); // s3 CHECK
+    await h.service.advance("user-1", "topic-1"); // s3 CHECK (conceptual)
     await h.service.respond("user-1", "topic-1", "wrong 1"); // hint given, stays
-    await h.service.respond("user-1", "topic-1", "wrong 2"); // model still says incorrect — must force-resolve
+    await h.service.respond("user-1", "topic-1", "wrong 2"); // Phase 8: strategy switches instead of force-resolving — one genuine extra attempt
+    const stillPending = await h.service.advance("user-1", "topic-1");
+    expect(stillPending.currentStepIndex).toBe(2); // still on s3 — the switch is not a resolution
+    await h.service.respond("user-1", "topic-1", "wrong 3"); // model still says incorrect, already switched once — must force-resolve now
     const advanced = await h.service.advance("user-1", "topic-1");
     expect(advanced.currentStepIndex).toBe(3); // moved on despite never answering correctly
   });
@@ -448,6 +464,106 @@ describe("InteractiveLessonService", () => {
     await expect(h.service.respond("user-1", "topic-1", "   ")).rejects.toThrow(BadRequestException);
   });
 
+  it("rejects an oversized respond() message BEFORE any provider call (Phase 9.4A/9.4B — parity with TutorService's 4000-char cap)", async () => {
+    const h = makeHarness();
+    await h.service.advance("user-1", "topic-1");
+    h.generateSpy.mockClear();
+    const oversized = "a".repeat(4001);
+    await expect(h.service.respond("user-1", "topic-1", oversized)).rejects.toThrow(BadRequestException);
+    expect(h.generateSpy).not.toHaveBeenCalled();
+  });
+
+  it("accepts a message at exactly the 4000-character limit", async () => {
+    const h = makeHarness();
+    await h.service.advance("user-1", "topic-1");
+    const atLimit = "a".repeat(4000);
+    await expect(h.service.respond("user-1", "topic-1", atLimit)).resolves.toBeDefined();
+  });
+
+  describe("non-progress AI-spend guard (Phase 9.4B — closes the Phase 9.4A unbounded-respond() finding)", () => {
+    it("blocks further AI calls once the non-progress-turn limit is reached on a non-CHECK step, without ever calling the provider again", async () => {
+      const h = makeHarness();
+      await h.service.advance("user-1", "topic-1"); // s1 (INTRO) delivered — current step is non-CHECK
+      h.generateSpy.mockClear();
+
+      for (let i = 0; i < 20; i++) {
+        await h.service.respond("user-1", "topic-1", `interruption question #${i}`);
+      }
+      expect(h.generateSpy).toHaveBeenCalledTimes(20);
+
+      const blocked = await h.service.respond("user-1", "topic-1", "one more question");
+      expect(h.generateSpy).toHaveBeenCalledTimes(20); // no new call
+      // user-1's profile is Arabic (preferredLang: "ar") — the fixed
+      // limit message is locale-aware, never AI-generated.
+      expect(blocked.content).toMatch(/أسئلة/);
+    });
+
+    it("does not grow the counter past the limit once blocked (stays capped, not unbounded)", async () => {
+      const h = makeHarness();
+      await h.service.advance("user-1", "topic-1");
+      for (let i = 0; i < 22; i++) {
+        await h.service.respond("user-1", "topic-1", `question #${i}`);
+      }
+      const session = h.getSession("user-1", "topic-1");
+      expect(session.nonProgressTurns).toBe(20);
+    });
+
+    it("never counts a genuine deterministic CHECK answer attempt against the non-progress budget", async () => {
+      // Mirrors the "deterministic answer validation" harness below: s5's
+      // delivery is mocked to return a real captured `expression`, so "6"/"7"
+      // responses are validated deterministically (never reaching the
+      // AI-classification branch this guard applies to). s3 (conceptual, no
+      // expression) resolves via one genuine AI-classification call, which
+      // DOES count — establishing a non-zero `before` on purpose, to prove
+      // the deterministic calls after it add nothing further.
+      const h = makeHarness({
+        generateImpl: async (args: any) => {
+          const isCheckDelivery = args.messages?.[0]?.content === 'Teach the "CHECK" step now.';
+          if (isCheckDelivery && args.systemPrompt.includes("check application")) {
+            return { content: JSON.stringify({ say: "4 + 3 = ?", expression: { op: "add", operands: [4, 3] } }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" };
+          }
+          if (isCheckDelivery) {
+            return { content: JSON.stringify({ say: "what does + mean?", expression: null }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" };
+          }
+          if (args.responseFormat === "json_object") {
+            return { content: JSON.stringify({ intent: "answer", isCorrect: true, say: "good" }), inputTokens: 5, outputTokens: 5, model: "gpt-4o-mini" };
+          }
+          return { content: "ok, moving on", inputTokens: 5, outputTokens: 5, model: "gpt-4o-mini" };
+        },
+      });
+      await h.service.advance("user-1", "topic-1"); // s1
+      await h.service.advance("user-1", "topic-1"); // s2
+      await h.service.advance("user-1", "topic-1"); // s3 CHECK delivered (no expression)
+      await h.service.respond("user-1", "topic-1", "anything"); // resolves s3 via AI-classification fallback — counts
+      await h.service.advance("user-1", "topic-1"); // s4 EXAMPLE
+      await h.service.advance("user-1", "topic-1"); // s5 CHECK delivered (expression: 4+3) — deterministic-eligible
+      const before = h.getSession("user-1", "topic-1").nonProgressTurns;
+      expect(before).toBe(1); // exactly the one AI-classification resolution of s3, nothing from delivery turns
+      await h.service.respond("user-1", "topic-1", "6"); // wrong, deterministic path
+      await h.service.respond("user-1", "topic-1", "7"); // correct, deterministic path
+      const after = h.getSession("user-1", "topic-1").nonProgressTurns;
+      expect(after).toBe(before); // deterministic answer attempts never consume this budget
+    });
+
+    it("also blocks the AI-classification fallback path on a CHECK step (e.g. repeated non-answer chatter), before any provider call", async () => {
+      const h = makeHarness({
+        generateImpl: async () => ({ content: JSON.stringify({ intent: "question", isCorrect: null, say: "Still just a question." }), inputTokens: 5, outputTokens: 5, model: "gpt-4o-mini" }),
+      });
+      await h.service.advance("user-1", "topic-1"); // s1
+      await h.service.advance("user-1", "topic-1"); // s2
+      await h.service.advance("user-1", "topic-1"); // s3 (conceptual CHECK — AI-classification path)
+      h.generateSpy.mockClear();
+
+      for (let i = 0; i < 20; i++) {
+        await h.service.respond("user-1", "topic-1", `not really an answer #${i}`);
+      }
+      expect(h.generateSpy).toHaveBeenCalledTimes(20);
+
+      await h.service.respond("user-1", "topic-1", "still not an answer");
+      expect(h.generateSpy).toHaveBeenCalledTimes(20); // blocked before the call
+    });
+  });
+
   it("logs lesson turns with feature 'lesson_chat' and creditsUsed 0 (entitlement already reserved once at session start)", async () => {
     const h = makeHarness();
     await h.service.advance("user-1", "topic-1");
@@ -476,6 +592,134 @@ describe("InteractiveLessonService", () => {
     it("throws NotFoundException for an unknown asset id, rather than serving nothing silently", async () => {
       const h = makeHarness();
       await expect(h.service.getVisualAsset("does-not-exist")).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe("teaching strategy (Phase 8 V1)", () => {
+    // s3 (checkType: "conceptual") is the pilot's switch point. Responses
+    // are keyed to the exact call sequence the test below drives.
+    function strategyGenerateImpl() {
+      let call = 0;
+      return async (args: any) => {
+        call++;
+        if (call <= 2) return { content: "teaching content", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }; // s1, s2 deliver
+        if (call === 3) return { content: JSON.stringify({ say: "How many apples do you have?", expression: null }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }; // s3 deliver (conceptual, no expression)
+        if (call === 4) return { content: JSON.stringify({ intent: "answer", isCorrect: false, say: "Not quite, try again." }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }; // attempt 1: wrong
+        if (call === 5) return { content: JSON.stringify({ intent: "answer", isCorrect: false, say: "Still not it — let's try differently." }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }; // attempt 2: wrong -> should switch
+        return { content: JSON.stringify({ intent: "answer", isCorrect: true, say: "That's it!" }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }; // attempt 3: correct
+      };
+    }
+
+    async function driveToSecondWrongAttempt(h: ReturnType<typeof makeHarness>) {
+      await h.service.advance("user-1", "topic-1"); // deliver s1
+      await h.service.advance("user-1", "topic-1"); // deliver s2
+      await h.service.advance("user-1", "topic-1"); // deliver s3 (CHECK conceptual)
+      await h.service.respond("user-1", "topic-1", "5"); // attempt 1: wrong
+      return h.service.respond("user-1", "topic-1", "5"); // attempt 2: wrong -> switch
+    }
+
+    it("defaults to CONCRETE_OBJECTS with no prior state", async () => {
+      const h = makeHarness({ generateImpl: strategyGenerateImpl() });
+      await h.service.advance("user-1", "topic-1"); // s1
+      const result = await h.service.advance("user-1", "topic-1"); // deliver s2 (EXPLAIN)
+      const session = h.getSession("user-1", "topic-1");
+      const s2 = session.stepResultsJson.find((r: any) => r.stepId === "s2");
+      expect(s2.strategy).toBe("CONCRETE_OBJECTS");
+      expect(result).toBeDefined();
+    });
+
+    it("does not switch after the first meaningful wrong attempt", async () => {
+      const h = makeHarness({ generateImpl: strategyGenerateImpl() });
+      await h.service.advance("user-1", "topic-1");
+      await h.service.advance("user-1", "topic-1");
+      await h.service.advance("user-1", "topic-1");
+      await h.service.respond("user-1", "topic-1", "5");
+      const session = h.getSession("user-1", "topic-1");
+      const s3 = session.stepResultsJson.find((r: any) => r.stepId === "s3");
+      expect(s3.strategy).toBe("CONCRETE_OBJECTS");
+      expect(s3.strategyHistory ?? []).toHaveLength(0);
+      expect(s3.correct).toBe(false);
+    });
+
+    it("switches to NUMBER_LINE on the second meaningful wrong attempt, recording the reason", async () => {
+      const h = makeHarness({ generateImpl: strategyGenerateImpl() });
+      await driveToSecondWrongAttempt(h);
+      const session = h.getSession("user-1", "topic-1");
+      const s3 = session.stepResultsJson.find((r: any) => r.stepId === "s3");
+      expect(s3.strategy).toBe("NUMBER_LINE");
+      expect(s3.strategyHistory).toHaveLength(1);
+      expect(s3.strategyHistory[0]).toMatchObject({ strategy: "NUMBER_LINE", atStepId: "s3" });
+      expect(s3.strategyHistory[0].reason).toMatch(/2.*meaningful/);
+      // The switch itself is the second chance — not yet force-resolved.
+      expect(s3.correct).toBe(false);
+    });
+
+    it("preserves strategy history across a resumed session (fresh getState call)", async () => {
+      const h = makeHarness({ generateImpl: strategyGenerateImpl() });
+      await driveToSecondWrongAttempt(h);
+      const state = await h.service.getState("user-1", "topic-1") as any;
+      const s3 = state.stepResults.find((r: any) => r.stepId === "s3");
+      expect(s3.strategy).toBe("NUMBER_LINE");
+      expect(s3.strategyHistory).toHaveLength(1);
+      expect(state.currentStepIndex).toBe(2); // still on s3, not advanced past the check
+    });
+
+    it("changes the prompt's strategy guidance after a switch", async () => {
+      const h = makeHarness({ generateImpl: strategyGenerateImpl() });
+      await driveToSecondWrongAttempt(h); // 5 calls: s1, s2, s3-deliver, attempt1, attempt2(switch)
+      const beforeSwitchPrompt = h.generateSpy.mock.calls[3][0].systemPrompt as string; // attempt 1 call
+      await h.service.respond("user-1", "topic-1", "4"); // attempt 3, post-switch — 6th call
+      const afterSwitchPrompt = h.generateSpy.mock.calls[5][0].systemPrompt as string;
+      expect(beforeSwitchPrompt).toContain("CONCRETE_OBJECTS");
+      expect(afterSwitchPrompt).toContain("NUMBER_LINE");
+      expect(afterSwitchPrompt).toMatch(/number line/i);
+      expect(afterSwitchPrompt).not.toBe(beforeSwitchPrompt);
+    });
+
+    it("accepts a correct answer after the switch, without a duplicate LessonSession", async () => {
+      const h = makeHarness({ generateImpl: strategyGenerateImpl() });
+      await driveToSecondWrongAttempt(h);
+      const sessionCountBefore = Object.keys(h.state.sessions).length;
+      const result = await h.service.respond("user-1", "topic-1", "4"); // attempt 3: correct
+      const session = h.getSession("user-1", "topic-1");
+      const s3 = session.stepResultsJson.find((r: any) => r.stepId === "s3");
+      expect(s3.correct).toBe(true);
+      expect(Object.keys(h.state.sessions).length).toBe(sessionCountBefore); // no duplicate session
+      expect(result.content).toBe("That's it!");
+    });
+
+    it("never switches strategy on the deterministic applied check (s5) — only conceptual checks are eligible", async () => {
+      let call = 0;
+      const impl = async () => {
+        call++;
+        if (call <= 3) return { content: "teaching content", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }; // s1, s2, and s3 delivered as plain content
+        if (call === 4) return { content: JSON.stringify({ intent: "answer", isCorrect: true, say: "Good!" }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }; // s3 answered correctly first try — no switch
+        return { content: JSON.stringify({ say: "What is 5 plus 0?", expression: { op: "add", operands: [5, 0] } }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }; // s5 deliver
+      };
+      const h = makeHarness({ generateImpl: impl });
+      await h.service.advance("user-1", "topic-1"); // s1
+      await h.service.advance("user-1", "topic-1"); // s2
+      await h.service.advance("user-1", "topic-1"); // s3 deliver
+      await h.service.respond("user-1", "topic-1", "4"); // s3 correct — no switch
+      await h.service.advance("user-1", "topic-1"); // move to s4
+      await h.service.advance("user-1", "topic-1"); // deliver s5 (deterministic, expression captured)
+      await h.service.respond("user-1", "topic-1", "6"); // wrong — deterministic rejects regardless of strategy
+      const wrongSession = h.getSession("user-1", "topic-1");
+      const s5AfterWrong = wrongSession.stepResultsJson.find((r: any) => r.stepId === "s5");
+      expect(s5AfterWrong.correct).toBe(false); // deterministic validator, not AI, decided this
+      expect(s5AfterWrong.strategyHistory ?? []).toHaveLength(0); // never eligible for switching
+
+      await h.service.respond("user-1", "topic-1", "5"); // correct
+      const finalSession = h.getSession("user-1", "topic-1");
+      const s5Final = finalSession.stepResultsJson.find((r: any) => r.stepId === "s5");
+      expect(s5Final.correct).toBe(true);
+      expect(finalSession.stepResultsJson.find((r: any) => r.stepId === "s3").strategyHistory ?? []).toHaveLength(0);
+    });
+
+    it("strategy selection itself causes no additional AI call: exactly one generate() call per attempt, none extra for the switch", async () => {
+      const h = makeHarness({ generateImpl: strategyGenerateImpl() });
+      await driveToSecondWrongAttempt(h); // 5 calls: s1, s2, s3-deliver, attempt1, attempt2(switch)
+      expect(h.generateSpy).toHaveBeenCalledTimes(5);
     });
   });
 });

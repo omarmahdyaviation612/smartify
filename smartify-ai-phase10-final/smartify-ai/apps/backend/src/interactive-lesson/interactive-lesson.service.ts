@@ -7,8 +7,35 @@ import { TutorQuestionPacksService } from "../tutor-question-packs/tutor-questio
 import { TutorService } from "../tutor/tutor.service";
 import { describeExpectedAnswer, describeOperands, tryDeterministicValidate } from "./answer-validators/deterministic-validator";
 import type { CheckExpression, StepResult, TeachingStep } from "./interactive-lesson.types";
+import { decideStrategySwitch, getCurrentStrategy, strategyGuidance } from "./teaching-strategy.util";
 
 const MAX_HINTS_BEFORE_FORCED_RESOLUTION = 1;
+
+// Consistent with TutorService.sendMessage's MAX_MESSAGE_CHARS — checked
+// BEFORE any daily-limit/non-progress-budget consumption or provider call,
+// same "reject an oversized prompt cheaply" placement (Phase 9.4A finding).
+const MAX_MESSAGE_CHARS = 4000;
+
+/**
+ * Phase 9.4A found that respond() had no cap at all on repeated
+ * non-progressing AI turns: every interruption on a non-CHECK step, and
+ * every CHECK-step message that isn't a clean deterministic answer (i.e.
+ * falls to AI classification), triggers a real billable call with no
+ * server-side limit beyond the global IP throttle and the (now-configured)
+ * USD budget. This is a coarse, session-scoped defense-in-depth cap on
+ * exactly those two call shapes — genuine deterministic answer attempts
+ * (tryDeterministicValidate) are never counted, so normal CHECK retries
+ * and Teaching Strategy switching are completely unaffected.
+ *
+ * 20 was chosen to be generous enough that no realistic student's genuine
+ * curiosity across one full lesson would ever hit it (a handful of
+ * clarifying questions is normal; twenty is not), while bounding the
+ * previously-unbounded spend vector to a small, fixed worst case per
+ * session (~20 calls, a few cents at measured per-call rates) — a rate
+ * SHAPE control, not the primary financial backstop, which remains the
+ * global/per-user USD budget in AIUsageService.
+ */
+const NON_PROGRESS_TURN_LIMIT = 20;
 
 @Injectable()
 export class InteractiveLessonService {
@@ -249,6 +276,12 @@ export class InteractiveLessonService {
 
   private async deliverStep(profile: { id: string }, topic: any, session: any, steps: TeachingStep[], step: TeachingStep, stepResults: StepResult[]) {
     const isCheckStep = step.type === "CHECK";
+    // Phase 8 V1: the teaching representation (objects/number-line/etc.)
+    // applies to the actual teaching content — EXPLAIN/EXAMPLE/CHECK —
+    // not to framing steps (INTRO/REVIEW/COMPLETE), and only ever chosen
+    // by deterministic code (teaching-strategy.util.ts), never the model.
+    const appliesStrategy = step.type === "EXPLAIN" || step.type === "EXAMPLE" || step.type === "CHECK";
+    const currentStrategy = appliesStrategy ? getCurrentStrategy(stepResults) : undefined;
     const ctx: LessonTeachingContext = {
       studentFirstName: (profile as any).fullName?.split(" ")[0] ?? "there",
       age: (profile as any).age ?? 7,
@@ -257,6 +290,8 @@ export class InteractiveLessonService {
       lessonTitleEn: topic.nameEn,
       currentStep: { type: step.type, objective: step.objective, conceptKey: step.conceptKey, checkType: step.checkType },
       mode: "deliver",
+      teachingStrategy: currentStrategy,
+      teachingStrategyGuidance: currentStrategy ? strategyGuidance(currentStrategy) : undefined,
     };
     const systemPrompt = this.contextBuilder.buildLessonTeachingPrompt(ctx);
     const raw = await this.runLessonAI({
@@ -272,7 +307,15 @@ export class InteractiveLessonService {
 
     const { say: content, expression } = isCheckStep ? this.parseDeliverCheckJson(raw) : { say: raw, expression: undefined as CheckExpression | undefined };
 
-    const updatedResults = this.upsertStepResult(stepResults, { stepId: step.id, delivered: true, attempts: 0, correct: step.type === "CHECK" ? false : null, hintGiven: false, expression });
+    const updatedResults = this.upsertStepResult(stepResults, {
+      stepId: step.id,
+      delivered: true,
+      attempts: 0,
+      correct: step.type === "CHECK" ? false : null,
+      hintGiven: false,
+      expression,
+      strategy: currentStrategy,
+    });
     await this.prisma.client.lessonSession.update({ where: { id: session.id }, data: { stepResultsJson: updatedResults as any } });
 
     if (step.type === "COMPLETE") {
@@ -413,7 +456,11 @@ export class InteractiveLessonService {
    * changes currentStepIndex; only advance() does that.
    */
   async respond(userId: string, topicId: string, message: string) {
-    if (!message?.trim()) throw new BadRequestException("A message is required.");
+    const trimmed = message?.trim();
+    if (!trimmed) throw new BadRequestException("A message is required.");
+    if (trimmed.length > MAX_MESSAGE_CHARS) {
+      throw new BadRequestException(`Message is too long (max ${MAX_MESSAGE_CHARS} characters).`);
+    }
     const profile = await this.getProfileOrThrow(userId);
     const topic = await this.getTopicOrThrow(topicId);
     const steps = this.getSteps(topic);
@@ -426,11 +473,39 @@ export class InteractiveLessonService {
     if (!currentStep) throw new NotFoundException("Lesson step not found.");
 
     if (currentStep.type !== "CHECK") {
-      const content = await this.runInterruption(profile, topic, session, currentStep, message.trim());
+      if (!(await this.consumeNonProgressBudget(session))) {
+        return this.toPublicState(session, steps, this.nonProgressLimitMessage(profile), false, stepResults);
+      }
+      const content = await this.runInterruption(profile, topic, session, currentStep, trimmed);
       return this.toPublicState(session, steps, content, false, stepResults);
     }
 
-    return this.evaluateCheck(profile, topic, session, steps, currentStep, stepResults, message.trim());
+    return this.evaluateCheck(profile, topic, session, steps, currentStep, stepResults, trimmed);
+  }
+
+  /**
+   * Session-scoped, server-authoritative non-progress-turn budget — see
+   * NON_PROGRESS_TURN_LIMIT above. Reads then increments (not a single
+   * atomic statement like reserveDailySlot): this guards call SHAPE across
+   * one student's own sequential lesson session, not concurrent access to
+   * a shared, money-equivalent resource, so the stricter atomic pattern
+   * used for the daily quota isn't needed here — a narrow race would at
+   * worst allow one or two extra calls before saturating, never an
+   * unbounded amount.
+   */
+  private async consumeNonProgressBudget(session: { id: string; nonProgressTurns: number }): Promise<boolean> {
+    if (session.nonProgressTurns >= NON_PROGRESS_TURN_LIMIT) return false;
+    await this.prisma.client.lessonSession.update({
+      where: { id: session.id },
+      data: { nonProgressTurns: { increment: 1 } },
+    });
+    return true;
+  }
+
+  private nonProgressLimitMessage(profile: { preferredLang?: string }): string {
+    return profile.preferredLang === "ar"
+      ? "سألت أسئلة كتير في الدرس ده — خلّينا نكمل خطوات الدرس دلوقتي، وتقدر تسأل المزيد في الدرس الجاي."
+      : "You've asked quite a few questions in this lesson — let's continue with the lesson steps for now. You can ask more next time.";
   }
 
   private async runInterruption(profile: { id: string }, topic: any, session: any, step: TeachingStep, message: string) {
@@ -467,6 +542,11 @@ export class InteractiveLessonService {
     const prior = stepResults.find((r) => r.stepId === step.id);
     const hintAlreadyGiven = prior?.hintGiven ?? false;
     const expression = prior?.expression;
+    // Phase 8 V1: strategy switching only ever applies to conceptual
+    // (non-deterministic) checks — deterministic arithmetic checks below
+    // are explicitly unaffected, per "deterministic validation remains
+    // authoritative" and stay on whatever strategy is already current.
+    const currentStrategy = getCurrentStrategy(stepResults);
 
     // Deterministic-first: when this check's question was captured as a
     // gradable expression at delivery time AND the student's reply parses
@@ -488,9 +568,28 @@ export class InteractiveLessonService {
         deterministic.correct,
         expression,
       );
-      const updatedResults = this.upsertStepResult(stepResults, { stepId: step.id, delivered: true, attempts, correct, hintGiven, expression });
+      const updatedResults = this.upsertStepResult(stepResults, {
+        stepId: step.id,
+        delivered: true,
+        attempts,
+        correct,
+        hintGiven,
+        expression,
+        strategy: currentStrategy,
+        strategyHistory: prior?.strategyHistory,
+      });
       await this.prisma.client.lessonSession.update({ where: { id: session.id }, data: { stepResultsJson: updatedResults as any } });
       return this.toPublicState(session, steps, say, false, updatedResults);
+    }
+
+    // Reaches here only when the message did NOT parse as a clean
+    // deterministic answer — a genuine ambiguous/conceptual answer, a real
+    // clarifying question, or repeated non-progress chatter. All three are
+    // indistinguishable before the model classifies them, so the same
+    // session-scoped budget applies here too (never to the deterministic
+    // branch above, which is exempt — normal CHECK retries are unaffected).
+    if (!(await this.consumeNonProgressBudget(session))) {
+      return this.toPublicState(session, steps, this.nonProgressLimitMessage(profile as any), false, stepResults);
     }
 
     const ctx: LessonTeachingContext = {
@@ -503,6 +602,8 @@ export class InteractiveLessonService {
       mode: "evaluate_check",
       hintAlreadyGivenThisStep: hintAlreadyGiven,
       studentMessage: message,
+      teachingStrategy: currentStrategy,
+      teachingStrategyGuidance: strategyGuidance(currentStrategy),
     };
     const systemPrompt = this.contextBuilder.buildLessonTeachingPrompt(ctx);
     const raw = await this.runLessonAI({
@@ -532,8 +633,40 @@ export class InteractiveLessonService {
       parsed = { intent: "question", isCorrect: null, say: raw };
     }
 
-    const { attempts, correct, hintGiven } = this.resolveCheckOutcome(prior, parsed.intent === "answer", parsed.isCorrect === true, hintAlreadyGiven);
-    const updatedResults = this.upsertStepResult(stepResults, { stepId: step.id, delivered: true, attempts, correct, hintGiven, expression });
+    const isAnswerAttempt = parsed.intent === "answer";
+    const isCorrectNow = parsed.isCorrect === true;
+
+    // Phase 8 V1: only a conceptual CHECK's genuinely-wrong answer attempts
+    // can trigger a strategy switch — never a question, never a correct
+    // answer, never a deterministic (arithmetic) check.
+    const switchDecision =
+      step.checkType === "conceptual" && isAnswerAttempt && !isCorrectNow
+        ? decideStrategySwitch({
+            stepId: step.id,
+            attemptsSoFar: (prior?.attempts ?? 0) + 1,
+            isMeaningfulWrongAttempt: true,
+            currentStrategy,
+            alreadySwitchedAtThisStep: (prior?.strategyHistory?.length ?? 0) > 0,
+          })
+        : null;
+
+    // A switch replaces the normal "give up after one hint" resolution
+    // with one more genuine attempt under the new strategy — switching IS
+    // the second chance here, so this attempt must not be force-resolved.
+    const { attempts, correct, hintGiven } = switchDecision
+      ? { attempts: (prior?.attempts ?? 0) + 1, correct: false, hintGiven: true }
+      : this.resolveCheckOutcome(prior, isAnswerAttempt, isCorrectNow, hintAlreadyGiven);
+
+    const updatedResults = this.upsertStepResult(stepResults, {
+      stepId: step.id,
+      delivered: true,
+      attempts,
+      correct,
+      hintGiven,
+      expression,
+      strategy: switchDecision?.strategy ?? prior?.strategy ?? currentStrategy,
+      strategyHistory: switchDecision ? [...(prior?.strategyHistory ?? []), switchDecision.record] : prior?.strategyHistory,
+    });
     await this.prisma.client.lessonSession.update({ where: { id: session.id }, data: { stepResultsJson: updatedResults as any } });
 
     return this.toPublicState(session, steps, parsed.say, false, updatedResults);

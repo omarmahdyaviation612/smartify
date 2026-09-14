@@ -13,7 +13,12 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 
-const EG_NATIONAL_CURRICULUM_ID = "cmtejriog000zltyslb13t2yl";
+// NOTE (2026-09-13, post-incident reconstruction): this ID was regenerated
+// by re-running prisma/seed.ts after the 2026-09-12 database reset (see
+// docs/incident-2026-09-12-database-reset.md) — cuids are generated at
+// insert time, not fixed, so the old hardcoded value here no longer refers
+// to any existing row. No curriculum/unit/lesson content below changed.
+const EG_NATIONAL_CURRICULUM_ID = "cmtyw8hn1000zuk62jeoyx33g";
 
 async function main() {
   const existingGrade = await prisma.grade.findFirst({ where: { curriculumId: EG_NATIONAL_CURRICULUM_ID, nameEn: "Grade 1" } });

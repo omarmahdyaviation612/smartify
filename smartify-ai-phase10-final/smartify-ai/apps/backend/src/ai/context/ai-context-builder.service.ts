@@ -59,6 +59,14 @@ export interface LessonTeachingContext {
    * actually used and may hallucinate different ones when hinting.
    */
   questionNumbersText?: string;
+  /**
+   * Phase 8 V1: which teaching representation to use for this turn
+   * (objects/number-line/symbolic). Chosen entirely by deterministic code
+   * (teaching-strategy.util.ts), never by the model — this only tells the
+   * model HOW to explain, never whether an answer is correct.
+   */
+  teachingStrategy?: string;
+  teachingStrategyGuidance?: string;
 }
 
 @Injectable()
@@ -193,6 +201,9 @@ export class AIContextBuilderService {
       `- Step type: ${ctx.currentStep.type}`,
       `- What this step must accomplish: ${ctx.currentStep.objective}`,
       ctx.currentStep.conceptKey ? `- Concept: ${ctx.currentStep.conceptKey}` : "",
+      ctx.teachingStrategy
+        ? `- Current teaching strategy: ${ctx.teachingStrategy}\n- Strategy instruction: ${ctx.teachingStrategyGuidance ?? ""}\n- STRATEGY OVERRIDE RULE: "What this step must accomplish" above defines WHAT concept/question to teach — it never dictates HOW to represent it. The strategy instruction above defines HOW. If the objective's own wording or example (e.g. a specific countable-object scenario) conflicts with the current teaching strategy, the teaching strategy instruction ALWAYS wins: keep the same underlying question/numbers, but restate them using the required representation instead of the objective's literal example.`
+        : "",
     ].filter(Boolean);
 
     if (ctx.mode === "deliver") {

@@ -16,10 +16,6 @@ const VALID_STEPS_JSON = JSON.stringify({
 });
 
 const INPUT: LessonGenerationInput = {
-  curriculumNameEn: "Egyptian National Curriculum (Arabic, Pilot)",
-  gradeNameEn: "Grade 1",
-  subjectNameEn: "Mathematics",
-  unitNameEn: "Addition",
   topicNameEn: "Addition with Zero",
   topicNameAr: "الجمع مع العدد صفر",
   learningObjectives: ["State and apply the rule that adding zero to a number does not change its value."],
@@ -28,13 +24,26 @@ const INPUT: LessonGenerationInput = {
   targetUnitId: "unit-1",
 };
 
-function makeHarness(opts: { generateImpl?: (args: any) => any; assertWithinBudget?: jest.Mock } = {}) {
+const DB_UNIT = {
+  id: "unit-1",
+  nameEn: "Addition",
+  subject: {
+    nameEn: "Mathematics",
+    grade: {
+      nameEn: "Grade 1",
+      curriculum: { nameEn: "Egyptian National Curriculum (Arabic, Pilot)" },
+    },
+  },
+};
+
+function makeHarness(opts: { generateImpl?: (args: any) => any; assertWithinBudget?: jest.Mock; unit?: any } = {}) {
   const createdDrafts: any[] = [];
   const usageRows: any[] = [];
   let draftCounter = 0;
 
   const prisma = {
     client: {
+      unit: { findUnique: jest.fn().mockResolvedValue("unit" in opts ? opts.unit : DB_UNIT) },
       lessonDraft: {
         create: jest.fn().mockImplementation(async ({ data }: any) => {
           const draft = { id: `draft-${++draftCounter}`, ...data };
@@ -63,6 +72,55 @@ function makeHarness(opts: { generateImpl?: (args: any) => any; assertWithinBudg
   return { service, prisma, createdDrafts, usageRows, generateSpy, providerFactory, usageService };
 }
 
+describe("LessonDraftGeneratorService.resolveUnitContext (Phase 6, Part A)", () => {
+  it("derives curriculum/grade/subject/unit names live from the Unit -> Subject -> Grade -> Curriculum DB relations, not from hand-typed input", async () => {
+    const h = makeHarness();
+    const context = await h.service.resolveUnitContext("unit-1");
+    expect(context).toEqual({
+      unitId: "unit-1",
+      curriculumNameEn: "Egyptian National Curriculum (Arabic, Pilot)",
+      gradeNameEn: "Grade 1",
+      subjectNameEn: "Mathematics",
+      unitNameEn: "Addition",
+    });
+    expect(h.prisma.client.unit.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "unit-1" } }),
+    );
+  });
+
+  it("confirms the resolved context belongs to the correct hierarchy (grade under the right curriculum, subject under the right grade)", async () => {
+    const otherUnit = {
+      id: "unit-2",
+      nameEn: "Subtraction",
+      subject: { nameEn: "Mathematics", grade: { nameEn: "Grade 1", curriculum: { nameEn: "Egyptian National Curriculum (Arabic, Pilot)" } } },
+    };
+    const h = makeHarness({ unit: otherUnit });
+    const context = await h.service.resolveUnitContext("unit-2");
+    // The resolved names are exactly the ones nested under THIS unit's own
+    // subject/grade/curriculum chain — never a mismatched/stale value.
+    expect(context.unitNameEn).toBe("Subtraction");
+    expect(context.subjectNameEn).toBe("Mathematics");
+    expect(context.gradeNameEn).toBe("Grade 1");
+    expect(context.curriculumNameEn).toBe("Egyptian National Curriculum (Arabic, Pilot)");
+  });
+
+  it("throws NotFoundException for an unknown targetUnitId, without calling the AI provider", async () => {
+    const h = makeHarness({ unit: null });
+    await expect(h.service.generateDraft(INPUT, "user-1")).rejects.toThrow(/Unit .* not found/);
+    expect(h.generateSpy).not.toHaveBeenCalled();
+  });
+
+  it("embeds the DB-resolved context (not hand-typed strings) into the generation prompt", async () => {
+    const h = makeHarness();
+    await h.service.generateDraft(INPUT, "user-1");
+    const promptSent = h.generateSpy.mock.calls[0][0].systemPrompt as string;
+    expect(promptSent).toContain("Egyptian National Curriculum (Arabic, Pilot)");
+    expect(promptSent).toContain("Grade 1");
+    expect(promptSent).toContain("Mathematics");
+    expect(promptSent).toContain("Unit: Addition");
+  });
+});
+
 describe("LessonDraftGeneratorService", () => {
   it("persists a valid generated draft with status pending_review", async () => {
     const h = makeHarness();
@@ -87,6 +145,14 @@ describe("LessonDraftGeneratorService", () => {
     const h = makeHarness({ assertWithinBudget: jest.fn().mockRejectedValue(new Error("budget exceeded")) });
     await expect(h.service.generateDraft(INPUT, "user-1")).rejects.toThrow("budget exceeded");
     expect(h.generateSpy).not.toHaveBeenCalled();
+  });
+
+  it("Phase 10B: persists objectives in the bilingual shape with objectiveAr always null — the AI never supplies a reviewed Arabic translation", async () => {
+    const h = makeHarness();
+    const { draft } = await h.service.generateDraft(INPUT, "user-1");
+    expect(draft.learningObjectivesJson).toEqual([
+      { objectiveEn: "State and apply the rule that adding zero to a number does not change its value.", objectiveAr: null },
+    ]);
   });
 
   it("logs a lesson_draft_generation usage row with creditsUsed 0 and studentId/subjectId null (not a student action)", async () => {

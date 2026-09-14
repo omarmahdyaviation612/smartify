@@ -41,14 +41,20 @@ export class CurriculaService {
    * hand-written example — so it can't drift from what actually exists.
    */
   async getStructureSample(curriculumCode: string) {
-    const curriculum = await this.prisma.client.curriculum.findUnique({
-      where: { code: curriculumCode },
+    // Same visibility rule as getPublicCatalog above: an inactive
+    // curriculum/grade/subject must never be reachable here either, even
+    // though this endpoint queries by curriculum CODE rather than going
+    // through the catalog list first.
+    const curriculum = await this.prisma.client.curriculum.findFirst({
+      where: { code: curriculumCode, isActive: true },
       include: {
         grades: {
+          where: { isActive: true },
           take: 1,
           orderBy: { level: "asc" },
           include: {
             subjects: {
+              where: { isActive: true },
               take: 1,
               include: {
                 units: {

@@ -1,10 +1,11 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AIProviderFactory } from "../../ai/ai-provider.factory";
 import { AIContextBuilderService } from "../../ai/context/ai-context-builder.service";
 import { AIUsageService } from "../../ai/usage/ai-usage.service";
 import { validateLessonDraft } from "./lesson-draft-validator";
-import type { LessonGenerationInput } from "./lesson-draft.types";
+import type { LessonGenerationInput, ResolvedUnitContext } from "./lesson-draft.types";
+import { toUnreviewedBilingualObjectives } from "./lesson-objectives.util";
 
 // One initial attempt + one corrective retry if validation fails — never an
 // uncontrolled loop. A retry re-sends the exact validation errors so the
@@ -48,6 +49,30 @@ export class LessonDraftGeneratorService {
     private readonly usageService: AIUsageService,
   ) {}
 
+  /**
+   * Resolves curriculum/grade/subject/unit names LIVE from the existing
+   * Unit -> Subject -> Grade -> Curriculum relations — never hand-typed.
+   * Phase 5 disclosed this as a fragile manual dependency; this is the
+   * Phase 6 fix. Mirrors the exact include chain interactive-lesson.service
+   * already uses for `getTopicOrThrow`.
+   */
+  async resolveUnitContext(unitId: string): Promise<ResolvedUnitContext & { unitId: string }> {
+    const unit = await this.prisma.client.unit.findUnique({
+      where: { id: unitId },
+      include: { subject: { include: { grade: { include: { curriculum: true } } } } },
+    });
+    if (!unit) {
+      throw new NotFoundException(`Unit ${unitId} not found — cannot resolve curriculum context.`);
+    }
+    return {
+      unitId: unit.id,
+      curriculumNameEn: unit.subject.grade.curriculum.nameEn,
+      gradeNameEn: unit.subject.grade.nameEn,
+      subjectNameEn: unit.subject.nameEn,
+      unitNameEn: unit.nameEn,
+    };
+  }
+
   async generateDraft(input: LessonGenerationInput, requestingUserId: string) {
     // Budget is checked once up front, and the provider/usage plumbing
     // below logs every real call regardless of how many attempts it takes
@@ -55,16 +80,21 @@ export class LessonDraftGeneratorService {
     // it actually cost, never hidden or double-counted.
     await this.usageService.assertWithinBudget(requestingUserId);
 
+    // Curriculum/grade/subject/unit names are resolved live from the DB —
+    // the caller only ever supplies the NEW topic identity/objectives,
+    // which genuinely don't exist yet.
+    const unitContext = await this.resolveUnitContext(input.targetUnitId);
+
     let lastErrors: string[] = [];
     let callsMade = 0;
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const systemPrompt = this.contextBuilder.buildLessonDraftGenerationPrompt(
         {
-          curriculumNameEn: input.curriculumNameEn,
-          gradeNameEn: input.gradeNameEn,
-          subjectNameEn: input.subjectNameEn,
-          unitNameEn: input.unitNameEn,
+          curriculumNameEn: unitContext.curriculumNameEn,
+          gradeNameEn: unitContext.gradeNameEn,
+          subjectNameEn: unitContext.subjectNameEn,
+          unitNameEn: unitContext.unitNameEn,
           topicNameEn: input.topicNameEn,
           topicNameAr: input.topicNameAr,
           learningObjectives: input.learningObjectives,
@@ -97,10 +127,10 @@ export class LessonDraftGeneratorService {
       if (validation.valid && validation.steps) {
         const draft = await this.prisma.client.lessonDraft.create({
           data: {
-            targetUnitId: input.targetUnitId ?? null,
+            targetUnitId: input.targetUnitId,
             topicNameEn: input.topicNameEn,
             topicNameAr: input.topicNameAr,
-            learningObjectivesJson: input.learningObjectives as any,
+            learningObjectivesJson: toUnreviewedBilingualObjectives(input.learningObjectives) as any,
             teachingStepsJson: validation.steps as any,
             status: "pending_review",
             aiProvider: providerKey,
