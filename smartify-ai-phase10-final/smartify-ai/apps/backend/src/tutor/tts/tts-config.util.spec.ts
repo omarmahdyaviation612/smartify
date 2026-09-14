@@ -11,7 +11,7 @@ describe("normalizeTtsConfig", () => {
   });
 
   it("accepts a fully valid custom config", () => {
-    const custom = { provider: "openai", model: "tts-1", voice: "shimmer", speed: 1.1 };
+    const custom = { provider: "openai", model: "tts-1", voice: "shimmer", speed: 1.1, instructions: "Speak calmly." };
     expect(normalizeTtsConfig(custom)).toEqual(custom);
   });
 
@@ -20,6 +20,21 @@ describe("normalizeTtsConfig", () => {
     expect(result.voice).toBe("shimmer"); // valid field kept
     expect(result.speed).toBe(DEFAULT_TTS_CONFIG.speed); // invalid field falls back
     expect(result.model).toBe(DEFAULT_TTS_CONFIG.model); // missing field falls back
+  });
+
+  it("defaults to the approved Smartify speaking instructions when none are given, never a blank/robotic voice", () => {
+    expect(normalizeTtsConfig({}).instructions).toBe(DEFAULT_TTS_CONFIG.instructions);
+    expect(normalizeTtsConfig({ instructions: "" }).instructions).toBe(DEFAULT_TTS_CONFIG.instructions);
+    expect(normalizeTtsConfig({ instructions: 42 }).instructions).toBe(DEFAULT_TTS_CONFIG.instructions);
+  });
+
+  it("keeps a valid custom instructions string as-is", () => {
+    expect(normalizeTtsConfig({ instructions: "Speak like a pirate." }).instructions).toBe("Speak like a pirate.");
+  });
+
+  it("Phase 9.4B: the owner-approved MVP default is gpt-4o-mini-tts / marin", () => {
+    expect(DEFAULT_TTS_CONFIG.model).toBe("gpt-4o-mini-tts");
+    expect(DEFAULT_TTS_CONFIG.voice).toBe("marin");
   });
 
   it("rejects a speed outside the provider's valid range", () => {

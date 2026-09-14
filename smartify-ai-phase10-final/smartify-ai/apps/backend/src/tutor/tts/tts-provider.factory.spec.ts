@@ -20,8 +20,8 @@ describe("TtsProviderFactory", () => {
     expect(await factory.getConfig()).toEqual(DEFAULT_TTS_CONFIG);
   });
 
-  it("reads provider/model/voice/speed from the SystemConfig row when present", async () => {
-    const custom = { provider: "openai", model: "tts-1", voice: "shimmer", speed: 1.1 };
+  it("reads provider/model/voice/speed/instructions from the SystemConfig row when present", async () => {
+    const custom = { provider: "openai", model: "tts-1", voice: "shimmer", speed: 1.1, instructions: "Speak warmly." };
     const factory = new TtsProviderFactory(makePrisma(custom));
     expect(await factory.getConfig()).toEqual(custom);
   });
@@ -33,12 +33,18 @@ describe("TtsProviderFactory", () => {
   });
 
   it("resolves an OpenAiTtsProvider configured with the resolved config", async () => {
-    const custom = { provider: "openai", model: "tts-1", voice: "shimmer", speed: 1.1 };
+    const custom = { provider: "openai", model: "tts-1", voice: "shimmer", speed: 1.1, instructions: "Speak warmly." };
     const factory = new TtsProviderFactory(makePrisma(custom));
     const provider = await factory.getActiveProvider();
     expect(provider).toBeInstanceOf(OpenAiTtsProvider);
     expect(provider.model).toBe("tts-1");
     expect(provider.providerKey).toBe("openai");
+  });
+
+  it("resolves the owner-approved MVP default (gpt-4o-mini-tts / marin) when no SystemConfig row exists", async () => {
+    const factory = new TtsProviderFactory(makePrisma());
+    const provider = await factory.getActiveProvider();
+    expect(provider.model).toBe("gpt-4o-mini-tts");
   });
 
   it("never throws for an unsupported provider — falls back to a working OpenAI provider instead", async () => {

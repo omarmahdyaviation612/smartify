@@ -65,6 +65,20 @@ export const updateSubjectSchema = z.object({
   isActive: z.boolean().optional(),
 }).strict();
 
+// Phase 9.4B — SUPER_ADMIN AI spending controls. A dedicated endpoint (not
+// the generic system-config/:key PATCH) so the per-user-budget <= global-
+// budget cross-field rule can be enforced against the resulting combined
+// state, not just the one field being changed.
+export const updateAISpendingControlsSchema = z
+  .object({
+    globalDailyBudgetUsd: z.number().positive().finite().optional(),
+    perUserDailyBudgetUsd: z.number().positive().finite().optional(),
+    dailyQuestionsPerSubject: z.number().int().positive().optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, "At least one field is required");
+export type UpdateAISpendingControlsInput = z.infer<typeof updateAISpendingControlsSchema>;
+
 export const updatePricingPlanSchema = z.object({
   monthlyPriceEGP: z.number().nonnegative().finite().optional(),
   includedSubjects: z.number().int().positive().optional(),

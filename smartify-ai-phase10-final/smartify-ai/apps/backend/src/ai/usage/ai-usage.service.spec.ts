@@ -155,6 +155,17 @@ describe("AIUsageService", () => {
         expect.objectContaining({ where: expect.objectContaining({ userId: "user-42" }) }),
       );
     });
+
+    it("Phase 9.4B (B7): a budget change made through admin configuration is honored by the very next check — no caching of the old limit", async () => {
+      const { service, prisma } = makeService({ globalBudget: 5, globalSpend: 4.99 });
+      await expect(service.assertWithinBudget("user-1")).resolves.toBeUndefined(); // below the $5 cap
+
+      // Simulate the admin lowering the global budget via updateSpendingControls.
+      prisma.client.systemConfig.findUnique.mockImplementation(({ where: { key } }: any) =>
+        Promise.resolve(key === "global_daily_ai_budget_usd" ? { value: 1 } : null),
+      );
+      await expect(service.assertWithinBudget("user-1")).rejects.toThrow(ServiceUnavailableException); // $4.99 spent >= new $1 cap
+    });
   });
 
   describe("buildUsageRow (cost ledger)", () => {

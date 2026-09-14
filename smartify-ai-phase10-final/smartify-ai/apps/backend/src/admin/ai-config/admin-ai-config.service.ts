@@ -1,9 +1,19 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
+import { AIUsageService } from "../../ai/usage/ai-usage.service";
+import type { UpdateAISpendingControlsInput } from "@smartify/validation";
+
+const GLOBAL_BUDGET_KEY = "global_daily_ai_budget_usd";
+const PER_USER_BUDGET_KEY = "per_user_daily_ai_budget_usd";
+const DAILY_QUESTIONS_KEY = "default_daily_ai_questions_per_subject";
+const DEFAULT_DAILY_QUESTIONS = 10;
 
 @Injectable()
 export class AdminAIConfigService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly usageService: AIUsageService,
+  ) {}
 
   listProviders() {
     return this.prisma.client.aIProviderConfig.findMany();
@@ -95,5 +105,72 @@ export class AdminAIConfigService {
       byFeature: Object.fromEntries(byFeature),
       topUsageStudents,
     };
+  }
+
+  /**
+   * Reuses AIUsageService.getGlobalSpendToday() (the exact same "since
+   * midnight" aggregate the runtime circuit breaker itself checks) rather
+   * than approximating "today" from getUsageSummary's rolling N-day
+   * window — this display must agree with what actually gates requests.
+   */
+  async getBudgetStatus() {
+    const [globalBudgetRow, perUserBudgetRow, dailyQuestionsRow, globalSpentTodayUsd] = await Promise.all([
+      this.prisma.client.systemConfig.findUnique({ where: { key: GLOBAL_BUDGET_KEY } }),
+      this.prisma.client.systemConfig.findUnique({ where: { key: PER_USER_BUDGET_KEY } }),
+      this.prisma.client.systemConfig.findUnique({ where: { key: DAILY_QUESTIONS_KEY } }),
+      this.usageService.getGlobalSpendToday(),
+    ]);
+
+    const globalBudgetUsd = typeof globalBudgetRow?.value === "number" ? globalBudgetRow.value : null;
+    const perUserBudgetUsd = typeof perUserBudgetRow?.value === "number" ? perUserBudgetRow.value : null;
+    const dailyQuestionsPerSubject = typeof dailyQuestionsRow?.value === "number" ? dailyQuestionsRow.value : DEFAULT_DAILY_QUESTIONS;
+
+    return {
+      globalBudgetUsd,
+      perUserBudgetUsd,
+      dailyQuestionsPerSubject,
+      globalSpentTodayUsd,
+      globalRemainingUsd: globalBudgetUsd === null ? null : Math.max(0, globalBudgetUsd - globalSpentTodayUsd),
+    };
+  }
+
+  /**
+   * The one place all three AI spending-control values are changed — kept
+   * separate from the generic system-config/:key PATCH specifically so the
+   * per-user <= global cross-field rule can be checked against the
+   * RESULTING combined state (current values merged with whatever's being
+   * changed in this call), not just the single field the caller happens to
+   * be touching. Rejects the whole request (writes nothing) if the
+   * resulting state would be invalid.
+   */
+  async updateSpendingControls(input: UpdateAISpendingControlsInput) {
+    const current = await this.getBudgetStatus();
+
+    const nextGlobal = input.globalDailyBudgetUsd ?? current.globalBudgetUsd;
+    const nextPerUser = input.perUserDailyBudgetUsd ?? current.perUserBudgetUsd;
+
+    if (nextPerUser !== null && nextGlobal !== null && nextPerUser > nextGlobal) {
+      throw new BadRequestException("Per-user daily AI budget cannot exceed the global daily AI budget.");
+    }
+    // A per-user cap only makes sense once a global cap exists (per-user
+    // spend is a subset of global spend) — surfacing this now, at write
+    // time, is clearer than a per-user budget that's silently meaningless.
+    if (nextPerUser !== null && nextGlobal === null) {
+      throw new BadRequestException("Set a global daily AI budget before setting a per-user daily AI budget.");
+    }
+
+    const writes: Array<Promise<unknown>> = [];
+    if (input.globalDailyBudgetUsd !== undefined) {
+      writes.push(this.updateSystemConfig(GLOBAL_BUDGET_KEY, input.globalDailyBudgetUsd, "Maximum combined AI/TTS spend allowed per day, across all students."));
+    }
+    if (input.perUserDailyBudgetUsd !== undefined) {
+      writes.push(this.updateSystemConfig(PER_USER_BUDGET_KEY, input.perUserDailyBudgetUsd, "Maximum AI/TTS spend one student may consume per day."));
+    }
+    if (input.dailyQuestionsPerSubject !== undefined) {
+      writes.push(this.updateSystemConfig(DAILY_QUESTIONS_KEY, input.dailyQuestionsPerSubject, "Included AI questions per subject per student per day, before Question Packages/AI Credits apply."));
+    }
+    await Promise.all(writes);
+
+    return this.getBudgetStatus();
   }
 }

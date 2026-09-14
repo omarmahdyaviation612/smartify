@@ -148,42 +148,194 @@ function PaymentProvidersSection() {
   );
 }
 
-function SystemConfigSection() {
+interface BudgetStatus {
+  globalBudgetUsd: number | null;
+  perUserBudgetUsd: number | null;
+  dailyQuestionsPerSubject: number;
+  globalSpentTodayUsd: number;
+  globalRemainingUsd: number | null;
+}
+
+/**
+ * SUPER_ADMIN AI spending controls (Phase 9.4B). Reuses the existing
+ * admin/ai-config area and its SystemConfig-backed budget/usage
+ * infrastructure — no new admin system, no new analytics pipeline.
+ * Today's spend and remaining-budget figures come straight from
+ * AdminAIConfigService.getBudgetStatus(), which itself reuses
+ * AIUsageService.getGlobalSpendToday() — the exact same number the
+ * runtime circuit breaker checks, not a separately-computed approximation.
+ */
+function AISpendingControlsSection() {
   const { apiFetch } = useApiClient();
-  const [dailyLimit, setDailyLimit] = useState<number | null>(null);
+  const [status, setStatus] = useState<BudgetStatus | null>(null);
+  const [globalInput, setGlobalInput] = useState("");
+  const [perUserInput, setPerUserInput] = useState("");
+  const [dailyQuestionsInput, setDailyQuestionsInput] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  function applyStatus(s: BudgetStatus) {
+    setStatus(s);
+    setGlobalInput(s.globalBudgetUsd === null ? "" : String(s.globalBudgetUsd));
+    setPerUserInput(s.perUserBudgetUsd === null ? "" : String(s.perUserBudgetUsd));
+    setDailyQuestionsInput(String(s.dailyQuestionsPerSubject));
+  }
 
   useEffect(() => {
-    apiFetch<{ value: number }>("/admin/ai-config/system-config/default_daily_ai_questions_per_subject").then((c) =>
-      setDailyLimit(c.value),
-    );
+    apiFetch<BudgetStatus>("/admin/ai-config/budget-status").then(applyStatus);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function save() {
-    if (dailyLimit === null) return;
-    await apiFetch("/admin/ai-config/system-config/default_daily_ai_questions_per_subject", {
-      method: "PATCH",
-      body: JSON.stringify({ value: dailyLimit }),
-    });
+    setError(null);
+    const globalDailyBudgetUsd = Number(globalInput);
+    const perUserDailyBudgetUsd = Number(perUserInput);
+    const dailyQuestionsPerSubject = Number(dailyQuestionsInput);
+
+    if (!Number.isFinite(globalDailyBudgetUsd) || globalDailyBudgetUsd <= 0) {
+      setError("Global daily AI budget must be a positive number.");
+      return;
+    }
+    if (!Number.isFinite(perUserDailyBudgetUsd) || perUserDailyBudgetUsd <= 0) {
+      setError("Per-user daily AI budget must be a positive number.");
+      return;
+    }
+    if (perUserDailyBudgetUsd > globalDailyBudgetUsd) {
+      setError("Per-user daily AI budget cannot exceed the global daily AI budget.");
+      return;
+    }
+    if (!Number.isInteger(dailyQuestionsPerSubject) || dailyQuestionsPerSubject <= 0) {
+      setError("Daily AI questions per subject must be a positive whole number.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const updated = await apiFetch<BudgetStatus>("/admin/ai-config/spending-controls", {
+        method: "PATCH",
+        body: JSON.stringify({ globalDailyBudgetUsd, perUserDailyBudgetUsd, dailyQuestionsPerSubject }),
+      });
+      applyStatus(updated);
+    } catch (err: any) {
+      setError(err?.message ?? "Could not save AI spending controls.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
     <div className="mt-6 rounded-sf-lg border border-neutral-200 bg-white p-6">
-      <h2 className="mb-4 font-semibold text-navy-900">System Config</h2>
-      <label className="block max-w-xs">
-        <span className="mb-2 block text-sm font-medium text-neutral-700">Daily AI questions per subject</span>
-        <div className="flex gap-2">
+      <h2 className="mb-1 font-semibold text-navy-900">AI Spending Controls</h2>
+      <p className="mb-4 text-xs text-neutral-500">
+        These caps protect against unexpected OpenAI spend. Changes take effect immediately for every new AI/TTS
+        request — no deploy or restart needed.
+      </p>
+
+      <div className="space-y-4">
+        <label className="block max-w-sm">
+          <span className="mb-1 block text-sm font-medium text-neutral-700">Global Daily AI Budget (USD)</span>
+          <p className="mb-2 text-xs text-neutral-500">Maximum combined AI/TTS spend allowed per day, across all students.</p>
           <input
             type="number"
-            value={dailyLimit ?? ""}
-            onChange={(e) => setDailyLimit(Number(e.target.value))}
+            step="0.01"
+            min="0"
+            value={globalInput}
+            onChange={(e) => setGlobalInput(e.target.value)}
             className="w-full rounded-sf border border-neutral-300 px-3 py-2"
           />
-          <button onClick={save} className="rounded-sf bg-sf-blue-500 px-4 py-2 text-sm text-white">
-            Save
-          </button>
+        </label>
+
+        <label className="block max-w-sm">
+          <span className="mb-1 block text-sm font-medium text-neutral-700">Per-User Daily AI Budget (USD)</span>
+          <p className="mb-2 text-xs text-neutral-500">Maximum AI/TTS spend one user may consume per day. Must not exceed the global budget.</p>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            value={perUserInput}
+            onChange={(e) => setPerUserInput(e.target.value)}
+            className="w-full rounded-sf border border-neutral-300 px-3 py-2"
+          />
+        </label>
+
+        <label className="block max-w-sm">
+          <span className="mb-1 block text-sm font-medium text-neutral-700">Daily AI Questions Per Subject</span>
+          <p className="mb-2 text-xs text-neutral-500">
+            Educational usage limit (included AI questions per subject per day) — separate from the USD spending caps above.
+          </p>
+          <input
+            type="number"
+            step="1"
+            min="1"
+            value={dailyQuestionsInput}
+            onChange={(e) => setDailyQuestionsInput(e.target.value)}
+            className="w-full rounded-sf border border-neutral-300 px-3 py-2"
+          />
+        </label>
+
+        {error && <p className="text-sm text-error-500">{error}</p>}
+
+        <button
+          onClick={save}
+          disabled={saving}
+          className="rounded-sf bg-sf-blue-500 px-4 py-2 text-sm text-white disabled:opacity-60"
+        >
+          {saving ? "Saving..." : "Save"}
+        </button>
+      </div>
+
+      {status && (
+        <div className="mt-6 border-t border-neutral-100 pt-4 text-sm">
+          <p className="text-neutral-600">
+            Today&apos;s AI spend: <span className="font-medium text-navy-900">${status.globalSpentTodayUsd.toFixed(4)}</span>
+          </p>
+          <p className="text-neutral-600">
+            Global budget remaining:{" "}
+            <span className="font-medium text-navy-900">
+              {status.globalRemainingUsd === null ? "No global cap set" : `$${status.globalRemainingUsd.toFixed(4)}`}
+            </span>
+          </p>
         </div>
-      </label>
+      )}
+    </div>
+  );
+}
+
+interface TtsConfig {
+  provider: string;
+  model: string;
+  voice: string;
+}
+
+/**
+ * Read-only — no voice switching UI in this phase (B11). The existing
+ * generic system-config/:key GET endpoint already serves this; no new
+ * backend surface needed.
+ */
+function TtsInfoSection() {
+  const { apiFetch } = useApiClient();
+  const [tts, setTts] = useState<TtsConfig | null>(null);
+
+  useEffect(() => {
+    apiFetch<{ value: TtsConfig }>("/admin/ai-config/system-config/tts_config")
+      .then((c) => setTts(c?.value ?? null))
+      .catch(() => setTts(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!tts) return null;
+
+  return (
+    <div className="mt-6 rounded-sf-lg border border-neutral-200 bg-white p-6">
+      <h2 className="mb-4 font-semibold text-navy-900">Voice (TTS)</h2>
+      <div className="space-y-1 text-sm">
+        <p className="text-neutral-600">
+          TTS Model: <span className="font-medium text-navy-900">{tts.model}</span>
+        </p>
+        <p className="text-neutral-600">
+          Selected Voice: <span className="font-medium text-navy-900">{tts.voice}</span>
+        </p>
+      </div>
     </div>
   );
 }
@@ -197,7 +349,8 @@ export default function AdminPlatformPage() {
           <div className="mt-6">
             <AIProvidersSection />
             <PaymentProvidersSection />
-            <SystemConfigSection />
+            <AISpendingControlsSection />
+            <TtsInfoSection />
           </div>
         </SmartifyContainer>
       </main>

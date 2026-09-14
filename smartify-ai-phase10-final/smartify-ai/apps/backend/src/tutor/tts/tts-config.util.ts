@@ -22,15 +22,41 @@ export interface TtsConfig {
   model: string;
   voice: string;
   speed: number;
+  /**
+   * Steerable voice-style guidance — only honored by models that support it
+   * (gpt-4o-mini-tts; NOT tts-1/tts-1-hd, see OpenAiTtsProvider). Optional
+   * so older/simpler models can leave it unset without any special-casing
+   * here.
+   */
+  instructions?: string;
 }
+
+// Phase 9.4B: owner-selected MVP voice after the Stage A bake-off (marin,
+// cedar, coral compared on gpt-4o-mini-tts) — see docs/voice-bakeoff report.
+// `speed` is kept for backward compatibility with a possible future
+// tts-1/tts-1-hd fallback but is never sent to the API for gpt-4o-mini-tts,
+// which doesn't support it (OpenAiTtsProvider omits it for that model).
+export const SMARTIFY_TTS_INSTRUCTIONS =
+  "Speak in warm, natural Egyptian Arabic (Masri), not Modern Standard Arabic, unless the text itself is formal. " +
+  "Personality: a kind, encouraging elementary-school teacher talking directly to a young child — human and " +
+  "conversational, never an announcer or narrator. Warm and genuinely encouraging without sounding childish, " +
+  "cartoonish, or exaggerated/theatrical. Pronounce Arabic words and numbers clearly and precisely. When " +
+  "explaining a math step or reading an equation, slow down slightly and add a short natural pause right around " +
+  "the numbers and the equals sign, as a real teacher would when making sure a child follows along. When the " +
+  "text expresses praise for a correct answer, sound genuinely pleased and warm, not over-the-top. When the text " +
+  "is calming/supportive after a mistake, sound patient and reassuring, never disappointed or flat. Avoid a " +
+  "robotic, flat, or metronomic cadence — vary pacing and warmth like a real person speaking to a child they " +
+  "care about. Do not change, add, or omit any words, numbers, or mathematical content from the given text — " +
+  "speak exactly what is written.";
 
 // Exactly the values already validated in Phase 2/3 live QA — changing the
 // SystemConfig row is how you change these now, not editing this constant.
 export const DEFAULT_TTS_CONFIG: TtsConfig = {
   provider: "openai",
-  model: "tts-1-hd",
-  voice: "nova",
+  model: "gpt-4o-mini-tts",
+  voice: "marin",
   speed: 0.94,
+  instructions: SMARTIFY_TTS_INSTRUCTIONS,
 };
 
 /**
@@ -46,5 +72,6 @@ export function normalizeTtsConfig(raw: unknown): TtsConfig {
     model: typeof value.model === "string" && value.model.trim() ? value.model : DEFAULT_TTS_CONFIG.model,
     voice: typeof value.voice === "string" && value.voice.trim() ? value.voice : DEFAULT_TTS_CONFIG.voice,
     speed: typeof value.speed === "number" && Number.isFinite(value.speed) && value.speed >= 0.25 && value.speed <= 4.0 ? value.speed : DEFAULT_TTS_CONFIG.speed,
+    instructions: typeof value.instructions === "string" && value.instructions.trim() ? value.instructions : DEFAULT_TTS_CONFIG.instructions,
   };
 }

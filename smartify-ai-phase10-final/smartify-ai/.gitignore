@@ -17,3 +17,8 @@ coverage
 *.sqlite
 *.sqlite3
 prisma/*.db
+
+# Pre-migration safety backups (packages/database/prisma/backup-guard.ts) —
+# local-only, never committed.
+/backups/
+*.pgdump

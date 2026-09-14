@@ -156,9 +156,21 @@ describe("TutorSpeechService", () => {
     expect(sentInput).not.toContain("+");
   });
 
-  it("passes a speed parameter to OpenAI for pacing control", async () => {
+  it("Phase 9.4B: passes the approved Smartify speaking instructions to OpenAI for pacing/style control on the default model (gpt-4o-mini-tts doesn't support `speed`)", async () => {
     mockCreate.mockResolvedValue(fakeAudioResponse());
     const { prisma } = makePrisma({ matchingMessage: { id: "msg-1", content: "Hello there." } });
+    const service = new TutorSpeechService(prisma, makeUsageService());
+    await service.synthesize({ userId: "user-1", conversationId: CONVERSATION_ID, text: "Hello there." });
+    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ instructions: expect.any(String) }));
+    expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("speed");
+  });
+
+  it("still passes a speed parameter for a model that supports it (e.g. tts-1/tts-1-hd, configured via SystemConfig)", async () => {
+    mockCreate.mockResolvedValue(fakeAudioResponse());
+    const { prisma } = makePrisma({
+      matchingMessage: { id: "msg-1", content: "Hello there." },
+      ttsConfig: { provider: "openai", model: "tts-1-hd", voice: "nova", speed: 0.94 },
+    });
     const service = new TutorSpeechService(prisma, makeUsageService());
     await service.synthesize({ userId: "user-1", conversationId: CONVERSATION_ID, text: "Hello there." });
     expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ speed: expect.any(Number) }));
@@ -184,15 +196,17 @@ describe("TutorSpeechService", () => {
     const service = new TutorSpeechService(prisma, makeUsageService());
     const result = await service.synthesize({ userId: "user-1", conversationId: CONVERSATION_ID, text: "Hello there." });
     expect(Buffer.isBuffer(result)).toBe(true);
-    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: "tts-1-hd", voice: "nova", speed: 0.94 }));
+    // Phase 9.4B default: gpt-4o-mini-tts/marin — doesn't send `speed` (unsupported by this model).
+    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-4o-mini-tts", voice: "marin" }));
+    expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("speed");
   });
 
-  it("uses the tts-1-hd model and the openai provider for cost tracking", async () => {
+  it("uses the gpt-4o-mini-tts model (owner-approved MVP default) and the openai provider for cost tracking", async () => {
     mockCreate.mockResolvedValue(fakeAudioResponse());
     const { prisma } = makePrisma({ matchingMessage: { id: "msg-1", content: "Hello there." } });
     const service = new TutorSpeechService(prisma, makeUsageService());
     await service.synthesize({ userId: "user-1", conversationId: CONVERSATION_ID, text: "Hello there." });
-    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: "tts-1-hd" }));
+    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-4o-mini-tts" }));
   });
 
   it("logs a tutor_tts usage row with zero creditsUsed (does not consume a Tutor question), cost proportional to characters, and subjectId derived from the conversation", async () => {
@@ -213,7 +227,7 @@ describe("TutorSpeechService", () => {
         subjectId: "subject-1",
         feature: "tutor_tts",
         provider: "openai",
-        model: "tts-1-hd",
+        model: "gpt-4o-mini-tts",
         creditsUsed: 0,
       }),
     });

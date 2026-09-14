@@ -4,7 +4,7 @@ import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { UserRole } from "@smartify/shared-types";
 import { AdminAIConfigService } from "./admin-ai-config.service";
-import { updateAIProviderSchema } from "@smartify/validation";
+import { updateAIProviderSchema, updateAISpendingControlsSchema } from "@smartify/validation";
 import { parseBody } from "../../common/validation/parse-body";
 
 // SUPER_ADMIN only — provider cost rates and aggregate spend are exactly
@@ -38,5 +38,15 @@ export class AdminAIConfigController {
   @Get("usage-summary")
   getUsageSummary(@Query("days") days?: string) {
     return this.service.getUsageSummary(days ? Number(days) : undefined);
+  }
+
+  @Get("budget-status")
+  getBudgetStatus() {
+    return this.service.getBudgetStatus();
+  }
+
+  @Patch("spending-controls")
+  updateSpendingControls(@Body() body: unknown) {
+    return this.service.updateSpendingControls(parseBody(updateAISpendingControlsSchema, body));
   }
 }
