@@ -5,10 +5,22 @@ import { PrismaService } from "../prisma/prisma.service";
 export class CurriculaService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Public curriculum catalog: curricula -> grades -> subjects. Drives the /curricula page and onboarding's curriculum/grade/subject steps. */
+  /**
+   * Public curriculum catalog: curricula -> grades -> subjects. Drives the
+   * /curricula page and onboarding's curriculum/grade/subject steps.
+   *
+   * Phase 10C: a curriculum is only listed here when it has at least one
+   * active grade. Without this, `isActive: true` alone let a curriculum
+   * with zero real grades (LOCAL/BRITISH_INTL/AMERICAN_INTL, at this
+   * point in the product) appear as a selectable onboarding option that
+   * dead-ended on the next step — this is a backend data-contract fix so
+   * every client (onboarding, the marketing page, anything else) gets a
+   * catalog that's actually safe to render/select from, not a cosmetic
+   * frontend-only filter.
+   */
   async getPublicCatalog() {
     return this.prisma.client.curriculum.findMany({
-      where: { isActive: true },
+      where: { isActive: true, grades: { some: { isActive: true } } },
       orderBy: { code: "asc" },
       select: {
         id: true,

@@ -7,6 +7,7 @@ import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getOnboardingCopy } from "@/content/onboarding";
 import { OnboardingStepper } from "@/components/OnboardingStepper";
 import { ApiError, useApiClient } from "@/lib/api-client";
+import { getQuestionOptionLabel } from "@/lib/question-option-label";
 import type { Locale } from "@/content/marketing";
 
 interface DiagnosticQuestion {
@@ -83,11 +84,32 @@ export default function OnboardingDiagnosticPage() {
         <SmartifyContainer className="mx-auto max-w-2xl">
           <h1 className="text-2xl font-bold text-navy-900">{copy.diagnostic.title}</h1>
           <p className="mt-2 text-neutral-600">{copy.diagnostic.body}</p>
-          <p className="mt-2 text-xs text-neutral-400">{copy.diagnostic.placeholderNotice}</p>
 
           {!questions && !loadError && <p className="mt-8 text-neutral-500">{copy.diagnostic.loading}</p>}
           {loadError && <p className="mt-8 text-sm text-error-500">{loadError}</p>}
-          {questions && questions.length === 0 && <p className="mt-8 text-neutral-500">{copy.diagnostic.noQuestions}</p>}
+
+          {/*
+            Phase 10D.1: an empty result here means "no real diagnostic
+            Questions exist for this student's selected subjects" — driven
+            entirely by actual Question availability (the backend already
+            excludes isPlaceholder rows), never a hardcoded subject/grade
+            check or a feature flag. This is an availability fallback, not
+            a completed diagnostic: no submit call happens on this path, so
+            no Assessment/QuestionAttempt/LearningPlan is ever created —
+            /onboarding/plan-ready already renders correctly with a null
+            diagnosticScore/learningPlan (see OnboardingService.getSummary).
+            Once real Questions exist for a subject, `questions.length`
+            will simply stop being 0 and the normal diagnostic UI below
+            resumes automatically.
+          */}
+          {questions && questions.length === 0 && (
+            <div className="mt-8 space-y-4 text-center">
+              <p className="text-neutral-500">{copy.diagnostic.noQuestions}</p>
+              <SmartifyButton variant="ai" onClick={() => router.push(`/${locale}/onboarding/plan-ready`)}>
+                {copy.diagnostic.noQuestionsContinueLabel}
+              </SmartifyButton>
+            </div>
+          )}
 
           {questions && questions.length > 0 && (
             <div className="mt-8 space-y-6">
@@ -109,7 +131,7 @@ export default function OnboardingDiagnosticPage() {
                           checked={answers[q.id] === opt}
                           onChange={() => setAnswers((prev) => ({ ...prev, [q.id]: opt }))}
                         />
-                        {opt}
+                        {getQuestionOptionLabel(opt, locale)}
                       </label>
                     ))}
                   </div>

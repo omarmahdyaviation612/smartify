@@ -408,4 +408,72 @@ export class AIContextBuilderService {
       .filter(Boolean)
       .join("\n");
   }
+
+  /**
+   * Phase 10E: system prompt for the (architecture-only in this phase —
+   * never actually called with a real provider) Question Bank generation
+   * pipeline. Reuses contentOriginalityRules() for the same copyright-safe
+   * / no-Ministry-endorsement guarantees as every other content-generation
+   * prompt in this service. Deliberately asks for ENGLISH content only —
+   * the model is never asked for Arabic, matching the "AI-generated
+   * Arabic/content is never auto-trusted" principle (see
+   * QuestionDraft.promptAr's doc comment) — a human reviewer supplies
+   * promptAr/explanationAr separately via QuestionPublishService.reviewDraft().
+   * Only asks for MVP-ready types (MULTIPLE_CHOICE, TRUE_FALSE) — see
+   * question-draft-validator.ts's own doc comment for why the runtime
+   * cannot yet support the others.
+   */
+  buildQuestionDraftGenerationPrompt(
+    ctx: {
+      curriculumNameEn: string;
+      gradeNameEn: string;
+      subjectNameEn: string;
+      unitNameEn: string;
+      topicNameEn: string;
+      learningFocus: string;
+      difficulty: string;
+      studentAgeRange: string;
+    },
+    retryFeedback?: string[],
+  ): string {
+    const retrySection = retryFeedback?.length
+      ? [
+          "PREVIOUS ATTEMPT WAS REJECTED — fix ONLY the issues below and output the complete corrected JSON again (not just the fixed parts):",
+          ...retryFeedback.map((e) => `- ${e}`),
+          "",
+        ]
+      : [];
+
+    return [
+      "You are Smartify's Question Bank drafting assistant. You do NOT show this question to any student directly — you draft ONE assessment question for a human curriculum reviewer to check, translate, and approve before it is ever shown to any student.",
+      "",
+      `Curriculum: ${ctx.curriculumNameEn}. Grade: ${ctx.gradeNameEn}. Subject: ${ctx.subjectNameEn}. Unit: ${ctx.unitNameEn}. Topic: ${ctx.topicNameEn}.`,
+      `Student age range: ${ctx.studentAgeRange}. Target difficulty: ${ctx.difficulty}.`,
+      `What this question should assess (a planning instruction, not a textbook question to copy): ${ctx.learningFocus}`,
+      "",
+      ...retrySection,
+      "TASK: draft exactly ONE question, in ENGLISH only (a human reviewer supplies the Arabic separately).",
+      "",
+      "Respond with ONLY a single JSON object, no other text, in exactly this shape:",
+      '{"type": "MULTIPLE_CHOICE" | "TRUE_FALSE", "difficulty": "EASY" | "MEDIUM" | "HARD", "promptEn": "...", "optionsJson": ["...", "..."], "correctAnswerJson": "<must exactly equal one entry of optionsJson>", "explanationEn": "..."}',
+      "",
+      "RULES:",
+      '- "type" must be MULTIPLE_CHOICE or TRUE_FALSE only — no other type is supported by the current runtime.',
+      '- MULTIPLE_CHOICE needs at least 3 distinct, non-empty options. TRUE_FALSE needs exactly 2 distinct options (e.g. "True"/"False").',
+      '- "correctAnswerJson" must be a plain string, character-for-character identical to exactly one entry in "optionsJson" — grading is exact-match with no normalization.',
+      '- "explanationEn" is shown to the student after they answer — briefly explain WHY the correct answer is correct.',
+      "- Use original numbers/scenarios every time — never reuse a specific textbook exercise's wording or numbers.",
+      "- Mathematically/factually correct is non-negotiable — double-check your own answer before responding.",
+      "",
+      ...this.formattingRules(),
+      "",
+      ...this.safetyRules(),
+      "",
+      ...this.contentOriginalityRules(ctx.subjectNameEn),
+      "- The curriculum/topic above is a map of WHAT to assess only. Never copy, closely paraphrase, or imitate a specific textbook page or exercise.",
+      "- Never mention or imply a source file, PDF, page number, or Ministry endorsement anywhere in your output.",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
 }

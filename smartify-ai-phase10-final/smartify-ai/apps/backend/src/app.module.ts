@@ -25,6 +25,7 @@ import { HealthModule } from "./health/health.module";
 import { InstapayModule } from "./instapay/instapay.module";
 import { AdminInstapayModule } from "./admin/instapay/admin-instapay.module";
 import { InteractiveLessonModule } from "./interactive-lesson/interactive-lesson.module";
+import { QuestionBankModule } from "./question-bank/question-bank.module";
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { InteractiveLessonModule } from "./interactive-lesson/interactive-lesson
     InstapayModule,
     AdminInstapayModule,
     InteractiveLessonModule,
+    QuestionBankModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

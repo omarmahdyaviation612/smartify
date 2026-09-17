@@ -84,7 +84,10 @@ describe("AdminAIConfigService — AI spending controls", () => {
         },
       },
     } as any;
-    const usageService = { getGlobalSpendToday: jest.fn().mockResolvedValue(globalSpentTodayUsd) } as any;
+    const usageService = {
+      getGlobalSpendToday: jest.fn().mockResolvedValue(globalSpentTodayUsd),
+      getGlobalCommittedUsdToday: jest.fn().mockResolvedValue(globalSpentTodayUsd),
+    } as any;
     return { service: new AdminAIConfigService(prisma, usageService), prisma, store };
   }
 

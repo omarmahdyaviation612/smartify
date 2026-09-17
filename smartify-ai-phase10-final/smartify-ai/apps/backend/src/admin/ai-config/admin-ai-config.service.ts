@@ -1,10 +1,11 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AIUsageService } from "../../ai/usage/ai-usage.service";
+import { GLOBAL_DAILY_AI_BUDGET_USD_KEY, PER_USER_DAILY_AI_BUDGET_USD_KEY, parseBudgetUsd } from "../../ai/usage/budget-config.util";
 import type { UpdateAISpendingControlsInput } from "@smartify/validation";
 
-const GLOBAL_BUDGET_KEY = "global_daily_ai_budget_usd";
-const PER_USER_BUDGET_KEY = "per_user_daily_ai_budget_usd";
+const GLOBAL_BUDGET_KEY = GLOBAL_DAILY_AI_BUDGET_USD_KEY;
+const PER_USER_BUDGET_KEY = PER_USER_DAILY_AI_BUDGET_USD_KEY;
 const DAILY_QUESTIONS_KEY = "default_daily_ai_questions_per_subject";
 const DEFAULT_DAILY_QUESTIONS = 10;
 
@@ -114,15 +115,20 @@ export class AdminAIConfigService {
    * window — this display must agree with what actually gates requests.
    */
   async getBudgetStatus() {
-    const [globalBudgetRow, perUserBudgetRow, dailyQuestionsRow, globalSpentTodayUsd] = await Promise.all([
+    const [globalBudgetRow, perUserBudgetRow, dailyQuestionsRow, globalSpentTodayUsd, globalCommittedUsdToday] = await Promise.all([
       this.prisma.client.systemConfig.findUnique({ where: { key: GLOBAL_BUDGET_KEY } }),
       this.prisma.client.systemConfig.findUnique({ where: { key: PER_USER_BUDGET_KEY } }),
       this.prisma.client.systemConfig.findUnique({ where: { key: DAILY_QUESTIONS_KEY } }),
       this.usageService.getGlobalSpendToday(),
+      // Phase 9.4D, Objective 3: the LIVE reserved+actual total the
+      // circuit breaker itself checks, including money currently held
+      // by an in-flight (not yet reconciled) request — distinct from
+      // globalSpentTodayUsd, which only counts already-completed calls.
+      this.usageService.getGlobalCommittedUsdToday(),
     ]);
 
-    const globalBudgetUsd = typeof globalBudgetRow?.value === "number" ? globalBudgetRow.value : null;
-    const perUserBudgetUsd = typeof perUserBudgetRow?.value === "number" ? perUserBudgetRow.value : null;
+    const globalBudgetUsd = parseBudgetUsd(globalBudgetRow?.value);
+    const perUserBudgetUsd = parseBudgetUsd(perUserBudgetRow?.value);
     const dailyQuestionsPerSubject = typeof dailyQuestionsRow?.value === "number" ? dailyQuestionsRow.value : DEFAULT_DAILY_QUESTIONS;
 
     return {
@@ -130,6 +136,7 @@ export class AdminAIConfigService {
       perUserBudgetUsd,
       dailyQuestionsPerSubject,
       globalSpentTodayUsd,
+      globalCommittedUsdToday,
       globalRemainingUsd: globalBudgetUsd === null ? null : Math.max(0, globalBudgetUsd - globalSpentTodayUsd),
     };
   }

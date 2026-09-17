@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { AIProviderFactory } from "../ai/ai-provider.factory";
 import { AIContextBuilderService } from "../ai/context/ai-context-builder.service";
@@ -190,6 +190,13 @@ export class TutorService {
       ? await this.questionPacks.consumeForTutor(profile.id, input.subjectId)
       : await this.reserveFreeTrial(profile.id, input.subjectId);
 
+    // Phase 9.4C: set once the atomic USD reservation below actually
+    // succeeds — the catch block releases it (alongside the trial/slot
+    // reservation) for every failure path after that point, and it stays
+    // null if we never get that far (so the catch never tries to release
+    // a reservation that was never taken).
+    let budgetReservationId: string | null = null;
+
     try {
       const cached = await this.answerCache.find({
         curriculumId: profile.curriculum.id,
@@ -247,15 +254,40 @@ export class TutorService {
 
       const { provider, providerKey, model } = await this.providerFactory.getActiveProvider();
 
+      const conversationMessages = [
+        ...priorMessages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+        { role: "user" as const, content: trimmed },
+      ];
+
+      // --- Phase 9.4C: atomic USD reservation, immediately before the
+      // costly provider call — this is the real, cross-process-safe
+      // circuit breaker (assertWithinBudget above stays as a cheap early
+      // check; this is what actually prevents two concurrent requests
+      // from both spending past the budget). Estimated from the REAL
+      // prompt text about to be sent, using the provider's real cost
+      // rates and the real output-token ceiling — a true worst case, not
+      // a guess. ---
+      const estimatedUsd = await this.usageService.estimateMaxChatCostUsd({
+        providerKey,
+        inputText: systemPrompt + conversationMessages.map((m) => m.content).join(""),
+      });
+      const reserveResult = await this.usageService.reserveBudget(userId, estimatedUsd);
+      if (!reserveResult.ok) {
+        throw new ServiceUnavailableException(
+          reserveResult.reason === "misconfigured"
+            ? "The AI Tutor is temporarily unavailable. Please try again later."
+            : "The AI Tutor is temporarily unavailable due to daily usage limits. Please try again later.",
+        );
+      }
+      budgetReservationId = reserveResult.reservationId;
+
       // --- The actual (costly) AI provider call. If this throws, no cost
       // was incurred, and the outer catch below releases the reserved
-      // slot (single release point — see its comment for why). ---
+      // slot AND the budget reservation (single release point — see its
+      // comment for why). ---
       const result = await provider.generate({
         systemPrompt,
-        messages: [
-          ...priorMessages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
-          { role: "user", content: trimmed },
-        ],
+        messages: conversationMessages,
       });
 
       // --- Persist messages + cost ledger atomically ---
@@ -272,6 +304,15 @@ export class TutorService {
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
       });
+
+      // Reconcile the USD reservation to the real cost regardless of
+      // whether the AIUsage/AIMessage transaction below succeeds — the
+      // real provider call already happened and real money was already
+      // spent either way, so the budget accounting must reflect reality
+      // even if the display-facing DB write fails (same philosophy as
+      // logUntrackedUsage below: real incurred cost must never silently
+      // vanish from the ledger that actually gates future spend).
+      await this.usageService.reconcileBudget(budgetReservationId, usageRow.costUsd).catch(() => undefined);
 
       try {
         await this.prisma.client.$transaction([
@@ -337,11 +378,14 @@ export class TutorService {
       // and the slot should stay consumed; only the cost-ledger write
       // failed, which is handled by logUntrackedUsage() instead.
       if (reservation.source === "daily") {
-        await this.usageService.releaseDailySlot(profile.id, input.subjectId).catch(() => undefined);
+        await this.usageService.releaseDailySlot(profile.id, input.subjectId, reservation.usageDate).catch(() => undefined);
       } else if (reservation.source === "extra") {
-        await this.questionPacks.refundExtraCredit(profile.id, input.subjectId).catch(() => undefined);
+        await this.questionPacks.refundExtraCredit(profile.id, input.subjectId, reservation.usageDate).catch(() => undefined);
       } else {
         await this.releaseFreeTrial(profile.id, input.subjectId);
+      }
+      if (budgetReservationId) {
+        await this.usageService.releaseBudget(budgetReservationId).catch(() => undefined);
       }
       throw err;
     }

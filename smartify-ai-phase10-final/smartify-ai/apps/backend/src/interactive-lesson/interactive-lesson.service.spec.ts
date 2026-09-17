@@ -131,6 +131,10 @@ describe("InteractiveLessonService", () => {
       buildUsageRow: jest.fn().mockImplementation(async (p: any) => ({ ...p, feature: p.feature ?? "tutor_chat", creditsUsed: p.creditsUsed ?? 1, costUsd: 0.0001, provider: p.providerKey })),
       logUntrackedUsage: jest.fn(),
       releaseDailySlot: jest.fn().mockResolvedValue(undefined),
+      estimateMaxChatCostUsd: jest.fn().mockResolvedValue(0.001),
+      reserveBudget: jest.fn().mockResolvedValue({ ok: true, reservationId: "reservation-1" }),
+      reconcileBudget: jest.fn().mockResolvedValue(undefined),
+      releaseBudget: jest.fn().mockResolvedValue(undefined),
     } as any;
 
     const questionPacks = {

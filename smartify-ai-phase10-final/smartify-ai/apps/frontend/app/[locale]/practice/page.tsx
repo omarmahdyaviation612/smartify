@@ -7,6 +7,8 @@ import { getPracticeCopy } from "@/content/practice";
 import { getMarketingCopy } from "@/content/marketing";
 import { Navbar } from "@/components/Navbar";
 import { useApiClient } from "@/lib/api-client";
+import { getQuestionOptionLabel } from "@/lib/question-option-label";
+import { getLocalizedExplanation } from "@/lib/localized-explanation";
 import type { Locale } from "@/content/marketing";
 import Link from "next/link";
 import { getLearningFeedback } from "@/content/learning-feedback";
@@ -34,6 +36,7 @@ interface Feedback {
   isCorrect: boolean;
   correctAnswer: string;
   explanationEn: string | null;
+  explanationAr: string | null;
 }
 
 export default function PracticePage() {
@@ -211,7 +214,7 @@ export default function PracticePage() {
                           checked={answers[q.id] === opt}
                           onChange={() => setAnswers((prev) => ({ ...prev, [q.id]: opt }))}
                         />
-                        {opt}
+                        {getQuestionOptionLabel(opt, locale)}
                       </label>
                     ))}
                   </div>
@@ -244,10 +247,14 @@ export default function PracticePage() {
                     >
                       {f.isCorrect ? copy.correctLabel : copy.incorrectLabel}
                     </span>
-                    {!f.isCorrect && <p className="mt-2 text-sm text-neutral-600">{copy.correctAnswer}: {String(f.correctAnswer)}</p>}
-                    {f.explanationEn && (
+                    {!f.isCorrect && (
+                      <p className="mt-2 text-sm text-neutral-600">
+                        {copy.correctAnswer}: {getQuestionOptionLabel(String(f.correctAnswer), locale)}
+                      </p>
+                    )}
+                    {getLocalizedExplanation(f.explanationEn, f.explanationAr, locale) && (
                       <p className="mt-2 text-sm text-neutral-500">
-                        <strong>{copy.explanationLabel}:</strong> {f.explanationEn}
+                        <strong>{copy.explanationLabel}:</strong> {getLocalizedExplanation(f.explanationEn, f.explanationAr, locale)}
                       </p>
                     )}
                   </div>

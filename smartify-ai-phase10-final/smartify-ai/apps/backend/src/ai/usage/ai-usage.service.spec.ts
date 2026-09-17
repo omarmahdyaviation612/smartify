@@ -122,49 +122,158 @@ describe("AIUsageService", () => {
     });
   });
 
-  describe("assertWithinBudget (circuit breaker — Phase 10 cost control)", () => {
-    it("is a no-op when neither a global nor a per-user budget is configured (default, unlimited behavior)", async () => {
-      const { service } = makeService({});
-      await expect(service.assertWithinBudget("user-1")).resolves.toBeUndefined();
+  describe("assertWithinBudget (circuit breaker — Phase 10 cost control, activated Phase 9.4)", () => {
+    it("Phase 9.4 (test 3): throws ServiceUnavailableException when the global budget is not configured at all — never silently unlimited", async () => {
+      const { service } = makeService({ perUserBudget: 5, userSpend: 0 });
+      await expect(service.assertWithinBudget("user-1")).rejects.toThrow(ServiceUnavailableException);
     });
 
-    it("does not throw when spend is below both configured budgets", async () => {
+    it("Phase 9.4 (test 4): throws ServiceUnavailableException when the per-user budget is not configured at all, even though the global budget is valid", async () => {
+      const { service } = makeService({ globalBudget: 100, globalSpend: 0 });
+      await expect(service.assertWithinBudget("user-1")).rejects.toThrow(ServiceUnavailableException);
+    });
+
+    it("Phase 9.4 (test 3+4): both missing is blocked, not a no-op — the pre-9.4 'unlimited when absent' behavior is gone", async () => {
+      const { service } = makeService({});
+      await expect(service.assertWithinBudget("user-1")).rejects.toThrow(ServiceUnavailableException);
+    });
+
+    it.each([
+      ["a string", "20" as any],
+      ["NaN", NaN],
+      ["Infinity", Infinity],
+      ["-Infinity", -Infinity],
+      ["zero", 0],
+      ["a negative number", -5],
+      ["null", null as any],
+    ])("Phase 9.4 (test 5/6): a malformed global budget (%s) fails safely, identically to a missing one", async (_label, malformed) => {
+      const { service } = makeService({ globalBudget: malformed, perUserBudget: 5, userSpend: 0 });
+      await expect(service.assertWithinBudget("user-1")).rejects.toThrow(ServiceUnavailableException);
+    });
+
+    it.each([
+      ["a string", "5" as any],
+      ["NaN", NaN],
+      ["Infinity", Infinity],
+      ["zero", 0],
+      ["a negative number", -1],
+    ])("Phase 9.4 (test 5/6): a malformed per-user budget (%s) fails safely, identically to a missing one", async (_label, malformed) => {
+      const { service } = makeService({ globalBudget: 100, globalSpend: 0, perUserBudget: malformed });
+      await expect(service.assertWithinBudget("user-1")).rejects.toThrow(ServiceUnavailableException);
+    });
+
+    it("Phase 9.4 (test 9): does not throw when both budgets are validly configured and spend is below both", async () => {
       const { service } = makeService({ globalBudget: 10, perUserBudget: 2, globalSpend: 5, userSpend: 0.5 });
       await expect(service.assertWithinBudget("user-1")).resolves.toBeUndefined();
     });
 
-    it("throws ServiceUnavailableException when today's global spend has reached the configured global daily budget", async () => {
-      const { service } = makeService({ globalBudget: 10, globalSpend: 10 });
+    it("Phase 9.4 (test 7): throws ServiceUnavailableException when today's global spend has reached the configured global daily budget", async () => {
+      const { service } = makeService({ globalBudget: 10, perUserBudget: 5, globalSpend: 10 });
       await expect(service.assertWithinBudget("user-1")).rejects.toThrow(ServiceUnavailableException);
     });
 
     it("throws ServiceUnavailableException when today's global spend has exceeded the configured global daily budget", async () => {
-      const { service } = makeService({ globalBudget: 10, globalSpend: 15 });
+      const { service } = makeService({ globalBudget: 10, perUserBudget: 5, globalSpend: 15 });
       await expect(service.assertWithinBudget("user-1")).rejects.toThrow(ServiceUnavailableException);
     });
 
-    it("throws ServiceUnavailableException when this user's own spend has reached the configured per-user daily budget, even though the global budget is fine", async () => {
+    it("Phase 9.4 (test 8): throws ServiceUnavailableException when this user's own spend has reached the configured per-user daily budget, even though the global budget is fine", async () => {
       const { service } = makeService({ globalBudget: 100, globalSpend: 1, perUserBudget: 1, userSpend: 1 });
       await expect(service.assertWithinBudget("user-1")).rejects.toThrow(ServiceUnavailableException);
     });
 
     it("checks the per-user spend for the exact user passed in, not a global aggregate", async () => {
-      const { service, prisma } = makeService({ perUserBudget: 5, userSpend: 1 });
+      const { service, prisma } = makeService({ globalBudget: 100, perUserBudget: 5, userSpend: 1 });
       await service.assertWithinBudget("user-42");
       expect(prisma.client.aIUsage.aggregate).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ userId: "user-42" }) }),
       );
     });
 
+    it("does not query per-user spend when the global check already fails (cheap check first, no wasted work)", async () => {
+      const { service, prisma } = makeService({ globalBudget: 10, perUserBudget: 5, globalSpend: 10 });
+      await expect(service.assertWithinBudget("user-1")).rejects.toThrow(ServiceUnavailableException);
+      expect(prisma.client.aIUsage.aggregate).toHaveBeenCalledTimes(1);
+      expect(prisma.client.aIUsage.aggregate).toHaveBeenCalledWith(expect.objectContaining({ where: expect.not.objectContaining({ userId: expect.anything() }) }));
+    });
+
     it("Phase 9.4B (B7): a budget change made through admin configuration is honored by the very next check — no caching of the old limit", async () => {
-      const { service, prisma } = makeService({ globalBudget: 5, globalSpend: 4.99 });
+      const { service, prisma } = makeService({ globalBudget: 5, perUserBudget: 5, globalSpend: 4.99 });
       await expect(service.assertWithinBudget("user-1")).resolves.toBeUndefined(); // below the $5 cap
 
       // Simulate the admin lowering the global budget via updateSpendingControls.
       prisma.client.systemConfig.findUnique.mockImplementation(({ where: { key } }: any) =>
-        Promise.resolve(key === "global_daily_ai_budget_usd" ? { value: 1 } : null),
+        Promise.resolve(
+          key === "global_daily_ai_budget_usd" ? { value: 1 } : key === "per_user_daily_ai_budget_usd" ? { value: 5 } : null,
+        ),
       );
       await expect(service.assertWithinBudget("user-1")).rejects.toThrow(ServiceUnavailableException); // $4.99 spent >= new $1 cap
+    });
+  });
+
+  /**
+   * Phase 9.4B, Objective 2: assertWithinBudget is a read-then-later-write
+   * check, NOT an atomic reservation like reserveDailySlot. Real USD cost
+   * is only known and written to AIUsage AFTER a successful provider call
+   * — a network round trip lasting from hundreds of milliseconds to
+   * several seconds. Any request that starts its check before another
+   * concurrent request's cost has been committed sees the SAME
+   * pre-request spend total, so both can pass even when, combined, they
+   * would exceed the configured budget. This is confirmed here at the
+   * unit level (two "concurrent" assertWithinBudget calls against a
+   * mocked aggregate that hasn't moved between them — exactly what real
+   * concurrent requests would observe against a real, not-yet-updated
+   * AIUsage table) rather than fixed — see the Phase 9.4B final report
+   * for why a real fix needs a schema change this phase does not make.
+   */
+  describe("assertWithinBudget — concurrent-request race (Phase 9.4B Objective 2, documented not fixed)", () => {
+    it("two simultaneous requests from the SAME user can both pass the per-user check against the same stale spend total, together exceeding the budget", async () => {
+      // Both requests observe $0.20 spent against a $0.25 cap — individually
+      // fine, but this user is about to make two $0.10 calls concurrently,
+      // which would total $0.40 > $0.25. Neither request's check can see
+      // the other's not-yet-committed cost, so both are allowed through.
+      const { service } = makeService({ globalBudget: 100, globalSpend: 0, perUserBudget: 0.25, userSpend: 0.2 });
+      const [first, second] = await Promise.allSettled([
+        service.assertWithinBudget("user-1"),
+        service.assertWithinBudget("user-1"),
+      ]);
+      expect(first.status).toBe("fulfilled");
+      expect(second.status).toBe("fulfilled"); // <- the race: a truly atomic check would have blocked this one
+    });
+
+    it("two simultaneous requests from DIFFERENT users can both pass the global check against the same stale spend total, together exceeding the global budget", async () => {
+      // Both observe $4.90 spent globally against a $5 cap — each is
+      // individually within budget, but concurrently they can jointly
+      // exceed it, and neither user's own per-user cap catches this
+      // because the overspend is on the GLOBAL total, not either
+      // individual user's total.
+      const { service } = makeService({ globalBudget: 5, globalSpend: 4.9, perUserBudget: 100, userSpend: 0 });
+      const [first, second] = await Promise.allSettled([
+        service.assertWithinBudget("user-1"),
+        service.assertWithinBudget("user-2"),
+      ]);
+      expect(first.status).toBe("fulfilled");
+      expect(second.status).toBe("fulfilled"); // <- same race, on the global total
+    });
+
+    it("by contrast, the COUNT-based reservation (reserveDailySlot) is genuinely race-safe under the same concurrent shape — this is what a real USD fix would need to match", async () => {
+      // Simulates Postgres: only the FIRST of two concurrent
+      // INSERT...ON CONFLICT...WHERE statements can win when the limit is
+      // 1 — the second's WHERE clause excludes it. This is real atomicity
+      // (enforced by Postgres, not JS), unlike assertWithinBudget above.
+      let called = false;
+      const { service, prisma } = makeService({ configuredLimit: 1 });
+      prisma.client.$queryRaw.mockImplementation(() => {
+        if (called) return Promise.resolve([]); // second caller: WHERE count < limit excludes the row
+        called = true;
+        return Promise.resolve([{ count: 1 }]); // first caller: wins the atomic slot
+      });
+      const [first, second] = await Promise.all([
+        service.reserveDailySlot("student-1", "subject-1"),
+        service.reserveDailySlot("student-1", "subject-1"),
+      ]);
+      const reservedCount = [first, second].filter((r) => r.reserved).length;
+      expect(reservedCount).toBe(1); // exactly one winner, unlike the USD race above
     });
   });
 

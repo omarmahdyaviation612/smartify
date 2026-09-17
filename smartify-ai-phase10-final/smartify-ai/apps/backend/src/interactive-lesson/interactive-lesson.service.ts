@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { AIProviderFactory } from "../ai/ai-provider.factory";
 import { AIContextBuilderService, LessonTeachingContext } from "../ai/context/ai-context-builder.service";
@@ -127,11 +127,11 @@ export class InteractiveLessonService {
     return { hasActiveSubscription, reservation };
   }
 
-  private async releaseEntitlement(profile: { id: string }, subjectId: string, reservation: { source: "daily" | "extra" | "free-trial" }) {
+  private async releaseEntitlement(profile: { id: string }, subjectId: string, reservation: { source: "daily" | "extra" | "free-trial"; usageDate?: Date }) {
     if (reservation.source === "daily") {
-      await this.usageService.releaseDailySlot(profile.id, subjectId).catch(() => undefined);
+      await this.usageService.releaseDailySlot(profile.id, subjectId, reservation.usageDate).catch(() => undefined);
     } else if (reservation.source === "extra") {
-      await this.questionPacks.refundExtraCredit(profile.id, subjectId).catch(() => undefined);
+      await this.questionPacks.refundExtraCredit(profile.id, subjectId, reservation.usageDate).catch(() => undefined);
     } else {
       await this.tutorService.releaseFreeTrial(profile.id, subjectId).catch(() => undefined);
     }
@@ -162,11 +162,36 @@ export class InteractiveLessonService {
     await this.usageService.assertWithinBudget(params.userId);
     const { provider, providerKey, model } = await this.providerFactory.getActiveProvider();
 
-    const result = await provider.generate({
-      systemPrompt: params.systemPrompt,
-      messages: [{ role: "user", content: params.userTurnLabel }],
-      responseFormat: params.responseFormat,
+    // Phase 9.4C: atomic USD reservation immediately before the provider
+    // call — self-contained to this one AI call (reserve, call, then
+    // reconcile-or-release below), independent of the outer per-session
+    // entitlement reservation (reserveEntitlement/releaseEntitlement),
+    // which is unrelated and unchanged.
+    const estimatedUsd = await this.usageService.estimateMaxChatCostUsd({
+      providerKey,
+      inputText: params.systemPrompt + params.userTurnLabel,
     });
+    const reserveResult = await this.usageService.reserveBudget(params.userId, estimatedUsd);
+    if (!reserveResult.ok) {
+      throw new ServiceUnavailableException(
+        reserveResult.reason === "misconfigured"
+          ? "The AI Tutor is temporarily unavailable. Please try again later."
+          : "The AI Tutor is temporarily unavailable due to daily usage limits. Please try again later.",
+      );
+    }
+    const budgetReservationId = reserveResult.reservationId;
+
+    let result: Awaited<ReturnType<typeof provider.generate>>;
+    try {
+      result = await provider.generate({
+        systemPrompt: params.systemPrompt,
+        messages: [{ role: "user", content: params.userTurnLabel }],
+        responseFormat: params.responseFormat,
+      });
+    } catch (err) {
+      await this.usageService.releaseBudget(budgetReservationId).catch(() => undefined);
+      throw err;
+    }
 
     const usageRow = await this.usageService.buildUsageRow({
       userId: params.userId,
@@ -179,6 +204,11 @@ export class InteractiveLessonService {
       feature: "lesson_chat",
       creditsUsed: 0,
     });
+
+    // Reconciles regardless of whether the AIMessage/AIUsage transaction
+    // below succeeds — real cost was already incurred at the provider
+    // either way (same philosophy as TutorService.sendMessage).
+    await this.usageService.reconcileBudget(budgetReservationId, usageRow.costUsd).catch(() => undefined);
 
     const contentToPersist = params.persistedContent ? params.persistedContent(result.content) : result.content;
 

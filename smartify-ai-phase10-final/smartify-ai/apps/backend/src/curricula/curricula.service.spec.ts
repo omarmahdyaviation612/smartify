@@ -2,6 +2,61 @@ import { NotFoundException } from "@nestjs/common";
 import { CurriculaService } from "./curricula.service";
 
 /**
+ * Phase 10C: getPublicCatalog() must never let a student pick a curriculum
+ * that dead-ends the very next onboarding step. isActive alone wasn't
+ * enough — LOCAL/BRITISH_INTL/AMERICAN_INTL were all `isActive: true` with
+ * zero active grades, so they showed up as selectable cards with no grade
+ * to choose afterward. Fixed at the data-contract level (the query itself
+ * excludes them), not a frontend-only filter.
+ */
+describe("CurriculaService.getPublicCatalog", () => {
+  function makeService(findManyImpl: (...args: any[]) => any) {
+    const prisma = { client: { curriculum: { findMany: jest.fn(findManyImpl) } } };
+    return { service: new CurriculaService(prisma as any), prisma };
+  }
+
+  it("CASE 7/8 — queries only active curricula that have at least one active grade (the exact backend data-contract fix)", async () => {
+    const { service, prisma } = makeService(() => []);
+    await service.getPublicCatalog();
+    expect(prisma.client.curriculum.findMany).toHaveBeenCalledTimes(1);
+    const call = prisma.client.curriculum.findMany.mock.calls[0][0];
+    expect(call.where).toEqual({ isActive: true, grades: { some: { isActive: true } } });
+  });
+
+  it("CASE 8 — an active curriculum with zero active grades is excluded by construction (the where clause itself filters it, not post-processing)", async () => {
+    // The `grades: { some: { isActive: true } }` clause means Prisma itself
+    // never returns LOCAL/BRITISH_INTL/AMERICAN_INTL-shaped rows here — this
+    // test documents that contract rather than re-implementing Prisma's
+    // filtering, which a mocked client can't meaningfully execute.
+    const { service } = makeService(() => [
+      { id: "eg", code: "EG_NATIONAL", nameEn: "Egyptian National", nameAr: "المصري", country: "EG", grades: [{ id: "g1", nameEn: "Grade 1", nameAr: "الأول", level: 1, subjects: [] }] },
+    ]);
+    const result = await service.getPublicCatalog();
+    expect(result.map((c: any) => c.code)).toEqual(["EG_NATIONAL"]);
+    expect(result.map((c: any) => c.code)).not.toEqual(expect.arrayContaining(["LOCAL", "BRITISH_INTL", "AMERICAN_INTL"]));
+  });
+
+  it("CASE 9 — Egyptian National Grade 1 remains available through the catalog", async () => {
+    const { service } = makeService(() => [
+      { id: "eg", code: "EG_NATIONAL", nameEn: "Egyptian National", nameAr: "المصري", country: "EG", grades: [{ id: "g1", nameEn: "Grade 1", nameAr: "الأول", level: 1, subjects: [{ id: "s1", nameEn: "Mathematics", nameAr: "الرياضيات", icon: "calculator" }] }] },
+    ]);
+    const result = await service.getPublicCatalog();
+    expect(result).toHaveLength(1);
+    expect(result[0].code).toBe("EG_NATIONAL");
+    expect(result[0].grades[0].nameEn).toBe("Grade 1");
+    expect(result[0].grades[0].subjects[0].nameEn).toBe("Mathematics");
+  });
+
+  it("still filters nested grades/subjects by isActive:true (unchanged from before — a placeholder grade under an otherwise-real curriculum stays hidden)", async () => {
+    const { service, prisma } = makeService(() => []);
+    await service.getPublicCatalog();
+    const call = prisma.client.curriculum.findMany.mock.calls[0][0];
+    expect(call.select.grades.where).toEqual({ isActive: true });
+    expect(call.select.grades.select.subjects.where).toEqual({ isActive: true });
+  });
+});
+
+/**
  * Regression: getStructureSample (public, unauthenticated /curricula/:code/
  * structure-sample) queried grades/subjects with no isActive filter at all,
  * unlike getPublicCatalog right above it in the same file. A real GET

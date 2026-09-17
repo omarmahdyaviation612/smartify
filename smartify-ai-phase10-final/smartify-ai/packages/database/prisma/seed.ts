@@ -11,6 +11,7 @@
  * tables — no schema change required.
  */
 import { PrismaClient, QuestionType, Difficulty } from "@prisma/client";
+import { seedAiBudgetConfig } from "./seed-ai-budget-config";
 
 const prisma = new PrismaClient();
 
@@ -246,25 +247,11 @@ async function main() {
   // USD-denominated circuit breaker in AIUsageService.assertWithinBudget
   // was fully dormant. Phase 9.4B sets the owner-approved initial
   // soft-launch caps — editable afterward from Admin > Platform Config >
-  // AI Spending Controls, never by editing this seed again.
-  await prisma.systemConfig.upsert({
-    where: { key: "global_daily_ai_budget_usd" },
-    update: {},
-    create: {
-      key: "global_daily_ai_budget_usd",
-      value: 5.0,
-      description: "Maximum combined AI/TTS spend allowed per day, across all students.",
-    },
-  });
-  await prisma.systemConfig.upsert({
-    where: { key: "per_user_daily_ai_budget_usd" },
-    update: {},
-    create: {
-      key: "per_user_daily_ai_budget_usd",
-      value: 0.25,
-      description: "Maximum AI/TTS spend one student may consume per day.",
-    },
-  });
+  // AI Spending Controls, never by editing this seed again. Extracted to
+  // seed-ai-budget-config.ts (Phase 9.4B re-verification) so it's
+  // unit-testable in isolation — same two upserts, same values, same
+  // create-only-if-missing semantics as before.
+  await seedAiBudgetConfig(prisma);
 
   // Phase 9.4B — owner-selected MVP voice (marin, on gpt-4o-mini-tts) from
   // the Stage A bake-off. See tts-config.util.ts for the canonical

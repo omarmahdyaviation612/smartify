@@ -82,4 +82,19 @@ for (const locale of ['en', 'ar']) {
     assert.ok(hrefs.includes(`/${locale}/privacy`), 'missing privacy link');
     assert.ok(hrefs.includes(`/${locale}/terms`), 'missing terms link');
   });
+
+  test(`${locale} privacy route discloses cookies, parent/student linking, and voice input handling (Phase 9.3 re-verification)`, async () => {
+    const page = await render('app/[locale]/privacy/page.tsx', locale);
+    const text = page.text();
+    assert.match(text, locale === 'ar' ? /ملفات تعريف الارتباط/ : /[Cc]ookies?/);
+    assert.match(text, locale === 'ar' ? /sf_locale/ : /sf_locale/);
+    assert.match(text, locale === 'ar' ? /رمز دعوة/ : /invitation code/);
+    assert.match(text, locale === 'ar' ? /الإدخال الصوتي/ : /[Vv]oice input/);
+    assert.match(text, locale === 'ar' ? /التعرف على الكلام/ : /speech recognition/i);
+  });
+
+  test(`${locale} terms route states there is no guarantee of grades or educational outcomes`, async () => {
+    const page = await render('app/[locale]/terms/page.tsx', locale);
+    assert.match(page.text(), locale === 'ar' ? /لا يضمن استخدام سمارتيفاي/ : /does not guarantee any particular grade/);
+  });
 }

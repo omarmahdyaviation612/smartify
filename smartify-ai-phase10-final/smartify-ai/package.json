@@ -13,6 +13,8 @@
     "db:generate": "pnpm --filter @smartify/database exec prisma generate",
     "db:seed": "pnpm --filter @smartify/database exec prisma db seed",
     "db:verify": "pnpm --filter @smartify/database exec tsx prisma/verify-seed.ts",
+    "db:budget-cleanup:preview": "pnpm --filter @smartify/database exec tsx prisma/cleanup-budget-reservations.ts --dry-run",
+    "db:budget-cleanup": "pnpm --filter @smartify/database exec tsx prisma/cleanup-budget-reservations.ts",
     "infra:up": "docker compose up -d --wait postgres redis",
     "infra:down": "docker compose down",
     "staging:verify": "pnpm db:deploy && pnpm db:seed && pnpm db:seed && pnpm db:verify"

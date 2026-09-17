@@ -7,6 +7,8 @@ import { getQuizzesCopy } from "@/content/quizzes";
 import { getMarketingCopy } from "@/content/marketing";
 import { Navbar } from "@/components/Navbar";
 import { useApiClient } from "@/lib/api-client";
+import { getQuestionOptionLabel } from "@/lib/question-option-label";
+import { getLocalizedExplanation } from "@/lib/localized-explanation";
 import type { Locale } from "@/content/marketing";
 import Link from "next/link";
 import { getLearningFeedback } from "@/content/learning-feedback";
@@ -41,6 +43,7 @@ interface QuizResult {
     yourAnswer: string;
     correctAnswer: string;
     explanationEn: string | null;
+    explanationAr: string | null;
   }>;
 }
 
@@ -69,6 +72,7 @@ export default function QuizzesPage() {
   const [questions, setQuestions] = useState<Question[] | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [result, setResult] = useState<QuizResult | null>(null);
+  const [assessmentMeta, setAssessmentMeta] = useState<{ requestedCount: number; returnedCount: number; isFullAssessment: boolean } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -117,9 +121,12 @@ export default function QuizzesPage() {
     try {
     const query = new URLSearchParams({ subjectId, type: quizType });
     if (quizType === "topic_assessment") query.set("topicId", topicId);
-    const data = await apiFetch<{ questions: Question[] }>(`/quizzes/questions?${query.toString()}`);
+    const data = await apiFetch<{ questions: Question[]; requestedCount: number; returnedCount: number; isFullAssessment: boolean }>(
+      `/quizzes/questions?${query.toString()}`,
+    );
     if (!data.questions.length) { setError(feedback.questionsUnavailable); return; }
     setQuestions(data.questions);
+    setAssessmentMeta({ requestedCount: data.requestedCount, returnedCount: data.returnedCount, isFullAssessment: data.isFullAssessment });
     setAnswers({});
     setResult(null);
     } catch (err: any) {
@@ -231,6 +238,11 @@ export default function QuizzesPage() {
 
           {questions && !result && (
             <div className="mt-8 space-y-6">
+              {quizType === "mock_exam" && assessmentMeta && !assessmentMeta.isFullAssessment && (
+                <p role="status" className="rounded-sf-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                  {copy.incompleteMockNotice(assessmentMeta.returnedCount, assessmentMeta.requestedCount)}
+                </p>
+              )}
               {questions.map((q, i) => (
                 <div key={q.id} className="rounded-sf-lg border border-neutral-200 bg-white p-6">
                   <p className="font-medium text-navy-900">
@@ -246,7 +258,7 @@ export default function QuizzesPage() {
                           checked={answers[q.id] === opt}
                           onChange={() => setAnswers((prev) => ({ ...prev, [q.id]: opt }))}
                         />
-                        {opt}
+                        {getQuestionOptionLabel(opt, locale)}
                       </label>
                     ))}
                   </div>
@@ -301,16 +313,16 @@ export default function QuizzesPage() {
                       b.isCorrect ? "bg-success-100 text-success-500" : "bg-error-100 text-error-500"
                     }`}
                   >
-                    {b.isCorrect ? "✓" : "✗"} {copy.yourAnswer}: {b.yourAnswer}
+                    {b.isCorrect ? "✓" : "✗"} {copy.yourAnswer}: {getQuestionOptionLabel(String(b.yourAnswer), locale)}
                   </span>
                   {!b.isCorrect && (
                     <p className="mt-2 text-sm text-neutral-600">
-                      {copy.correctAnswer}: {b.correctAnswer}
+                      {copy.correctAnswer}: {getQuestionOptionLabel(String(b.correctAnswer), locale)}
                     </p>
                   )}
-                  {b.explanationEn && (
+                  {getLocalizedExplanation(b.explanationEn, b.explanationAr, locale) && (
                     <p className="mt-2 text-sm text-neutral-500">
-                      <strong>{copy.explanationLabel}:</strong> {b.explanationEn}
+                      <strong>{copy.explanationLabel}:</strong> {getLocalizedExplanation(b.explanationEn, b.explanationAr, locale)}
                     </p>
                   )}
                 </div>

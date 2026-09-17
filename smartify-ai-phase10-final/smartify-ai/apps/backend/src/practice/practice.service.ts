@@ -68,8 +68,12 @@ export class PracticeService {
             .reduce<number | null>((acc, t, _i, arr) => (acc ?? 0) + t.percent / arr.length, null);
 
     const weights = pickDifficultyWeights(avgAccuracy);
+    // Phase 10E: isPlaceholder: false is load-bearing, not cosmetic — same
+    // rationale as the diagnostic's own filter (Phase 10D.1) and Quiz's
+    // (this phase) — seed/demo placeholder content must never reach a real
+    // student assessment flow.
     const allQuestions = await this.prisma.client.question.findMany({
-      where: { topicId: { in: topicIds } },
+      where: { topicId: { in: topicIds }, isPlaceholder: false },
       select: {
         id: true,
         topicId: true,
@@ -117,7 +121,7 @@ export class PracticeService {
     });
     const questionById = new Map(questions.map((q) => [q.id, q]));
 
-    const feedback: Array<{ questionId: string; isCorrect: boolean; correctAnswer: unknown; explanationEn: string | null }> = [];
+    const feedback: Array<{ questionId: string; isCorrect: boolean; correctAnswer: unknown; explanationEn: string | null; explanationAr: string | null }> = [];
     const attemptRows: Array<{ studentId: string; questionId: string; answerJson: any; isCorrect: boolean; source: string }> = [];
 
     for (const a of answers) {
@@ -125,7 +129,7 @@ export class PracticeService {
       if (!q) continue;
       const isCorrect = JSON.stringify(q.correctAnswerJson) === JSON.stringify(a.answer);
       attemptRows.push({ studentId: profile.id, questionId: q.id, answerJson: a.answer, isCorrect, source: "practice" });
-      feedback.push({ questionId: q.id, isCorrect, correctAnswer: q.correctAnswerJson, explanationEn: q.explanationEn });
+      feedback.push({ questionId: q.id, isCorrect, correctAnswer: q.correctAnswerJson, explanationEn: q.explanationEn, explanationAr: q.explanationAr });
     }
 
     await this.prisma.client.questionAttempt.createMany({ data: attemptRows });

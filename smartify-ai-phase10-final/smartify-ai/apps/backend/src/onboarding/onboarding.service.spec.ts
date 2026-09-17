@@ -75,6 +75,74 @@ describe("OnboardingService", () => {
     });
   });
 
+  /**
+   * Phase 10D.1: the diagnostic-availability fallback on the frontend is
+   * driven entirely by `getDiagnosticQuestions()` returning an empty
+   * array — so this query MUST exclude placeholder Questions (otherwise a
+   * subject with only seed/demo content would incorrectly look
+   * "available") and MUST stay scoped to the student's own selected
+   * subjects via relational IDs, never a name match.
+   */
+  describe("getDiagnosticQuestions — Phase 10D.1 availability fallback", () => {
+    function makeProfilePrismaMock(opts: { studentSubjects: any[]; findManyImpl?: (args: any) => any[] }) {
+      const findMany = jest.fn().mockImplementation(opts.findManyImpl ?? (() => []));
+      return {
+        client: {
+          studentProfile: { findUnique: jest.fn().mockResolvedValue({ id: "student-1" }) },
+          studentSubject: { findMany: jest.fn().mockResolvedValue(opts.studentSubjects) },
+          question: { findMany },
+        },
+      } as any;
+    }
+
+    const SUBJECT_WITH_TOPICS = {
+      subjectId: "subject-math",
+      subject: { units: [{ topics: [{ id: "topic-1" }, { id: "topic-2" }] }] },
+    };
+
+    it("CASE 7 — excludes isPlaceholder:true Questions from the query itself, not just a post-filter", async () => {
+      const prisma = makeProfilePrismaMock({ studentSubjects: [SUBJECT_WITH_TOPICS] });
+      const service = new OnboardingService(prisma);
+
+      await service.getDiagnosticQuestions("user-1");
+
+      const call = prisma.client.question.findMany.mock.calls[0][0];
+      expect(call.where).toEqual({ topicId: { in: ["topic-1", "topic-2"] }, isPlaceholder: false });
+    });
+
+    it("returns an empty array (not an error) when only placeholder Questions exist for the selected subjects", async () => {
+      // The mock question.findMany applies the where clause itself, proving
+      // the real filter — not just that some filter object was passed —
+      // actually excludes placeholder rows.
+      const ALL_QUESTIONS = [{ id: "q1", topicId: "topic-1", isPlaceholder: true }];
+      const prisma = makeProfilePrismaMock({
+        studentSubjects: [SUBJECT_WITH_TOPICS],
+        findManyImpl: ({ where }: any) => ALL_QUESTIONS.filter((q) => where.topicId.in.includes(q.topicId) && q.isPlaceholder === where.isPlaceholder),
+      });
+      const service = new OnboardingService(prisma);
+
+      const result = await service.getDiagnosticQuestions("user-1");
+      expect(result).toEqual([]);
+    });
+
+    it("CASE 8 — only queries topics under the student's own selected subjects, via relational IDs", async () => {
+      const prisma = makeProfilePrismaMock({
+        studentSubjects: [
+          { subjectId: "subject-math", subject: { units: [{ topics: [{ id: "topic-math-1" }] }] } },
+        ],
+      });
+      const service = new OnboardingService(prisma);
+
+      await service.getDiagnosticQuestions("user-1");
+
+      const call = prisma.client.question.findMany.mock.calls[0][0];
+      // Only the selected subject's own topic ids are ever in scope — a
+      // topic belonging to some other, unselected subject is never included
+      // because it was never in `studentSubjects` to begin with.
+      expect(call.where.topicId.in).toEqual(["topic-math-1"]);
+    });
+  });
+
   describe("submitDiagnostic — grading correctness", () => {
     function makeQuestion(id: string, subjectId: string, correctAnswer: string) {
       return {

@@ -94,8 +94,16 @@ export class OnboardingService {
 
     // A small, mixed-difficulty spread — enough to produce a meaningful
     // per-subject score without turning onboarding into a long exam.
+    //
+    // Phase 10D.1: isPlaceholder: false is load-bearing, not cosmetic — the
+    // frontend's diagnostic-availability fallback (an empty result here
+    // means "diagnostic unavailable, let the student continue") depends on
+    // this query returning zero rows for a subject that has only seed/demo
+    // placeholder Questions. Without this filter, a subject with nothing
+    // but placeholder content would incorrectly look "available" and serve
+    // non-curriculum content as if it were real.
     const questions = await this.prisma.client.question.findMany({
-      where: { topicId: { in: topicIds } },
+      where: { topicId: { in: topicIds }, isPlaceholder: false },
       take: 10,
       orderBy: { createdAt: "asc" },
       select: {

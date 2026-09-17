@@ -260,3 +260,53 @@ describe("AIContextBuilderService.buildLessonDraftGenerationPrompt (Phase 5)", (
     expect(prompt).toContain('Topic to plan: "Addition with Zero"');
   });
 });
+
+describe("AIContextBuilderService.buildQuestionDraftGenerationPrompt (Phase 10E)", () => {
+  const service = new AIContextBuilderService();
+  const questionCtx = {
+    curriculumNameEn: "Egyptian National Curriculum (Arabic, Pilot)",
+    gradeNameEn: "Grade 1",
+    subjectNameEn: "Mathematics",
+    unitNameEn: "Addition",
+    topicNameEn: "Addition (Part 1)",
+    learningFocus: "Assess simple one-digit addition within 10.",
+    difficulty: "EASY",
+    studentAgeRange: "6-7",
+  };
+
+  it("reuses the shared copyright-safety / originality rules", () => {
+    const prompt = service.buildQuestionDraftGenerationPrompt(questionCtx);
+    expect(prompt).toMatch(/do not reproduce or closely paraphrase/i);
+    expect(prompt).toMatch(/never mention or imply a source file, pdf, page number, or ministry endorsement/i);
+  });
+
+  it("only asks for MVP-ready types, never SHORT_ANSWER/FILL_BLANK/MATCHING/STEP_PROBLEM", () => {
+    const prompt = service.buildQuestionDraftGenerationPrompt(questionCtx);
+    expect(prompt).toContain('"MULTIPLE_CHOICE" | "TRUE_FALSE"');
+    expect(prompt).not.toMatch(/SHORT_ANSWER|FILL_BLANK|MATCHING|STEP_PROBLEM/);
+  });
+
+  it("never asks the model for Arabic content — a human reviewer supplies it separately", () => {
+    const prompt = service.buildQuestionDraftGenerationPrompt(questionCtx);
+    expect(prompt).toMatch(/human reviewer supplies the arabic separately/i);
+    expect(prompt).not.toMatch(/promptAr|explanationAr/);
+  });
+
+  it("instructs exact-match-safe answer formatting", () => {
+    const prompt = service.buildQuestionDraftGenerationPrompt(questionCtx);
+    expect(prompt).toMatch(/character-for-character identical to exactly one entry/i);
+    expect(prompt).toMatch(/exact-match with no normalization/i);
+  });
+
+  it("includes retry feedback verbatim when a previous attempt failed validation", () => {
+    const prompt = service.buildQuestionDraftGenerationPrompt(questionCtx, ['Duplicate options: "4".']);
+    expect(prompt).toContain("PREVIOUS ATTEMPT WAS REJECTED");
+    expect(prompt).toContain('Duplicate options: "4".');
+  });
+
+  it("embeds the exact resolved topic/unit context, not hand-typed strings", () => {
+    const prompt = service.buildQuestionDraftGenerationPrompt(questionCtx);
+    expect(prompt).toContain("Topic: Addition (Part 1)");
+    expect(prompt).toContain("Unit: Addition");
+  });
+});

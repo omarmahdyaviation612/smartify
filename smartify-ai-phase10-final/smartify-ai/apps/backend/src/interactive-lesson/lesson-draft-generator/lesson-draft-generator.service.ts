@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AIProviderFactory } from "../../ai/ai-provider.factory";
 import { AIContextBuilderService } from "../../ai/context/ai-context-builder.service";
@@ -105,14 +105,38 @@ export class LessonDraftGeneratorService {
       );
 
       const { provider, providerKey, model } = await this.providerFactory.getActiveProvider();
-      const result = await provider.generate({
-        systemPrompt,
-        messages: [{ role: "user", content: "Generate the lesson draft now." }],
-        responseFormat: "json_object",
+
+      // Phase 9.4C: atomic USD reservation per attempt — see the matching
+      // comment in QuestionDraftGeneratorService.generateDraft.
+      const estimatedUsd = await this.usageService.estimateMaxChatCostUsd({
+        providerKey,
+        inputText: systemPrompt + "Generate the lesson draft now.",
       });
+      const reserveResult = await this.usageService.reserveBudget(requestingUserId, estimatedUsd);
+      if (!reserveResult.ok) {
+        throw new ServiceUnavailableException(
+          reserveResult.reason === "misconfigured"
+            ? "AI content generation is temporarily unavailable. Please try again later."
+            : "AI content generation is temporarily unavailable due to daily usage limits. Please try again later.",
+        );
+      }
+      const budgetReservationId = reserveResult.reservationId;
+
+      let result: Awaited<ReturnType<typeof provider.generate>>;
+      try {
+        result = await provider.generate({
+          systemPrompt,
+          messages: [{ role: "user", content: "Generate the lesson draft now." }],
+          responseFormat: "json_object",
+        });
+      } catch (err) {
+        await this.usageService.releaseBudget(budgetReservationId).catch(() => undefined);
+        throw err;
+      }
       callsMade++;
 
-      await this.logUsage(requestingUserId, providerKey, model, result.inputTokens, result.outputTokens);
+      const actualCostUsd = await this.logUsage(requestingUserId, providerKey, model, result.inputTokens, result.outputTokens);
+      await this.usageService.reconcileBudget(budgetReservationId, actualCostUsd).catch(() => undefined);
 
       let parsed: unknown;
       try {
@@ -153,7 +177,8 @@ export class LessonDraftGeneratorService {
     );
   }
 
-  private async logUsage(userId: string, providerKey: string, model: string, inputTokens: number, outputTokens: number) {
+  /** Returns the computed costUsd so callers can reconcile the matching USD budget reservation to the exact same figure. */
+  private async logUsage(userId: string, providerKey: string, model: string, inputTokens: number, outputTokens: number): Promise<number> {
     const rates = await this.providerFactory.getCostRates(providerKey);
     const costUsd = inputTokens * rates.costPerInputToken + outputTokens * rates.costPerOutputToken;
     await this.prisma.client.aIUsage
@@ -172,5 +197,6 @@ export class LessonDraftGeneratorService {
         },
       })
       .catch((err) => this.logger.warn(`Usage log failed (content still generated): ${err instanceof Error ? err.message : String(err)}`));
+    return costUsd;
   }
 }

@@ -237,6 +237,7 @@ model Topic {
 
   lessons   Lesson[]
   questions Question[]
+  questionDrafts QuestionDraft[]
   tutorAnswerCache TutorAnswerCache[]
   materials LearningMaterial[]
   lessonSessions LessonSession[]
@@ -405,8 +406,57 @@ model Question {
   createdAt         DateTime     @default(now())
 
   attempts QuestionAttempt[]
+  publishedFromDraft QuestionDraft?
 
   @@index([topicId, difficulty])
+}
+
+// Phase 10E: a Question Bank draft awaiting human review — mirrors
+// LessonDraft's proven pending_review -> approved -> published pipeline
+// exactly (see LessonDraft's own doc comment). NEVER a real Question row —
+// nothing in Diagnostic/Practice/Quiz/Mock queries QuestionDraft, so a
+// draft sitting here in any status can never reach a student regardless of
+// content. Becoming a real, gradeable Question is a separate, explicit
+// publish step (QuestionPublishService.publish()), gated on
+// QuestionPublishService.approve() having already passed the deterministic
+// validator (question-draft-validator.ts) AND required human-reviewed
+// bilingual content being present — the AI's own proposed Arabic (if any)
+// is never trusted or auto-applied, exactly like LessonDraft.objectiveAr.
+model QuestionDraft {
+  id                String       @id @default(cuid())
+  topicId           String
+  topic             Topic        @relation(fields: [topicId], references: [id])
+  type              QuestionType
+  difficulty        Difficulty
+  promptEn          String       @db.Text
+  // Starts null on every AI-generated draft regardless of what the model
+  // proposed — a human reviewer must explicitly supply it (see
+  // QuestionPublishService.reviewDraft()) before approve() will accept
+  // the draft. Never auto-trusted AI output.
+  promptAr          String?      @db.Text
+  optionsJson       Json? // choices for MULTIPLE_CHOICE/TRUE_FALSE
+  correctAnswerJson Json
+  explanationEn     String?      @db.Text
+  explanationAr     String?      @db.Text
+  status            String       @default("pending_review") // "pending_review" | "approved" | "rejected" | "published"
+  isAiGenerated     Boolean      @default(false)
+  aiProvider        String?
+  aiModel           String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  reviewedAt        DateTime?
+  reviewedByUserId  String?
+  rejectionReason   String?
+
+  // Idempotent publish linkage — same pattern as LessonDraft.publishedTopicId:
+  // unique so at most one draft can ever claim to have published a given
+  // Question, and re-publishing an already-published draft is a safe no-op.
+  publishedQuestionId String?   @unique
+  publishedQuestion   Question? @relation(fields: [publishedQuestionId], references: [id])
+  publishedAt         DateTime?
+
+  @@index([status])
+  @@index([topicId])
 }
 
 model QuestionAttempt {
@@ -632,6 +682,65 @@ model AIDailyUsageCounter {
   updatedAt DateTime @updatedAt
 
   @@unique([studentId, subjectId, usageDate])
+}
+
+// Phase 9.4C: the USD-denominated sibling of AIDailyUsageCounter above —
+// same atomic "INSERT ... ON CONFLICT ... WHERE ... RETURNING" reservation
+// pattern, applied to money instead of a question count, because
+// AIUsageService.assertWithinBudget's SELECT-SUM-then-compare check is a
+// classic TOCTOU race: two concurrent requests can both read the same
+// pre-request spend total and both pass, together exceeding the budget
+// (see AIUsageService.assertWithinBudget's Phase 9.4B test coverage,
+// which proves the race exists). One table serves BOTH the global cap and
+// every per-user cap via the (scope, scopeKey) discriminator — "global"
+// rows use scopeKey="global"; per-user rows use scopeKey=userId — rather
+// than two near-identical tables. `committedUsd` is the current best
+// estimate of total USD exposure for that scope+day, whether still
+// in-flight (an unreconciled reservation's estimate) or already actual
+// (a reconciled reservation's real cost) — AIBudgetReservation below is
+// the per-request record of which reservation contributed what, needed
+// for idempotent release/reconcile; this table alone cannot answer "did
+// request X already reconcile" and is never queried directly by request
+// code, only atomically incremented/decremented by AIUsageService.
+model AIDailyBudgetCounter {
+  id          String   @id @default(cuid())
+  scope       String // "global" | "user"
+  scopeKey    String // "global" for the single global row; StudentProfile-independent userId for a per-user row
+  usageDate   DateTime // truncated to the day (00:00) — one row per scope+scopeKey+day
+  committedUsd Decimal @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@unique([scope, scopeKey, usageDate])
+}
+
+enum AIBudgetReservationStatus {
+  RESERVED
+  RECONCILED
+  RELEASED
+}
+
+// Phase 9.4C: one row per individual reserveBudget() call — the durable,
+// cross-process idempotency record Objective 4 requires. Its `id` is the
+// reservation token callers hold onto; reconcileBudget()/releaseBudget()
+// both do an atomic "UPDATE ... WHERE id = ? AND status = 'RESERVED'"
+// status transition before touching AIDailyBudgetCounter, so a second
+// call with the same id (a retry, a duplicate release-then-reconcile,
+// etc.) matches zero rows and is a safe no-op — the accumulator is never
+// adjusted twice for the same reservation. estimatedUsd is fixed at
+// reserve time (what was actually deducted from both accumulator rows);
+// reconciledUsd is filled in only on a successful RECONCILED transition.
+model AIBudgetReservation {
+  id            String                     @id @default(cuid())
+  userId        String
+  usageDate     DateTime // truncated to the day (00:00) — must match the AIDailyBudgetCounter rows this reservation touched
+  estimatedUsd  Decimal
+  reconciledUsd Decimal?
+  status        AIBudgetReservationStatus  @default(RESERVED)
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([status])
 }
 
 // Phase 10 concurrency/idempotency hardening: payment providers

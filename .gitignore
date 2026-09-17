@@ -8,3 +8,7 @@ curriculum-sources/
 # Local browser-automation QA artifacts (snapshots/screenshots/console logs) —
 # session debris from manual testing, not project content.
 .playwright-cli/
+
+# Isolated Next.js 15/React 19/Clerk 6 migration evaluation snapshot — local
+# reference only (diagnostic logs, trace evidence), not tracked history.
+migration-evaluation-20260917/

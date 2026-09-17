@@ -28,8 +28,10 @@ describe("TutorService", () => {
     providerFactoryError?: Error;
     conversation?: any;
     assertWithinBudget?: jest.Mock;
+    reserveBudgetResult?: { ok: true; reservationId: string } | { ok: false; reason: "misconfigured" | "global_exceeded" | "user_exceeded" };
   } = {}) {
     const releaseDailySlot = jest.fn().mockResolvedValue(undefined);
+    const releaseBudget = jest.fn().mockResolvedValue(undefined);
     const prisma = {
       client: {
         studentProfile: { findUnique: jest.fn().mockResolvedValue(studentProfile) },
@@ -73,12 +75,16 @@ describe("TutorService", () => {
       buildUsageRow: jest.fn().mockResolvedValue({ costUsd: 0.0001 }),
       getRemainingToday: jest.fn().mockResolvedValue({ used: 1, limit: 10, remaining: 9 }),
       logUntrackedUsage: jest.fn(),
+      estimateMaxChatCostUsd: jest.fn().mockResolvedValue(0.001),
+      reserveBudget: jest.fn().mockResolvedValue(overrides.reserveBudgetResult ?? { ok: true, reservationId: "reservation-1" }),
+      reconcileBudget: jest.fn().mockResolvedValue(undefined),
+      releaseBudget,
     } as any;
 
     const questionPacks = {
       consumeForTutor: jest.fn().mockImplementation(async () => {
         if (overrides.reserveResult && !overrides.reserveResult.reserved) throw new ForbiddenException("No questions remaining");
-        return { source: "daily", limit: 10 };
+        return { source: "daily", limit: 10, usageDate: new Date("2026-09-15T00:00:00.000Z") };
       }),
       getRemaining: jest.fn().mockResolvedValue({ dailyRemaining: 9, extraRemaining: 3, totalRemaining: 12, packPriceEGP: 50, packSize: 10 }),
     } as any;
@@ -86,7 +92,7 @@ describe("TutorService", () => {
       find: jest.fn().mockResolvedValue(null),
       save: jest.fn().mockResolvedValue(undefined),
     } as any;
-    return { service: new TutorService(prisma, providerFactory, contextBuilder, usageService, questionPacks, answerCache), prisma, usageService, releaseDailySlot, questionPacks };
+    return { service: new TutorService(prisma, providerFactory, contextBuilder, usageService, questionPacks, answerCache), prisma, usageService, releaseDailySlot, releaseBudget, questionPacks };
   }
 
   it("rejects an empty message before reserving a slot or calling the provider", async () => {
@@ -114,6 +120,32 @@ describe("TutorService", () => {
     await expect(service.sendMessage("user-1", { subjectId: "subject-1", message: "hi" })).rejects.toThrow(ServiceUnavailableException);
     expect(usageService.reserveDailySlot).not.toHaveBeenCalled();
     expect(questionPacks.consumeForTutor).not.toHaveBeenCalled();
+  });
+
+  it("Phase 9.4C (test 2/3): rejects the message when the atomic budget RESERVATION is refused (after the cheap assertWithinBudget check passed) — the provider is never called", async () => {
+    const providerGenerate = jest.fn();
+    const { service } = makeService({ reserveBudgetResult: { ok: false, reason: "global_exceeded" }, providerGenerate });
+    await expect(service.sendMessage("user-1", { subjectId: "subject-1", message: "hi" })).rejects.toThrow(ServiceUnavailableException);
+    expect(providerGenerate).not.toHaveBeenCalled();
+  });
+
+  it("Phase 9.4C: the existing daily-count slot (already reserved before the atomic budget check runs, per the unchanged ordering) is released when the budget reservation is then refused", async () => {
+    const { service, releaseDailySlot } = makeService({ reserveBudgetResult: { ok: false, reason: "user_exceeded" } });
+    await expect(service.sendMessage("user-1", { subjectId: "subject-1", message: "hi" })).rejects.toThrow(ServiceUnavailableException);
+    expect(releaseDailySlot).toHaveBeenCalledWith("student-1", "subject-1", new Date("2026-09-15T00:00:00.000Z"));
+  });
+
+  it("Phase 9.4C (test 7): releases the budget reservation (not just the slot) when the provider call itself fails", async () => {
+    const failingGenerate = jest.fn().mockRejectedValue(new Error("provider down"));
+    const { service, releaseBudget } = makeService({ providerGenerate: failingGenerate });
+    await expect(service.sendMessage("user-1", { subjectId: "subject-1", message: "hi" })).rejects.toThrow("provider down");
+    expect(releaseBudget).toHaveBeenCalledWith("reservation-1");
+  });
+
+  it("Phase 9.4C (test 8): reconciles the budget reservation to the real cost after a successful provider call", async () => {
+    const { service, usageService } = makeService();
+    await service.sendMessage("user-1", { subjectId: "subject-1", message: "hi" });
+    expect(usageService.reconcileBudget).toHaveBeenCalledWith("reservation-1", 0.0001);
   });
 
   it("allows students without an active subscription to use their one-time free trial", async () => {
@@ -157,7 +189,20 @@ describe("TutorService", () => {
     const { service, releaseDailySlot } = makeService({ providerGenerate: failingGenerate });
 
     await expect(service.sendMessage("user-1", { subjectId: "subject-1", message: "hi" })).rejects.toThrow();
-    expect(releaseDailySlot).toHaveBeenCalledWith("student-1", "subject-1");
+    expect(releaseDailySlot).toHaveBeenCalledWith("student-1", "subject-1", new Date("2026-09-15T00:00:00.000Z"));
+  });
+
+  it("refunds the original quota day when a mocked provider failure arrives after midnight", async () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-09-15T23:59:59.999Z"));
+    try {
+      const { service, releaseDailySlot, questionPacks } = makeService({ providerGenerate: jest.fn(async () => {
+        jest.setSystemTime(new Date("2026-09-16T00:00:00.000Z"));
+        throw new Error("mock failure");
+      }) });
+      questionPacks.consumeForTutor.mockResolvedValue({ source: "daily", limit: 10, usageDate: new Date("2026-09-15T00:00:00.000Z") });
+      await expect(service.sendMessage("user-1", { subjectId: "subject-1", message: "hi" })).rejects.toThrow("mock failure");
+      expect(releaseDailySlot).toHaveBeenCalledWith("student-1", "subject-1", new Date("2026-09-15T00:00:00.000Z"));
+    } finally { jest.useRealTimers(); }
   });
 
   describe("conversation context (regression: unrelated follow-up reusing the previous answer's structure)", () => {
@@ -239,27 +284,27 @@ describe("TutorService", () => {
       const authError = Object.assign(new Error("Incorrect API key provided"), { status: 401 });
       const { service, releaseDailySlot } = makeService({ providerGenerate: jest.fn().mockRejectedValue(authError) });
       await expect(service.sendMessage("user-1", { subjectId: "subject-1", message: "hi" })).rejects.toThrow("Incorrect API key provided");
-      expect(releaseDailySlot).toHaveBeenCalledWith("student-1", "subject-1");
+      expect(releaseDailySlot).toHaveBeenCalledWith("student-1", "subject-1", new Date("2026-09-15T00:00:00.000Z"));
     });
 
     it("releases the slot and propagates a useful error on provider 429/rate limit", async () => {
       const rateLimitError = Object.assign(new Error("Rate limit reached"), { status: 429 });
       const { service, releaseDailySlot } = makeService({ providerGenerate: jest.fn().mockRejectedValue(rateLimitError) });
       await expect(service.sendMessage("user-1", { subjectId: "subject-1", message: "hi" })).rejects.toThrow("Rate limit reached");
-      expect(releaseDailySlot).toHaveBeenCalledWith("student-1", "subject-1");
+      expect(releaseDailySlot).toHaveBeenCalledWith("student-1", "subject-1", new Date("2026-09-15T00:00:00.000Z"));
     });
 
     it("releases the slot and propagates a useful error on provider timeout", async () => {
       const timeoutError = Object.assign(new Error("Request timed out"), { code: "ETIMEDOUT" });
       const { service, releaseDailySlot } = makeService({ providerGenerate: jest.fn().mockRejectedValue(timeoutError) });
       await expect(service.sendMessage("user-1", { subjectId: "subject-1", message: "hi" })).rejects.toThrow("Request timed out");
-      expect(releaseDailySlot).toHaveBeenCalledWith("student-1", "subject-1");
+      expect(releaseDailySlot).toHaveBeenCalledWith("student-1", "subject-1", new Date("2026-09-15T00:00:00.000Z"));
     });
 
     it("releases the slot when no AI provider is configured/available at all", async () => {
       const { service, releaseDailySlot } = makeService({ providerFactoryError: new ServiceUnavailableException("No active AI provider is configured.") });
       await expect(service.sendMessage("user-1", { subjectId: "subject-1", message: "hi" })).rejects.toThrow("No active AI provider is configured.");
-      expect(releaseDailySlot).toHaveBeenCalledWith("student-1", "subject-1");
+      expect(releaseDailySlot).toHaveBeenCalledWith("student-1", "subject-1", new Date("2026-09-15T00:00:00.000Z"));
     });
 
     it("does not crash on an empty/malformed provider response, and does not release the slot (real cost was still incurred)", async () => {
@@ -290,7 +335,7 @@ describe("TutorService", () => {
     await expect(
       service.sendMessage("user-1", { subjectId: "subject-1", conversationId: "conv-x", message: "hi" }),
     ).rejects.toThrow(ForbiddenException);
-    expect(releaseDailySlot).toHaveBeenCalledWith("student-1", "subject-1");
+    expect(releaseDailySlot).toHaveBeenCalledWith("student-1", "subject-1", new Date("2026-09-15T00:00:00.000Z"));
   });
 
   it("does NOT release the slot on a successful reply, even if the message-persist transaction fails", async () => {

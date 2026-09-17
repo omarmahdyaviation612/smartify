@@ -35,8 +35,19 @@ function makePrisma(opts: { profile?: any; conversation?: any; matchingMessage?:
   return { prisma, usageCreate };
 }
 
-function makeUsageService(assertWithinBudget = jest.fn().mockResolvedValue(undefined)) {
-  return { assertWithinBudget } as any;
+function makeUsageService(
+  assertWithinBudget = jest.fn().mockResolvedValue(undefined),
+  reserveBudgetResult: { ok: true; reservationId: string } | { ok: false; reason: "misconfigured" | "global_exceeded" | "user_exceeded" } = {
+    ok: true,
+    reservationId: "reservation-1",
+  },
+) {
+  return {
+    assertWithinBudget,
+    reserveBudget: jest.fn().mockResolvedValue(reserveBudgetResult),
+    reconcileBudget: jest.fn().mockResolvedValue(undefined),
+    releaseBudget: jest.fn().mockResolvedValue(undefined),
+  } as any;
 }
 
 describe("TutorSpeechService", () => {
@@ -108,6 +119,35 @@ describe("TutorSpeechService", () => {
     const service = new TutorSpeechService(prisma, makeUsageService(assertWithinBudget));
     await service.synthesize({ userId: "user-1", conversationId: CONVERSATION_ID, text: "Hello" });
     expect(assertWithinBudget).toHaveBeenCalledWith("user-1");
+  });
+
+  it("Phase 9.4C: rejects when the atomic budget RESERVATION is refused (even though the cheap early assertWithinBudget check passed), without calling OpenAI", async () => {
+    const { prisma } = makePrisma();
+    const usageService = makeUsageService(jest.fn().mockResolvedValue(undefined), { ok: false, reason: "user_exceeded" });
+    const service = new TutorSpeechService(prisma, usageService);
+    await expect(service.synthesize({ userId: "user-1", conversationId: CONVERSATION_ID, text: "Hello" })).rejects.toThrow(
+      ServiceUnavailableException,
+    );
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("Phase 9.4C: releases the budget reservation when the OpenAI call itself fails, and never reconciles it", async () => {
+    mockCreate.mockRejectedValue(new Error("OpenAI down"));
+    const { prisma } = makePrisma();
+    const usageService = makeUsageService();
+    const service = new TutorSpeechService(prisma, usageService);
+    await expect(service.synthesize({ userId: "user-1", conversationId: CONVERSATION_ID, text: "Hello" })).rejects.toThrow("OpenAI down");
+    expect(usageService.releaseBudget).toHaveBeenCalledWith("reservation-1");
+    expect(usageService.reconcileBudget).not.toHaveBeenCalled();
+  });
+
+  it("Phase 9.4C: reconciles the budget reservation to the real billed cost after a successful synthesis", async () => {
+    mockCreate.mockResolvedValue(fakeAudioResponse());
+    const { prisma } = makePrisma();
+    const usageService = makeUsageService();
+    const service = new TutorSpeechService(prisma, usageService);
+    await service.synthesize({ userId: "user-1", conversationId: CONVERSATION_ID, text: "Hello" });
+    expect(usageService.reconcileBudget).toHaveBeenCalledWith("reservation-1", expect.any(Number));
   });
 
   it("rejects empty/whitespace-only text before calling OpenAI", async () => {

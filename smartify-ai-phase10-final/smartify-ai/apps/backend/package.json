@@ -7,7 +7,8 @@
     "dev": "nest start --watch",
     "start": "node dist/main.js",
     "lint": "eslint \"src/**/*.ts\"",
-    "test": "jest"
+    "test": "jest",
+    "test:postgres-integration": "jest --testPathIgnorePatterns=/node_modules/ --testPathPattern=\\.postgres\\.spec\\.ts$"
   },
   "dependencies": {
     "@clerk/backend": "^1.6.2",

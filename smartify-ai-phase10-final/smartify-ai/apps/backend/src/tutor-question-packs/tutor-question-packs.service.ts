@@ -18,7 +18,8 @@ export class TutorQuestionPacksService {
 
   private startOfToday() {
     const date = new Date();
-    date.setHours(0, 0, 0, 0);
+    // Same UTC day as the included AI quota and USD budget.
+    date.setUTCHours(0, 0, 0, 0);
     return date;
   }
 
@@ -35,10 +36,11 @@ export class TutorQuestionPacksService {
   }
 
   async getRemaining(userId: string, subjectId: string) {
+    const usageDate = this.startOfToday();
     const profile = await this.getStudentSubject(userId, subjectId);
-    const daily = await this.usageService.getRemainingToday(profile.id, subjectId);
+    const daily = await this.usageService.getRemainingToday(profile.id, subjectId, usageDate);
     const credits = await this.prisma.client.tutorExtraQuestionCredit.findUnique({
-      where: { studentId_subjectId_usageDate: { studentId: profile.id, subjectId, usageDate: this.startOfToday() } },
+      where: { studentId_subjectId_usageDate: { studentId: profile.id, subjectId, usageDate } },
     });
     const extraRemaining = credits?.remaining ?? 0;
     return {
@@ -50,23 +52,26 @@ export class TutorQuestionPacksService {
     };
   }
 
-  async consumeForTutor(studentId: string, subjectId: string): Promise<{ source: "daily" | "extra"; limit: number }> {
-    const daily = await this.usageService.reserveDailySlot(studentId, subjectId);
-    if (daily.reserved) return { source: "daily", limit: daily.limit };
+  async consumeForTutor(studentId: string, subjectId: string): Promise<{ source: "daily" | "extra"; limit: number; usageDate: Date }> {
+    // Internal reservation metadata, never part of an HTTP response. Refunds
+    // must use this day even when a failed request finishes after midnight.
+    const usageDate = this.startOfToday();
+    const daily = await this.usageService.reserveDailySlot(studentId, subjectId, usageDate);
+    if (daily.reserved) return { source: "daily", limit: daily.limit, usageDate };
 
     const credits = await this.prisma.client.tutorExtraQuestionCredit.updateMany({
-      where: { studentId, subjectId, usageDate: this.startOfToday(), remaining: { gt: 0 } },
+      where: { studentId, subjectId, usageDate, remaining: { gt: 0 } },
       data: { remaining: { decrement: 1 } },
     });
     if (credits.count === 0) {
       throw new ForbiddenException(`You've used today's ${daily.limit} AI questions for this subject. Buy 10 more questions for 50 EGP.`);
     }
-    return { source: "extra", limit: daily.limit };
+    return { source: "extra", limit: daily.limit, usageDate };
   }
 
-  async refundExtraCredit(studentId: string, subjectId: string) {
+  async refundExtraCredit(studentId: string, subjectId: string, usageDate = this.startOfToday()) {
     await this.prisma.client.tutorExtraQuestionCredit.updateMany({
-      where: { studentId, subjectId, usageDate: this.startOfToday() },
+      where: { studentId, subjectId, usageDate },
       data: { remaining: { increment: 1 } },
     });
   }
@@ -124,6 +129,8 @@ export class TutorQuestionPacksService {
   }
 
   async applyPaidPurchase(providerKey: string, purchaseId: string, externalEventId: string) {
+    // Capture once: an awaited update must not move the upsert to tomorrow.
+    const usageDate = this.startOfToday();
     const purchase = await this.prisma.client.tutorQuestionPackPurchase.findUnique({ where: { id: purchaseId } });
     if (!purchase) throw new NotFoundException("Question pack purchase not found.");
     if (purchase.status === "paid") return;
@@ -141,14 +148,14 @@ export class TutorQuestionPacksService {
           studentId_subjectId_usageDate: {
             studentId: purchase.studentId,
             subjectId: purchase.subjectId,
-            usageDate: this.startOfToday(),
+            usageDate,
           },
         },
         update: { remaining: { increment: PACK_SIZE }, purchaseId },
         create: {
           studentId: purchase.studentId,
           subjectId: purchase.subjectId,
-          usageDate: this.startOfToday(),
+          usageDate,
           remaining: PACK_SIZE,
           purchaseId,
         },

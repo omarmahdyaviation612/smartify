@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { AIUsageService } from "../ai/usage/ai-usage.service";
 import { stripMarkdownForSpeech } from "./speech-text.util";
@@ -82,7 +82,42 @@ export class TutorSpeechService {
       throw new BadRequestException(`Text is too long to synthesize (max ${MAX_INPUT_CHARS} characters).`);
     }
 
-    const { audio, billedUnits } = await provider.synthesize({ text: spoken });
+    // Phase 9.4C: atomic USD reservation immediately before the provider
+    // call. TTS cost is deterministic (billedUnits === spoken.length,
+    // confirmed in openai-tts.provider.ts), so the "estimate" here is
+    // exactly the real cost, not a worst-case ceiling like the chat path
+    // — reconciliation below should always land at delta=0 in practice,
+    // but goes through the same path for consistency and defense in
+    // depth. Skipped entirely when cost is genuinely zero (e.g. a
+    // zero-cost provider stub) — nothing to protect against there.
+    const estimatedUsd = spoken.length * provider.costPerUnitUsd;
+    let budgetReservationId: string | null = null;
+    if (estimatedUsd > 0) {
+      const reserveResult = await this.usageService.reserveBudget(input.userId, estimatedUsd);
+      if (!reserveResult.ok) {
+        throw new ServiceUnavailableException(
+          reserveResult.reason === "misconfigured"
+            ? "The AI Tutor is temporarily unavailable. Please try again later."
+            : "The AI Tutor is temporarily unavailable due to daily usage limits. Please try again later.",
+        );
+      }
+      budgetReservationId = reserveResult.reservationId;
+    }
+
+    let audio: Buffer;
+    let billedUnits: number;
+    try {
+      ({ audio, billedUnits } = await provider.synthesize({ text: spoken }));
+    } catch (err) {
+      if (budgetReservationId) {
+        await this.usageService.releaseBudget(budgetReservationId).catch(() => undefined);
+      }
+      throw err;
+    }
+
+    if (budgetReservationId) {
+      await this.usageService.reconcileBudget(budgetReservationId, billedUnits * provider.costPerUnitUsd).catch(() => undefined);
+    }
 
     await this.prisma.client.aIUsage.create({
       data: {

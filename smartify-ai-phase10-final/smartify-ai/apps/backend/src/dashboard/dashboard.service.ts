@@ -61,17 +61,21 @@ export class DashboardService {
       attemptedAt: a.attemptedAt,
     }));
 
-    // Phase 4: the small multi-topic Interactive Lesson pilot. Every
-    // interactive topic in the system today belongs to this one pilot (a
-    // handful of rows total), so listing them all directly is correct and
-    // far simpler than wiring proper StudentSubject-based scoping for a
-    // set this small — that scoping belongs to a later phase once
-    // interactive topics actually span more than one pilot subject.
+    // Phase 10C: scoped strictly to the student's own selected subjects —
+    // and, defensively, to their own grade too (never trusting subjectIds
+    // alone to already be grade-correct, in case a future bug elsewhere
+    // ever lets a StudentSubject point at the wrong grade's subject).
+    // Relational IDs only, never a name match. `subjectIds` empty (no
+    // subjects selected yet) naturally yields zero topics via `{ in: [] }`
+    // — no separate "incomplete profile" branch needed; this is the
+    // fail-closed behavior by construction, not a special case.
+    //
     // Prisma's JSON-column null filters need the Prisma.JsonNull sentinel,
     // not a plain `null`, to distinguish SQL NULL from a JSON "null" value —
     // simplest to just filter in JS instead of fighting that at the query
-    // level; ~50 topics total at this pilot's scale, cheap either way.
+    // level; cheap at this scale either way.
     const allTopics = await this.prisma.client.topic.findMany({
+      where: { unit: { subjectId: { in: subjectIds }, subject: { gradeId: profile.gradeId } } },
       include: { unit: true },
       orderBy: [{ unit: { order: "asc" } }, { order: "asc" }],
     });

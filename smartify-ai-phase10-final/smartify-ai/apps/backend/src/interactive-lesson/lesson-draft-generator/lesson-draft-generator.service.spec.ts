@@ -1,3 +1,4 @@
+import { ServiceUnavailableException } from "@nestjs/common";
 import { AIContextBuilderService } from "../../ai/context/ai-context-builder.service";
 import { LessonDraftGenerationError, LessonDraftGeneratorService } from "./lesson-draft-generator.service";
 import type { LessonGenerationInput } from "./lesson-draft.types";
@@ -36,7 +37,12 @@ const DB_UNIT = {
   },
 };
 
-function makeHarness(opts: { generateImpl?: (args: any) => any; assertWithinBudget?: jest.Mock; unit?: any } = {}) {
+function makeHarness(opts: {
+  generateImpl?: (args: any) => any;
+  assertWithinBudget?: jest.Mock;
+  unit?: any;
+  reserveBudgetResult?: { ok: true; reservationId: string } | { ok: false; reason: "misconfigured" | "global_exceeded" | "user_exceeded" };
+} = {}) {
   const createdDrafts: any[] = [];
   const usageRows: any[] = [];
   let draftCounter = 0;
@@ -63,13 +69,20 @@ function makeHarness(opts: { generateImpl?: (args: any) => any; assertWithinBudg
     getCostRates: jest.fn().mockResolvedValue({ costPerInputToken: 0.0000005, costPerOutputToken: 0.0000015 }),
   } as any;
 
+  const reserveBudget = jest.fn().mockResolvedValue(opts.reserveBudgetResult ?? { ok: true, reservationId: "reservation-1" });
+  const reconcileBudget = jest.fn().mockResolvedValue(undefined);
+  const releaseBudget = jest.fn().mockResolvedValue(undefined);
   const usageService = {
     assertWithinBudget: opts.assertWithinBudget ?? jest.fn().mockResolvedValue(undefined),
+    estimateMaxChatCostUsd: jest.fn().mockResolvedValue(0.001),
+    reserveBudget,
+    reconcileBudget,
+    releaseBudget,
   } as any;
 
   const service = new LessonDraftGeneratorService(prisma, providerFactory, new AIContextBuilderService(), usageService);
 
-  return { service, prisma, createdDrafts, usageRows, generateSpy, providerFactory, usageService };
+  return { service, prisma, createdDrafts, usageRows, generateSpy, providerFactory, usageService, reserveBudget, reconcileBudget, releaseBudget };
 }
 
 describe("LessonDraftGeneratorService.resolveUnitContext (Phase 6, Part A)", () => {
@@ -145,6 +158,28 @@ describe("LessonDraftGeneratorService", () => {
     const h = makeHarness({ assertWithinBudget: jest.fn().mockRejectedValue(new Error("budget exceeded")) });
     await expect(h.service.generateDraft(INPUT, "user-1")).rejects.toThrow("budget exceeded");
     expect(h.generateSpy).not.toHaveBeenCalled();
+  });
+
+  it("Phase 9.4C: rejects when the atomic budget RESERVATION is refused (even though the cheap early assertWithinBudget check passed), without calling the provider", async () => {
+    const h = makeHarness({ reserveBudgetResult: { ok: false, reason: "global_exceeded" } });
+    await expect(h.service.generateDraft(INPUT, "user-1")).rejects.toThrow(ServiceUnavailableException);
+    expect(h.generateSpy).not.toHaveBeenCalled();
+  });
+
+  it("Phase 9.4C: releases the budget reservation when the provider call itself fails", async () => {
+    const h = makeHarness({ generateImpl: async () => { throw new Error("provider down"); } });
+    await expect(h.service.generateDraft(INPUT, "user-1")).rejects.toThrow("provider down");
+    expect(h.releaseBudget).toHaveBeenCalledWith("reservation-1");
+    expect(h.reconcileBudget).not.toHaveBeenCalled();
+  });
+
+  it("Phase 9.4C: reconciles the budget reservation to the exact real cost logged for that attempt", async () => {
+    const h = makeHarness();
+    await h.service.generateDraft(INPUT, "user-1");
+    expect(h.reconcileBudget).toHaveBeenCalledTimes(1);
+    const [reservationId, actualCostUsd] = h.reconcileBudget.mock.calls[0];
+    expect(reservationId).toBe("reservation-1");
+    expect(actualCostUsd).toBeCloseTo(0.00035, 10); // 100*0.0000005 + 200*0.0000015
   });
 
   it("Phase 10B: persists objectives in the bilingual shape with objectiveAr always null — the AI never supplies a reviewed Arabic translation", async () => {

@@ -32,10 +32,10 @@ export interface OnboardingCopy {
   diagnostic: {
     title: string;
     body: string;
-    placeholderNotice: string;
     submitLabel: string;
     loading: string;
     noQuestions: string;
+    noQuestionsContinueLabel: string;
     error: string;
   };
   planReady: {
@@ -81,10 +81,10 @@ const en: OnboardingCopy = {
   diagnostic: {
     title: "Quick diagnostic",
     body: "A short set of questions across your selected subjects, so we know where to start.",
-    placeholderNotice: "This uses our current placeholder question bank — not final curriculum content.",
     submitLabel: "Submit Answers",
     loading: "Loading questions...",
-    noQuestions: "No questions are available for your selected subjects yet.",
+    noQuestions: "Your diagnostic assessment isn't available yet for these subjects. You can continue and start learning now.",
+    noQuestionsContinueLabel: "Continue",
     error: "Something went wrong loading the diagnostic. Please try again.",
   },
   planReady: {
@@ -130,10 +130,10 @@ const ar: OnboardingCopy = {
   diagnostic: {
     title: "تقييم سريع",
     body: "مجموعة قصيرة من الأسئلة عبر المواد التي اخترتها، حتى نعرف من أين نبدأ.",
-    placeholderNotice: "يستخدم هذا التقييم بنك أسئلة تجريبي حاليًا — وليس محتوى المنهج النهائي.",
     submitLabel: "إرسال الإجابات",
     loading: "جاري تحميل الأسئلة...",
-    noQuestions: "لا توجد أسئلة متاحة للمواد التي اخترتها حتى الآن.",
+    noQuestions: "التقييم التشخيصي لسه مش متاح للمواد دي. تقدر تكمل وتبدأ التعلّم دلوقتي.",
+    noQuestionsContinueLabel: "متابعة",
     error: "حدث خطأ أثناء تحميل التقييم. حاول مرة أخرى.",
   },
   planReady: {

@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { Prisma } from "@smartify/database";
 import { PrismaService } from "../prisma/prisma.service";
 import { TopicAccuracyService } from "../analytics/topic-accuracy.service";
+import { shuffleQuestionPool } from "./shuffle-question-pool";
 
 type QuizType = "topic_assessment" | "mock_exam";
 
@@ -34,8 +35,24 @@ export class QuizzesService {
    * created. The client holds the question set locally and submits
    * everything together via submitQuiz(), which is the only place
    * grading and QuizResult creation happen.
+   *
+   * Phase 10E hardening:
+   *  - isPlaceholder: false is load-bearing (same rationale as the
+   *    diagnostic's own filter, Phase 10D.1) — seed/demo placeholder
+   *    content must never reach a real assessment flow.
+   *  - the eligible pool is shuffled BEFORE `take` questions are sliced
+   *    off, so repeated requests don't deterministically return the same
+   *    first N rows just because DB order happens to be stable (Phase
+   *    10D finding). `rng` is injectable for deterministic tests only —
+   *    production callers always get the default Math.random.
+   *  - the response now also reports requestedCount/availableCount/
+   *    returnedCount/isFullAssessment so a caller can tell an undersized
+   *    pool apart from a full assessment, rather than silently returning
+   *    fewer questions and looking identical to a real 8/20-question quiz.
+   *    Purely additive — existing clients reading only `.questions` are
+   *    unaffected.
    */
-  async getQuizQuestions(userId: string, subjectId: string, type: QuizType, topicId?: string) {
+  async getQuizQuestions(userId: string, subjectId: string, type: QuizType, topicId?: string, rng: () => number = Math.random) {
     const profile = await this.getProfileOrThrow(userId);
     this.assertSubjectOwned(profile, subjectId);
 
@@ -47,10 +64,9 @@ export class QuizzesService {
     const topics = await this.prisma.client.topic.findMany({ where: topicWhere });
     if (topics.length === 0) throw new BadRequestException("No topics found for this quiz.");
 
-    const take = type === "mock_exam" ? 20 : 8;
-    const questions = await this.prisma.client.question.findMany({
-      where: { topicId: { in: topics.map((t) => t.id) } },
-      take,
+    const requestedCount = type === "mock_exam" ? 20 : 8;
+    const eligible = await this.prisma.client.question.findMany({
+      where: { topicId: { in: topics.map((t) => t.id) }, isPlaceholder: false },
       select: {
         id: true,
         topicId: true,
@@ -63,7 +79,18 @@ export class QuizzesService {
       },
     });
 
-    return { quizType: type, subjectId, topicId: topicId ?? null, questions };
+    const questions = shuffleQuestionPool(eligible, rng).slice(0, requestedCount);
+
+    return {
+      quizType: type,
+      subjectId,
+      topicId: topicId ?? null,
+      questions,
+      requestedCount,
+      availableCount: eligible.length,
+      returnedCount: questions.length,
+      isFullAssessment: questions.length === requestedCount,
+    };
   }
 
   async submitQuiz(
@@ -87,6 +114,7 @@ export class QuizzesService {
       yourAnswer: unknown;
       correctAnswer: unknown;
       explanationEn: string | null;
+      explanationAr: string | null;
       topicNameEn: string;
       topicNameAr: string;
     }> = [];
@@ -104,6 +132,7 @@ export class QuizzesService {
         yourAnswer: a.answer,
         correctAnswer: q.correctAnswerJson,
         explanationEn: q.explanationEn,
+        explanationAr: q.explanationAr,
         topicNameEn: q.topic.nameEn,
         topicNameAr: q.topic.nameAr,
       });

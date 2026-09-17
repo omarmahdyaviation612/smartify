@@ -30,7 +30,7 @@ export interface LegalPageCopy {
   terms: LegalCopy;
 }
 
-const LAST_UPDATED = "2026-09-13";
+const LAST_UPDATED = "2026-09-16";
 
 const en: LegalPageCopy = {
   privacy: {
@@ -44,9 +44,11 @@ const en: LegalPageCopy = {
         paragraphs: [
           "Account and authentication information: your name and email address, managed through our authentication provider (Clerk), and an account identifier used to link your activity across the platform.",
           "Student profile information: age, country, and the curriculum, grade, and subjects you or your child are enrolled in.",
+          "Parent/student relationship information: if a parent or guardian links to a student's account using an invitation code, we store that link and, if the student or account owner has enabled it, whether the linked parent may also view the student's AI tutor conversation history. A linked parent can see the student's progress and activity through their own parent dashboard.",
           "Learning activity: lessons viewed, practice and quiz attempts, answers submitted, topic mastery, and related progress data used to personalize what is taught next.",
           "AI tutor interactions: the questions and messages you send to the AI tutor and the responses generated for you, which are necessary to provide tutoring within your current lesson and topic.",
           "Audio generated for lessons: where text-to-speech is used to read lesson content aloud, the underlying lesson text is processed to generate that audio.",
+          "Voice input: where you use the microphone to speak to the AI tutor instead of typing, your speech is converted to text by your own device's or browser's built-in speech recognition — we do not receive or process the raw audio of your voice. Only the resulting text is sent to Smartify AI, the same as if you had typed it.",
           "Subscription and payment information: the plan and subjects you select, and billing amounts. For manual InstaPay payments specifically, we collect the payment reference code, the amount and sender name you submit, and the receipt image you upload, along with the outcome of our review of that receipt.",
           "Administrative and security records: logs of administrative actions (such as verifying or rejecting a payment) and technical/service logs used to operate and secure the platform.",
         ],
@@ -73,6 +75,12 @@ const en: LegalPageCopy = {
         heading: "Sharing of information",
         paragraphs: [
           "Smartify AI does not sell your personal information. We share information only with the service providers needed to operate the platform — currently Clerk for authentication and OpenAI for AI tutoring and audio generation — and, for payment submissions, with the administrators who review and verify them.",
+        ],
+      },
+      {
+        heading: "Cookies and essential technical data",
+        paragraphs: [
+          "Smartify AI uses a small number of cookies needed for the platform to work: an authentication session cookie set by our authentication provider (Clerk) to keep you signed in, and a language-preference cookie (sf_locale) that remembers whether you use the site in Arabic or English, stored for up to one year. We do not currently use advertising or third-party tracking cookies.",
         ],
       },
       {
@@ -117,6 +125,7 @@ const en: LegalPageCopy = {
         heading: "The service",
         paragraphs: [
           "Smartify AI is an educational assistance platform that provides curriculum-aligned lessons, practice, an AI tutor, and progress tracking. Smartify AI is a learning aid — it does not replace teachers, schools, or official educational institutions, and is not an official curriculum or examination authority.",
+          "Using Smartify AI does not guarantee any particular grade, exam result, or other educational outcome. Study results depend on many factors outside our control, including individual effort and official school assessment.",
         ],
       },
       {
@@ -208,9 +217,11 @@ const ar: LegalPageCopy = {
         paragraphs: [
           "معلومات الحساب والتحقق من الهوية: اسمك وبريدك الإلكتروني، تتم إدارتهما عبر مزوّد المصادقة الخاص بنا (Clerk)، بالإضافة إلى معرّف حساب يُستخدم لربط نشاطك عبر المنصة.",
           "معلومات الملف الدراسي للطالب: العمر والدولة، والمنهج والصف والمواد التي أنت أو طفلك مسجّل بها.",
+          "معلومات العلاقة بين ولي الأمر والطالب: إذا قام أحد الوالدين أو ولي الأمر بربط حسابه بحساب الطالب باستخدام رمز دعوة، فإننا نحتفظ بسجل هذا الربط، وبما إذا كان الطالب أو صاحب الحساب قد فعّل السماح لولي الأمر المرتبط بالاطلاع على سجل محادثات المعلم الذكي. يمكن لولي الأمر المرتبط الاطلاع على تقدم الطالب ونشاطه من خلال لوحة تحكم ولي الأمر الخاصة به.",
           "نشاط التعلم: الدروس التي تمت مشاهدتها، محاولات التدريب والاختبارات، الإجابات المُرسلة، ومستوى الإتقان في كل موضوع، وبيانات التقدم المرتبطة بها والمستخدمة لتخصيص ما يتم تدريسه لاحقًا.",
           "التفاعل مع المعلم الذكي: الأسئلة والرسائل التي ترسلها إلى المعلم الذكي والردود التي يتم توليدها لك، وهي ضرورية لتقديم الشرح ضمن درسك وموضوعك الحالي.",
           "الصوت المُولَّد للدروس: عند استخدام تحويل النص إلى صوت لقراءة محتوى الدرس، تتم معالجة نص الدرس لتوليد ذلك الصوت.",
+          "الإدخال الصوتي: عند استخدامك للميكروفون للتحدث إلى المعلم الذكي بدلًا من الكتابة، يتم تحويل كلامك إلى نص بواسطة ميزة التعرف على الكلام المدمجة في جهازك أو متصفحك — نحن لا نستقبل أو نعالج التسجيل الصوتي الخام لصوتك. يتم إرسال النص الناتج فقط إلى سمارتيفاي AI، تمامًا كما لو كنت قد كتبته.",
           "معلومات الاشتراك والدفع: الخطة والمواد التي تختارها، ومبالغ الفوترة. وبالنسبة لعمليات الدفع اليدوي عبر إنستاباي تحديدًا، نجمع رمز مرجع الدفع، والمبلغ واسم المُرسل اللذين تُرسلهما، وصورة الإيصال التي ترفعها، إلى جانب نتيجة مراجعتنا لهذا الإيصال.",
           "سجلات إدارية وأمنية: سجلات الإجراءات الإدارية (مثل تأكيد أو رفض عملية دفع) وسجلات تقنية/تشغيلية تُستخدم لتشغيل المنصة وحمايتها.",
         ],
@@ -237,6 +248,12 @@ const ar: LegalPageCopy = {
         heading: "مشاركة المعلومات",
         paragraphs: [
           "لا تبيع سمارتيفاي AI معلوماتك الشخصية. نشارك المعلومات فقط مع مزودي الخدمة اللازمين لتشغيل المنصة — حاليًا Clerk للمصادقة وOpenAI لتشغيل المعلم الذكي وتوليد الصوت — وبالنسبة لعمليات الدفع، مع المشرفين الذين يراجعونها ويؤكدونها.",
+        ],
+      },
+      {
+        heading: "ملفات تعريف الارتباط والبيانات التقنية الأساسية",
+        paragraphs: [
+          "تستخدم سمارتيفاي AI عددًا محدودًا من ملفات تعريف الارتباط (الكوكيز) اللازمة لعمل المنصة: ملف جلسة مصادقة يضبطه مزوّد المصادقة الخاص بنا (Clerk) لإبقائك مسجّل الدخول، وملف تفضيل اللغة (sf_locale) الذي يتذكر ما إذا كنت تستخدم الموقع بالعربية أو الإنجليزية، ويُحفظ لمدة تصل إلى سنة واحدة. لا نستخدم حاليًا ملفات تعريف ارتباط إعلانية أو لتتبع طرف ثالث.",
         ],
       },
       {
@@ -281,6 +298,7 @@ const ar: LegalPageCopy = {
         heading: "الخدمة",
         paragraphs: [
           "سمارتيفاي AI منصة مساعدة تعليمية تقدم دروسًا متوافقة مع المنهج، وتدريبًا، ومعلمًا ذكيًا، ومتابعة للتقدم. سمارتيفاي AI أداة مساعدة في التعلم — ولا تحل محل المعلمين أو المدارس أو الجهات التعليمية الرسمية، وليست جهة رسمية للمناهج أو الامتحانات.",
+          "لا يضمن استخدام سمارتيفاي AI الحصول على درجة أو نتيجة امتحان معينة أو أي نتيجة تعليمية أخرى. تعتمد نتائج الدراسة على عوامل عديدة خارجة عن سيطرتنا، منها الجهد الفردي والتقييم المدرسي الرسمي.",
         ],
       },
       {

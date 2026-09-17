@@ -19,6 +19,8 @@ export interface QuizzesCopy {
   correctAnswer: string;
   explanationLabel: string;
   takeAnother: string;
+  /** Shown before the questions when a Mock Exam's pool is smaller than the intended size (isFullAssessment: false) — never hardcode the counts, always use the real returned/requested values. */
+  incompleteMockNotice: (returnedCount: number, requestedCount: number) => string;
 }
 
 const en: QuizzesCopy = {
@@ -40,6 +42,8 @@ const en: QuizzesCopy = {
   correctAnswer: "Correct answer",
   explanationLabel: "Explanation",
   takeAnother: "Take Another Quiz",
+  incompleteMockNotice: (returnedCount, requestedCount) =>
+    `This practice mock currently contains ${returnedCount} of the intended ${requestedCount} questions. More questions will be added as new content becomes available.`,
 };
 
 const ar: QuizzesCopy = {
@@ -61,6 +65,8 @@ const ar: QuizzesCopy = {
   correctAnswer: "الإجابة الصحيحة",
   explanationLabel: "الشرح",
   takeAnother: "خذ اختبارًا آخر",
+  incompleteMockNotice: (returnedCount, requestedCount) =>
+    `الاختبار التجريبي متاح حاليًا بـ ${returnedCount} أسئلة من أصل ${requestedCount} سؤالًا. سيتم إضافة المزيد من الأسئلة مع توفر محتوى جديد.`,
 };
 
 const copyByLocale: Record<Locale, QuizzesCopy> = { en, ar };
