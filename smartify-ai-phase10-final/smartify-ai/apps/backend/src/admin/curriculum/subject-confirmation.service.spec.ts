@@ -1,5 +1,7 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { AdminCurriculumService } from "./admin-curriculum.service";
+import { confirmExtraBookStructureSchema } from "@smartify/validation";
+import { parseBody } from "../../common/validation/parse-body";
 
 /**
  * Admin New Subject + Textbook Ingestion V1 (2026-09-20) — AdminCurriculumService's
@@ -238,6 +240,32 @@ describe("AdminCurriculumService.analyzeExtraBook", () => {
 });
 
 describe("AdminCurriculumService.confirmExtraBookStructure", () => {
+  it.each([
+    ["Anne & the Dolphin", 15],
+    ["White Fang", 81],
+  ])("accepts the manual Step 3 payload for %s", async (bookLabel, pageCount) => {
+    const { service, tocExtraction, unitCreateCalls, topicCreateManyCalls } = makeService({ pdfPageCount: pageCount });
+    const input = parseBody(confirmExtraBookStructureSchema, JSON.parse(JSON.stringify({
+      bookLabel,
+      units: [{
+        nameEn: `Story — ${bookLabel}`,
+        nameAr: `قصة — ${bookLabel}`,
+        sourcePageStart: 1,
+        sourcePageEnd: pageCount,
+        topics: [{ nameEn: "Chapter 1", nameAr: "الفصل 1" }],
+      }],
+    })));
+
+    const result = await service.confirmExtraBookStructure("subject-1", input);
+
+    expect(result).toMatchObject({ unitsCreated: 1, topicsCreated: 1 });
+    expect(tocExtraction.getPageCount).toHaveBeenCalledWith("subject-1", { sourceOverride: result.sourceFileOverride });
+    expect(unitCreateCalls[0]).toMatchObject({ sourcePageStart: 1, sourcePageEnd: pageCount, sourceFileOverride: result.sourceFileOverride });
+    expect(topicCreateManyCalls[0][0]).toMatchObject({ nameEn: "Chapter 1" });
+    expect(topicCreateManyCalls[0][0]).not.toHaveProperty("teachingStepsJson");
+    expect(tocExtraction.extract).not.toHaveBeenCalled();
+  });
+
   it("A/E. appends new Units+Topics under the existing Subject, with correct Topic nesting", async () => {
     const { service, tx, unitCreateCalls, topicCreateManyCalls } = makeService();
     const result = await service.confirmExtraBookStructure("subject-1", validExtraBookInput());

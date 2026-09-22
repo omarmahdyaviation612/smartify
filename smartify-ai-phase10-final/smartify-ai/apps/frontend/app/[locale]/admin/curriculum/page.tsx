@@ -305,10 +305,12 @@ function UnitsTopicsEditor({ units, onChange }: { units: DraftUnit[]; onChange: 
             <div className="flex flex-wrap items-center gap-2">
               <input className={editorInputCls} value={unit.nameEn} onChange={(e) => updateUnit(uIndex, { nameEn: e.target.value })} placeholder="Unit name (English)" />
               <input className={editorInputCls} value={unit.nameAr} onChange={(e) => updateUnit(uIndex, { nameAr: e.target.value })} placeholder="اسم الوحدة" dir="rtl" />
-              <span className="text-xs text-neutral-400">pages</span>
-              <input type="number" className={`${editorInputCls} w-20`} value={unit.sourcePageStart} onChange={(e) => updateUnit(uIndex, { sourcePageStart: Number(e.target.value) })} />
-              <span className="text-xs text-neutral-400">→</span>
-              <input type="number" className={`${editorInputCls} w-20`} value={unit.sourcePageEnd} onChange={(e) => updateUnit(uIndex, { sourcePageEnd: Number(e.target.value) })} />
+              <div dir="ltr" className="flex items-center gap-2">
+                <span className="text-xs text-neutral-400">pages</span>
+                <input type="number" aria-label="Unit start page" className={`${editorInputCls} w-20`} value={unit.sourcePageStart} onChange={(e) => updateUnit(uIndex, { sourcePageStart: Number(e.target.value) })} />
+                <span className="text-xs text-neutral-400">→</span>
+                <input type="number" aria-label="Unit end page" className={`${editorInputCls} w-20`} value={unit.sourcePageEnd} onChange={(e) => updateUnit(uIndex, { sourcePageEnd: Number(e.target.value) })} />
+              </div>
               <button onClick={() => moveUnit(uIndex, -1)} disabled={uIndex === 0} className="text-xs text-neutral-500 disabled:opacity-30">
                 ↑
               </button>
