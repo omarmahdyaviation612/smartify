@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getPracticeCopy } from "@/content/practice";
@@ -41,6 +41,8 @@ interface Feedback {
 
 export default function PracticePage() {
   const { locale } = useParams<{ locale: Locale }>();
+  const searchParams = useSearchParams();
+  const requestedSubjectId = searchParams.get("subjectId");
   const isAr = locale === "ar";
   const copy = getPracticeCopy(locale);
   const navCopy = getMarketingCopy(locale);
@@ -69,7 +71,9 @@ export default function PracticePage() {
       .then((data) => {
         if (!active) return;
         setSubjects(data.subjects);
-        if (data.subjects[0]) setSubjectId(data.subjects[0].id);
+        const requested = requestedSubjectId && data.subjects.some((s) => s.id === requestedSubjectId) ? requestedSubjectId : null;
+        if (requested) setSubjectId(requested);
+        else if (data.subjects[0]) setSubjectId(data.subjects[0].id);
         else setNotOnboarded(true);
       })
       .catch((err) => {

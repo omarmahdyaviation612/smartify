@@ -289,6 +289,15 @@ export class TutorService {
         systemPrompt,
         messages: conversationMessages,
       });
+      // Trimmed once, here — the model routinely emits a trailing space
+      // before its closing quote, and /tutor/speech trims its own input
+      // before matching against the persisted AIMessage.content, so an
+      // untrimmed reply here would persist/cache/return one string but be
+      // compared against a different (trimmed) one, breaking voice
+      // playback for that turn (found 2026-09-19 in the Interactive
+      // Lesson engine's identical pattern — same shared TTS endpoint, so
+      // the same bug applies here unchanged).
+      result.content = result.content.trim();
 
       // --- Persist messages + cost ledger atomically ---
       // Both writes happen in one transaction so it's never possible to

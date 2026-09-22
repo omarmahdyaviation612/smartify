@@ -180,4 +180,146 @@ export class AdminAIConfigService {
 
     return this.getBudgetStatus();
   }
+
+  private startOfToday(): Date {
+    const d = new Date();
+    d.setUTCHours(0, 0, 0, 0);
+    return d;
+  }
+
+  private startOfMonth(): Date {
+    const d = new Date();
+    d.setUTCDate(1);
+    d.setUTCHours(0, 0, 0, 0);
+    return d;
+  }
+
+  /**
+   * Admin AI Cost / Budget Dashboard (2026-09-20) — platform-level split
+   * between real student-runtime spend (Lesson/Tutor/TTS) and platform
+   * content-authoring spend (grounding, TOC extraction, lesson/question
+   * generation — billed to CONTENT_AUTHORING_ACTOR_ID, never a student).
+   * The split is exactly AIUsage.studentId being set vs null — the SAME
+   * discriminator every content-authoring call site in this codebase
+   * already writes, not a new classification scheme. Reuses the existing
+   * AIUsage ledger only; no second accounting system.
+   */
+  async getCostOverview() {
+    const [todayRows, monthRows] = await Promise.all([
+      this.prisma.client.aIUsage.findMany({ where: { createdAt: { gte: this.startOfToday() } }, select: { costUsd: true, studentId: true } }),
+      this.prisma.client.aIUsage.findMany({ where: { createdAt: { gte: this.startOfMonth() } }, select: { costUsd: true, studentId: true } }),
+    ]);
+
+    const split = (rows: Array<{ costUsd: unknown; studentId: string | null }>) => {
+      let studentRuntimeUsd = 0;
+      let platformAuthoringUsd = 0;
+      for (const row of rows) {
+        if (row.studentId != null) studentRuntimeUsd += Number(row.costUsd);
+        else platformAuthoringUsd += Number(row.costUsd);
+      }
+      return { totalUsd: studentRuntimeUsd + platformAuthoringUsd, studentRuntimeUsd, platformAuthoringUsd };
+    };
+
+    return { today: split(todayRows), month: split(monthRows) };
+  }
+
+  /**
+   * Every student with at least one AIUsage row in the window, with
+   * today's real spend and remaining budget against the SAME shared
+   * per-user daily budget AIUsageService itself enforces — never a
+   * fabricated per-student limit. If no global per-user cap is
+   * configured, remaining is reported as null (matches getBudgetStatus's
+   * own convention) rather than guessed.
+   */
+  async listStudentSpend(windowDays = 30) {
+    const windowStart = new Date();
+    windowStart.setDate(windowStart.getDate() - windowDays);
+
+    const [todayRows, windowRows, perUserBudgetRow] = await Promise.all([
+      this.prisma.client.aIUsage.findMany({ where: { studentId: { not: null }, createdAt: { gte: this.startOfToday() } }, select: { userId: true, costUsd: true } }),
+      this.prisma.client.aIUsage.findMany({ where: { studentId: { not: null }, createdAt: { gte: windowStart } }, select: { userId: true, studentId: true, costUsd: true } }),
+      this.prisma.client.systemConfig.findUnique({ where: { key: PER_USER_BUDGET_KEY } }),
+    ]);
+    const perUserBudgetUsd = parseBudgetUsd(perUserBudgetRow?.value);
+
+    const todayByUserId = new Map<string, number>();
+    for (const row of todayRows) todayByUserId.set(row.userId, (todayByUserId.get(row.userId) ?? 0) + Number(row.costUsd));
+
+    const byUserId = new Map<string, { userId: string; studentId: string; windowUsd: number }>();
+    for (const row of windowRows) {
+      const entry = byUserId.get(row.userId) ?? { userId: row.userId, studentId: row.studentId as string, windowUsd: 0 };
+      entry.windowUsd += Number(row.costUsd);
+      byUserId.set(row.userId, entry);
+    }
+
+    const studentIds = [...byUserId.values()].map((entry) => entry.studentId);
+    const profiles = studentIds.length > 0
+      ? await this.prisma.client.studentProfile.findMany({ where: { id: { in: studentIds } }, select: { id: true, fullName: true, user: { select: { email: true } } } })
+      : [];
+    const profileByStudentId = new Map(profiles.map((profile) => [profile.id, profile]));
+
+    return [...byUserId.values()]
+      .map((entry) => {
+        const profile = profileByStudentId.get(entry.studentId);
+        const todayUsd = todayByUserId.get(entry.userId) ?? 0;
+        return {
+          studentId: entry.studentId,
+          fullName: profile?.fullName ?? "(unknown student)",
+          email: profile?.user.email ?? null,
+          todayUsd,
+          windowDays,
+          windowUsd: entry.windowUsd,
+          perUserBudgetUsd,
+          remainingTodayUsd: perUserBudgetUsd === null ? null : Math.max(0, perUserBudgetUsd - todayUsd),
+        };
+      })
+      .sort((a, b) => b.windowUsd - a.windowUsd);
+  }
+
+  /**
+   * Drill-down for one student: real AIUsage spend grouped by Subject
+   * (never including platform content-authoring rows — those never carry
+   * this student's studentId in the first place, so they cannot appear
+   * here even accidentally), and within each Subject, by feature
+   * (lesson_chat / tutor_chat / tutor_tts) wherever the stored data
+   * supports it.
+   */
+  async getStudentSpendDetail(studentId: string, windowDays = 30) {
+    const windowStart = new Date();
+    windowStart.setDate(windowStart.getDate() - windowDays);
+
+    const rows = await this.prisma.client.aIUsage.findMany({
+      where: { studentId, createdAt: { gte: windowStart } },
+      select: { subjectId: true, feature: true, costUsd: true },
+    });
+
+    const bySubjectId = new Map<string, { subjectId: string | null; costUsd: number; byFeature: Map<string, number> }>();
+    for (const row of rows) {
+      const key = row.subjectId ?? "__none__";
+      const entry = bySubjectId.get(key) ?? { subjectId: row.subjectId, costUsd: 0, byFeature: new Map<string, number>() };
+      entry.costUsd += Number(row.costUsd);
+      entry.byFeature.set(row.feature, (entry.byFeature.get(row.feature) ?? 0) + Number(row.costUsd));
+      bySubjectId.set(key, entry);
+    }
+
+    const subjectIds = [...bySubjectId.values()].map((entry) => entry.subjectId).filter((id): id is string => id != null);
+    const subjects = subjectIds.length > 0
+      ? await this.prisma.client.subject.findMany({ where: { id: { in: subjectIds } }, select: { id: true, nameEn: true, nameAr: true } })
+      : [];
+    const subjectById = new Map(subjects.map((subject) => [subject.id, subject]));
+
+    return {
+      windowDays,
+      totalUsd: rows.reduce((sum, row) => sum + Number(row.costUsd), 0),
+      bySubject: [...bySubjectId.values()]
+        .map((entry) => ({
+          subjectId: entry.subjectId,
+          subjectNameEn: entry.subjectId ? subjectById.get(entry.subjectId)?.nameEn ?? "(unknown subject)" : "(no subject)",
+          subjectNameAr: entry.subjectId ? subjectById.get(entry.subjectId)?.nameAr ?? "" : "",
+          costUsd: entry.costUsd,
+          byFeature: Object.fromEntries(entry.byFeature),
+        }))
+        .sort((a, b) => b.costUsd - a.costUsd),
+    };
+  }
 }

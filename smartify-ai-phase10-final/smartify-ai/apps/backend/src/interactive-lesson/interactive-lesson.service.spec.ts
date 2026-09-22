@@ -21,7 +21,7 @@ describe("InteractiveLessonService", () => {
     { id: "s7", type: "COMPLETE", order: 7, objective: "acknowledge completion" },
   ];
 
-  function makeHarness(opts: { generateImpl?: (args: any) => any; subscriptionActive?: boolean } = {}) {
+  function makeHarness(opts: { generateImpl?: (args: any) => any; studentSubjectRow?: { expiresAt: Date | null } } = {}) {
     const state: {
       profiles: Record<string, any>;
       topics: Record<string, any>;
@@ -107,7 +107,19 @@ describe("InteractiveLessonService", () => {
           findFirst: jest.fn().mockImplementation(async () => [...state.messages].reverse()[0] ?? null),
         },
         aIUsage: { create: jest.fn().mockImplementation(async ({ data }: any) => { state.usage.push(data); return data; }) },
-        subscription: { findUnique: jest.fn().mockResolvedValue(opts.subscriptionActive ? { status: "active" } : null) },
+        // Subject entitlement fix (2026-09-20): reserveEntitlement now
+        // checks StudentSubject for the specific Subject being opened —
+        // never account-wide Subscription — so this mock stands in for
+        // that row. No row (the default, opts.studentSubjectRow unset)
+        // means "not entitled", falling through to the trial path, the
+        // exact same default every OTHER test in this file already
+        // relies on.
+        studentSubject: {
+          findUnique: jest.fn().mockImplementation(async ({ where: { studentId_subjectId } }: any) => {
+            if (!opts.studentSubjectRow) return null;
+            return { studentId: studentId_subjectId.studentId, subjectId: studentId_subjectId.subjectId, expiresAt: opts.studentSubjectRow.expiresAt };
+          }),
+        },
         lesson: { findFirst: jest.fn().mockResolvedValue(null) },
         studentProgress: { upsert: jest.fn().mockResolvedValue({}) },
         lessonVisualAsset: { findUnique: jest.fn().mockResolvedValue(null) },
@@ -142,17 +154,43 @@ describe("InteractiveLessonService", () => {
       refundExtraCredit: jest.fn().mockResolvedValue(undefined),
     } as any;
 
-    const tutorService = {
-      reserveFreeTrial: jest.fn().mockImplementation(async (studentId: string) => {
+    // Free Trial V1 (2026-09-20): InteractiveLessonService no longer reuses
+    // TutorService's single-subject FreeTutorTrial for Lesson entitlement —
+    // this mock stands in for TrialService.reserveLessonTrial/
+    // releaseLessonTrialReservation instead. Unconditionally succeeds
+    // (mirroring the old tutorService mock's behavior) so every OTHER test
+    // in this file — none of which are actually about trial-subject
+    // selection — keeps exercising the rest of the lesson engine unchanged.
+    const trialService = {
+      reserveLessonTrial: jest.fn().mockImplementation(async (studentId: string) => {
         reserveFreeTrialCalls++;
         state.freeTrials[studentId] = (state.freeTrials[studentId] ?? 0) + 1;
-        return { source: "free-trial" as const };
+        return { source: "lesson-trial" as const, consumptionId: `consumption-${reserveFreeTrialCalls}` };
       }),
-      releaseFreeTrial: jest.fn().mockImplementation(async (studentId: string) => {
+      releaseLessonTrialReservation: jest.fn().mockImplementation(async () => {
         releaseFreeTrialCalls++;
-        state.freeTrials[studentId] = Math.max(0, (state.freeTrials[studentId] ?? 0) - 1);
       }),
     } as any;
+
+    // Default behavior simulates a successful lazy-generation round trip
+    // for a title-only topic (teachingStepsJson: null): ensureTopicHasLesson
+    // "writes" STEPS onto that topic in this mock's state, exactly like the
+    // real LessonDraftGeneratorService.ensureTopicHasLesson (draft +
+    // auto-publish) would in Postgres. Most tests never hit this at all
+    // (their fixture topics already have teachingStepsJson set, so
+    // ensureTopicHasSteps() returns early) — real implementations are
+    // exercised separately in lesson-draft-generator.service.spec.ts /
+    // lesson-publish.service.spec.ts.
+    const draftGenerator = {
+      ensureTopicHasLesson: jest.fn().mockImplementation(async (topicId: string) => {
+        state.topics[topicId] = { ...state.topics[topicId], teachingStepsJson: STEPS };
+        return state.topics[topicId];
+      }),
+    } as any;
+    // Question-pool generation is a fire-and-forget-shaped no-op here —
+    // no test in this file asserts on it; real behavior is covered by
+    // question-draft-generator.service.spec.ts.
+    const questionGenerator = { ensurePoolForTopic: jest.fn().mockResolvedValue(undefined) } as any;
 
     const service = new InteractiveLessonService(
       prisma,
@@ -160,7 +198,9 @@ describe("InteractiveLessonService", () => {
       new AIContextBuilderService(),
       usageService,
       questionPacks,
-      tutorService,
+      trialService,
+      draftGenerator,
+      questionGenerator,
     );
 
     return {
@@ -168,7 +208,8 @@ describe("InteractiveLessonService", () => {
       prisma,
       state,
       questionPacks,
-      tutorService,
+      trialService,
+      draftGenerator,
       getSession: (userId: string, topicId: string) => state.sessions[`${state.profiles[userId].id}:${topicId}`],
       freeTrialCount: () => ({ reserve: reserveFreeTrialCalls, release: releaseFreeTrialCalls }),
       generateSpy,
@@ -181,6 +222,26 @@ describe("InteractiveLessonService", () => {
     const session = h.getSession("user-1", "topic-1");
     expect(session).toBeDefined();
     expect(session.status).toBe("IN_PROGRESS");
+  });
+
+  /**
+   * Budget-attribution regression (2026-09-20, "D" in the fix's own test
+   * plan): the Interactive Lesson engine's own runtime teaching turns must
+   * remain billed to the real student — this is per-student tutoring
+   * spend, never shared/cached content-authoring cost, and the lazy-
+   * generation billing fix (lesson-draft-generator.service.spec.ts,
+   * question-draft-generator.service.spec.ts) must not have touched it.
+   * "topic-1" already has teachingStepsJson set in this harness, so this
+   * exercises a pure runtime turn with no lazy generation involved at all.
+   */
+  it("D: a runtime lesson teaching turn (advance()) is billed to the real student's userId, never CONTENT_AUTHORING_ACTOR_ID", async () => {
+    const h = makeHarness();
+    await h.service.advance("user-1", "topic-1");
+
+    expect(h.state.usage.length).toBeGreaterThan(0);
+    for (const row of h.state.usage) {
+      expect(row.userId).toBe("user-1");
+    }
   });
 
   it("D: the first delivered step is step index 0 (INTRO)", async () => {
@@ -271,6 +332,67 @@ describe("InteractiveLessonService", () => {
     expect(delivered.readyToContinue).toBe(false);
     const answered = await h.service.respond("user-1", "topic-1", "combining");
     expect(answered.readyToContinue).toBe(true);
+  });
+
+  it("2026-09-19 real-world bug: trims trailing whitespace the model emits inside a CHECK step's JSON \"say\" field, so the persisted AIMessage and the returned content are byte-identical (a real 'Voice playback unavailable' report traced to /tutor/speech trimming its input before matching an untrimmed stored reply)", async () => {
+    const h = makeHarness({
+      generateImpl: async (args: any) =>
+        args.responseFormat === "json_object"
+          ? { content: JSON.stringify({ say: "How many apples do you have in total? ", expression: null }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }
+          : { content: "some teaching content", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" },
+    });
+    await h.service.advance("user-1", "topic-1");
+    await h.service.advance("user-1", "topic-1");
+    const delivered = await h.service.advance("user-1", "topic-1"); // s3 CHECK delivered
+    expect(delivered.content).toBe("How many apples do you have in total?");
+    const persisted = h.state.messages[h.state.messages.length - 1];
+    expect(persisted.content).toBe("How many apples do you have in total?");
+    expect(persisted.content).toBe(delivered.content); // exact match — what /tutor/speech's anti-injection check requires
+  });
+
+  it("2026-09-19 real-world bug: trims trailing whitespace in a plain-text (non-CHECK) step's content the same way", async () => {
+    const h = makeHarness({
+      generateImpl: async () => ({ content: "Let's talk about addition. ", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }),
+    });
+    const delivered = await h.service.advance("user-1", "topic-1"); // s1 INTRO, plain text
+    expect(delivered.content).toBe("Let's talk about addition.");
+    const persisted = h.state.messages[h.state.messages.length - 1];
+    expect(persisted.content).toBe(delivered.content);
+  });
+
+  it("2026-09-19 real-world bug: trims trailing whitespace in a CHECK-evaluation (respond()) reply's \"say\" field the same way", async () => {
+    const h = makeHarness({
+      generateImpl: async (args: any) =>
+        args.responseFormat === "json_object"
+          ? { content: JSON.stringify({ intent: "answer", isCorrect: true, say: "There you go! " }), inputTokens: 5, outputTokens: 5, model: "gpt-4o-mini" }
+          : { content: "some teaching content", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" },
+    });
+    await h.service.advance("user-1", "topic-1");
+    await h.service.advance("user-1", "topic-1");
+    await h.service.advance("user-1", "topic-1"); // s3 CHECK delivered
+    const answered = await h.service.respond("user-1", "topic-1", "some answer");
+    expect(answered.content).toBe("There you go!");
+    const persisted = h.state.messages[h.state.messages.length - 1];
+    expect(persisted.content).toBe(answered.content);
+  });
+
+  it("2026-09-19 real-world bug: a non-Mathematics subject's CHECK step never carries a deterministic expression, even when the model returns one — a real Science lesson's model invented 'add 3+2' for a life-processes question, user-confirmed ('بيدخل ال math في ال science')", async () => {
+    const h = makeHarness({
+      generateImpl: async (args: any) =>
+        args.responseFormat === "json_object"
+          ? { content: JSON.stringify({ say: "If you have 3 apples and add 2 more, how many do you have?", expression: { op: "add", operands: [3, 2] } }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }
+          : { content: "some teaching content", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" },
+    });
+    h.state.topics["topic-science"] = {
+      id: "topic-science", nameEn: "Life processes", teachingStepsJson: STEPS,
+      unit: { subjectId: "subject-2", subject: { nameEn: "Science" } },
+    };
+    await h.service.advance("user-1", "topic-science");
+    await h.service.advance("user-1", "topic-science");
+    await h.service.advance("user-1", "topic-science"); // s3 CHECK delivered
+    const session = h.getSession("user-1", "topic-science");
+    const s3Result = session.stepResultsJson.find((r: any) => r.stepId === "s3");
+    expect(s3Result.expression).toBeUndefined();
   });
 
   it("G: an incorrect answer gives a hint and stays on the same step, then a correct retry resolves it", async () => {
@@ -448,10 +570,29 @@ describe("InteractiveLessonService", () => {
     expect(s2.studentId).toBe("student-2");
   });
 
-  it("N: an unknown/non-interactive topic (no teachingStepsJson) is rejected", async () => {
+  it("N: a genuinely unknown topic id is rejected", async () => {
     const h = makeHarness();
-    h.state.topics["topic-2"] = { id: "topic-2", nameEn: "No Plan", teachingStepsJson: null, unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } } };
-    await expect(h.service.advance("user-1", "topic-2")).rejects.toThrow(NotFoundException);
+    await expect(h.service.advance("user-1", "no-such-topic")).rejects.toThrow(NotFoundException);
+  });
+
+  it("N2: a title-only topic (teachingStepsJson: null) is lazily generated on first advance(), not rejected", async () => {
+    const h = makeHarness();
+    h.state.topics["topic-2"] = { id: "topic-2", nameEn: "No Plan", nameAr: "بلا خطة", unitId: "unit-1", teachingStepsJson: null, unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } } };
+    const result = await h.service.advance("user-1", "topic-2");
+    expect(h.draftGenerator.ensureTopicHasLesson).toHaveBeenCalledWith("topic-2", expect.any(Object), expect.any(String));
+    expect(result.totalSteps).toBe(STEPS.length);
+  });
+
+  it("N3: getState() on a title-only topic (teachingStepsJson: null) reports { started: false } instead of throwing — so the frontend can still render the Start Lesson button", async () => {
+    const h = makeHarness();
+    h.state.topics["topic-2"] = { id: "topic-2", nameEn: "No Plan", nameAr: "بلا خطة", unitId: "unit-1", teachingStepsJson: null, unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } } };
+    const result = await h.service.getState("user-1", "topic-2");
+    expect(result).toEqual({ started: false });
+  });
+
+  it("getState() on a genuinely unknown topic id still throws NotFoundException", async () => {
+    const h = makeHarness();
+    await expect(h.service.getState("user-1", "no-such-topic")).rejects.toThrow(NotFoundException);
   });
 
   it("reserves entitlement exactly once at session start, never again on resume", async () => {
@@ -459,7 +600,45 @@ describe("InteractiveLessonService", () => {
     await h.service.advance("user-1", "topic-1"); // starts — reserves
     await h.service.advance("user-1", "topic-1"); // resumes/continues — must not reserve again
     await h.service.advance("user-1", "topic-1");
-    expect(h.tutorService.reserveFreeTrial).toHaveBeenCalledTimes(1);
+    expect(h.trialService.reserveLessonTrial).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * Subject entitlement fix (2026-09-20) — Lesson access is gated by
+   * StudentSubject for the SPECIFIC Subject being opened, never
+   * account-wide Subscription.status (there is no `subscription` mock at
+   * all anymore — see the harness's own comment on `studentSubject`).
+   */
+  describe("Subject entitlement gate (never account-wide Subscription.status)", () => {
+    it("a permanently owned Subject (expiresAt: null) uses the daily/extra quota path, never the trial", async () => {
+      const h = makeHarness({ studentSubjectRow: { expiresAt: null } });
+      await h.service.advance("user-1", "topic-1");
+      expect(h.questionPacks.consumeForTutor).toHaveBeenCalledWith("student-1", "subject-1");
+      expect(h.trialService.reserveLessonTrial).not.toHaveBeenCalled();
+    });
+
+    it("an active time-limited Subject grant (e.g. a referral reward, expiresAt in the future) also uses the daily/extra quota path — with no active Subscription at all", async () => {
+      const future = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
+      const h = makeHarness({ studentSubjectRow: { expiresAt: future } });
+      await h.service.advance("user-1", "topic-1");
+      expect(h.questionPacks.consumeForTutor).toHaveBeenCalledWith("student-1", "subject-1");
+      expect(h.trialService.reserveLessonTrial).not.toHaveBeenCalled();
+    });
+
+    it("an EXPIRED Subject grant (expiresAt in the past) is never treated as owned — falls through to the trial gate like any unentitled Subject", async () => {
+      const past = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+      const h = makeHarness({ studentSubjectRow: { expiresAt: past } });
+      await h.service.advance("user-1", "topic-1");
+      expect(h.questionPacks.consumeForTutor).not.toHaveBeenCalled();
+      expect(h.trialService.reserveLessonTrial).toHaveBeenCalledWith("student-1", "subject-1", "topic-1");
+    });
+
+    it("no StudentSubject row at all falls through to the trial gate (the pre-existing default every other test in this file relies on)", async () => {
+      const h = makeHarness();
+      await h.service.advance("user-1", "topic-1");
+      expect(h.questionPacks.consumeForTutor).not.toHaveBeenCalled();
+      expect(h.trialService.reserveLessonTrial).toHaveBeenCalledWith("student-1", "subject-1", "topic-1");
+    });
   });
 
   it("rejects a respond() call with an empty message", async () => {

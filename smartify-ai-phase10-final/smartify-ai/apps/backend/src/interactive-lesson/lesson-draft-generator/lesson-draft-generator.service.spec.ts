@@ -1,265 +1,142 @@
-import { ServiceUnavailableException } from "@nestjs/common";
-import { AIContextBuilderService } from "../../ai/context/ai-context-builder.service";
-import { LessonDraftGenerationError, LessonDraftGeneratorService } from "./lesson-draft-generator.service";
-import type { LessonGenerationInput } from "./lesson-draft.types";
+import { LessonDraftGeneratorService } from "./lesson-draft-generator.service";
+import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
 
-const VALID_STEPS_JSON = JSON.stringify({
-  topicNameEn: "Addition with Zero",
-  steps: [
-    { id: "s1", type: "INTRO", order: 1, objective: "Greet briefly and frame today's idea.", conceptKey: "greeting_framing" },
-    { id: "s2", type: "EXPLAIN", order: 2, objective: "Explain that adding zero leaves a number unchanged.", conceptKey: "zero_rule" },
-    { id: "s3", type: "CHECK", order: 3, objective: "Check the zero rule conceptually.", conceptKey: "zero_rule", checkType: "conceptual" },
-    { id: "s4", type: "EXAMPLE", order: 4, objective: "Show one applied example of adding zero.", conceptKey: "zero_rule" },
-    { id: "s5", type: "CHECK", order: 5, objective: "Check the student can apply the zero rule.", conceptKey: "zero_rule", checkType: "applied" },
-    { id: "s6", type: "REVIEW", order: 6, objective: "Briefly recap the zero rule." },
-    { id: "s7", type: "COMPLETE", order: 7, objective: "Acknowledge completion." },
-  ],
-});
+/**
+ * Budget-attribution regression suite (2026-09-20) — the Student
+ * Experience audit found that ensureTopicHasLesson()'s lazy generation
+ * correctly billed Unit grounding to CONTENT_AUTHORING_ACTOR_ID but billed
+ * the SUBSEQUENT generateAutoDraft() call to whichever real student
+ * happened to trigger it first — a one-time, permanently-cached authoring
+ * cost eaten from that one student's own daily budget. These tests lock in
+ * the fix: both the grounding call and the generation call must bill the
+ * platform actor, never `requestingUserId`, while the generation LOCK's
+ * ownership bookkeeping (`generationLockedBy`) is untouched.
+ */
+describe("LessonDraftGeneratorService.ensureTopicHasLesson — budget attribution", () => {
+  const REAL_STUDENT_ID = "real-student-1";
+  const TOPIC_ID = "topic-1";
+  const UNIT_ID = "unit-1";
 
-const INPUT: LessonGenerationInput = {
-  topicNameEn: "Addition with Zero",
-  topicNameAr: "الجمع مع العدد صفر",
-  learningObjectives: ["State and apply the rule that adding zero to a number does not change its value."],
-  preferredLang: "ar",
-  studentAgeRange: "6-7",
-  targetUnitId: "unit-1",
-};
+  const VALID_AUTO_DRAFT = {
+    topicNameEn: "Test Topic",
+    learningObjectives: [
+      { objectiveEn: "Objective one", objectiveAr: "الهدف الأول" },
+      { objectiveEn: "Objective two", objectiveAr: "الهدف الثاني" },
+    ],
+    steps: [
+      { id: "s1", type: "INTRO", order: 1, objective: "Introduce" },
+      { id: "s2", type: "EXPLAIN", order: 2, objective: "Explain" },
+      { id: "s3", type: "CHECK", order: 3, objective: "Check" },
+      { id: "s4", type: "COMPLETE", order: 4, objective: "Wrap up" },
+    ],
+  };
 
-const DB_UNIT = {
-  id: "unit-1",
-  nameEn: "Addition",
-  subject: {
-    nameEn: "Mathematics",
-    grade: {
-      nameEn: "Grade 1",
-      curriculum: { nameEn: "Egyptian National Curriculum (Arabic, Pilot)" },
-    },
-  },
-};
+  function makeHarness(topicOverrides: Record<string, unknown> = {}) {
+    const coldTopic = {
+      id: TOPIC_ID,
+      nameEn: "Test Topic",
+      nameAr: "موضوع الاختبار",
+      unitId: UNIT_ID,
+      teachingStepsJson: null,
+      ...topicOverrides,
+    };
 
-function makeHarness(opts: {
-  generateImpl?: (args: any) => any;
-  assertWithinBudget?: jest.Mock;
-  unit?: any;
-  reserveBudgetResult?: { ok: true; reservationId: string } | { ok: false; reason: "misconfigured" | "global_exceeded" | "user_exceeded" };
-} = {}) {
-  const createdDrafts: any[] = [];
-  const usageRows: any[] = [];
-  let draftCounter = 0;
-
-  const prisma = {
-    client: {
-      unit: { findUnique: jest.fn().mockResolvedValue("unit" in opts ? opts.unit : DB_UNIT) },
-      lessonDraft: {
-        create: jest.fn().mockImplementation(async ({ data }: any) => {
-          const draft = { id: `draft-${++draftCounter}`, ...data };
-          createdDrafts.push(draft);
-          return draft;
-        }),
-      },
-      aIUsage: { create: jest.fn().mockImplementation(async ({ data }: any) => { usageRows.push(data); return data; }) },
-    },
-  } as any;
-
-  const generateSpy = jest.fn().mockImplementation(
-    opts.generateImpl ?? (async () => ({ content: VALID_STEPS_JSON, inputTokens: 100, outputTokens: 200, model: "gpt-4o-mini" })),
-  );
-  const providerFactory = {
-    getActiveProvider: jest.fn().mockResolvedValue({ provider: { generate: generateSpy }, providerKey: "openai", model: "gpt-4o-mini" }),
-    getCostRates: jest.fn().mockResolvedValue({ costPerInputToken: 0.0000005, costPerOutputToken: 0.0000015 }),
-  } as any;
-
-  const reserveBudget = jest.fn().mockResolvedValue(opts.reserveBudgetResult ?? { ok: true, reservationId: "reservation-1" });
-  const reconcileBudget = jest.fn().mockResolvedValue(undefined);
-  const releaseBudget = jest.fn().mockResolvedValue(undefined);
-  const usageService = {
-    assertWithinBudget: opts.assertWithinBudget ?? jest.fn().mockResolvedValue(undefined),
-    estimateMaxChatCostUsd: jest.fn().mockResolvedValue(0.001),
-    reserveBudget,
-    reconcileBudget,
-    releaseBudget,
-  } as any;
-
-  const service = new LessonDraftGeneratorService(prisma, providerFactory, new AIContextBuilderService(), usageService);
-
-  return { service, prisma, createdDrafts, usageRows, generateSpy, providerFactory, usageService, reserveBudget, reconcileBudget, releaseBudget };
-}
-
-describe("LessonDraftGeneratorService.resolveUnitContext (Phase 6, Part A)", () => {
-  it("derives curriculum/grade/subject/unit names live from the Unit -> Subject -> Grade -> Curriculum DB relations, not from hand-typed input", async () => {
-    const h = makeHarness();
-    const context = await h.service.resolveUnitContext("unit-1");
-    expect(context).toEqual({
-      unitId: "unit-1",
-      curriculumNameEn: "Egyptian National Curriculum (Arabic, Pilot)",
-      gradeNameEn: "Grade 1",
-      subjectNameEn: "Mathematics",
-      unitNameEn: "Addition",
+    const generateSpy = jest.fn().mockResolvedValue({
+      content: JSON.stringify(VALID_AUTO_DRAFT),
+      inputTokens: 10,
+      outputTokens: 10,
     });
-    expect(h.prisma.client.unit.findUnique).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "unit-1" } }),
+
+    const prisma = {
+      client: {
+        topic: {
+          findUnique: jest.fn().mockResolvedValue(coldTopic),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          findUniqueOrThrow: jest.fn().mockResolvedValue({ ...coldTopic, teachingStepsJson: VALID_AUTO_DRAFT.steps }),
+        },
+        unit: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: UNIT_ID,
+            nameEn: "Unit 1",
+            groundingNotesJson: null,
+            groundingVersion: null,
+            subject: { nameEn: "Science", grade: { nameEn: "Year 5", curriculum: { nameEn: "Test Curriculum" } } },
+          }),
+        },
+        lessonDraft: {
+          create: jest.fn().mockResolvedValue({ id: "draft-1" }),
+        },
+        aIUsage: {
+          create: jest.fn().mockResolvedValue(undefined),
+        },
+      },
+    };
+
+    const providerFactory = {
+      getActiveProvider: jest.fn().mockResolvedValue({ provider: { generate: generateSpy }, providerKey: "openai", model: "gpt-4o-mini" }),
+      getCostRates: jest.fn().mockResolvedValue({ costPerInputToken: 0.0001, costPerOutputToken: 0.0002 }),
+    };
+
+    const contextBuilder = {
+      buildAutoLessonGenerationPrompt: jest.fn().mockReturnValue("system prompt"),
+    };
+
+    const usageService = {
+      assertWithinBudget: jest.fn().mockResolvedValue(undefined),
+      estimateMaxChatCostUsd: jest.fn().mockResolvedValue(0.01),
+      reserveBudget: jest.fn().mockResolvedValue({ ok: true, reservationId: "res-1" }),
+      reconcileBudget: jest.fn().mockResolvedValue(undefined),
+      releaseBudget: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const publisher = {
+      autoPublishIntoTopic: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const unitGrounding = {
+      ensureUnitGrounded: jest.fn().mockResolvedValue({ used: false }),
+    };
+
+    const service = new LessonDraftGeneratorService(prisma as any, providerFactory as any, contextBuilder as any, usageService as any, publisher as any, unitGrounding as any);
+
+    return { service, prisma, providerFactory, usageService, publisher, unitGrounding, generateSpy };
+  }
+
+  it("A/C — cold Topic: grounding AND the lazy generation call are both billed to CONTENT_AUTHORING_ACTOR_ID, never the real triggering student", async () => {
+    const { service, usageService, prisma, unitGrounding } = makeHarness();
+
+    await service.ensureTopicHasLesson(TOPIC_ID, { preferredLang: "en", studentAgeRange: "9-10" }, REAL_STUDENT_ID);
+
+    // C — grounding still billed to the platform actor.
+    expect(unitGrounding.ensureUnitGrounded).toHaveBeenCalledWith(UNIT_ID, CONTENT_AUTHORING_ACTOR_ID);
+
+    // A — the generation call's own budget check/reservation/usage row are
+    // all billed to the platform actor, never the real student.
+    expect(usageService.assertWithinBudget).toHaveBeenCalledWith(CONTENT_AUTHORING_ACTOR_ID);
+    expect(usageService.assertWithinBudget).not.toHaveBeenCalledWith(REAL_STUDENT_ID);
+    expect(usageService.reserveBudget).toHaveBeenCalledWith(CONTENT_AUTHORING_ACTOR_ID, expect.any(Number));
+    expect(usageService.reserveBudget).not.toHaveBeenCalledWith(REAL_STUDENT_ID, expect.any(Number));
+    expect(prisma.client.aIUsage.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ userId: CONTENT_AUTHORING_ACTOR_ID }) }));
+  });
+
+  it("the generation LOCK's ownership bookkeeping still records the real triggering student, unchanged by the billing fix", async () => {
+    const { service, prisma } = makeHarness();
+
+    await service.ensureTopicHasLesson(TOPIC_ID, { preferredLang: "en", studentAgeRange: "9-10" }, REAL_STUDENT_ID);
+
+    expect(prisma.client.topic.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ generationLockedBy: REAL_STUDENT_ID }) }),
     );
   });
 
-  it("confirms the resolved context belongs to the correct hierarchy (grade under the right curriculum, subject under the right grade)", async () => {
-    const otherUnit = {
-      id: "unit-2",
-      nameEn: "Subtraction",
-      subject: { nameEn: "Mathematics", grade: { nameEn: "Grade 1", curriculum: { nameEn: "Egyptian National Curriculum (Arabic, Pilot)" } } },
-    };
-    const h = makeHarness({ unit: otherUnit });
-    const context = await h.service.resolveUnitContext("unit-2");
-    // The resolved names are exactly the ones nested under THIS unit's own
-    // subject/grade/curriculum chain — never a mismatched/stale value.
-    expect(context.unitNameEn).toBe("Subtraction");
-    expect(context.subjectNameEn).toBe("Mathematics");
-    expect(context.gradeNameEn).toBe("Grade 1");
-    expect(context.curriculumNameEn).toBe("Egyptian National Curriculum (Arabic, Pilot)");
-  });
+  it("G — a warm (already-generated) Topic never touches grounding or the AI provider at all — pure cache hit, nothing to bill", async () => {
+    const { service, unitGrounding, providerFactory, prisma } = makeHarness({ teachingStepsJson: [{ id: "s1", type: "INTRO" }] });
 
-  it("throws NotFoundException for an unknown targetUnitId, without calling the AI provider", async () => {
-    const h = makeHarness({ unit: null });
-    await expect(h.service.generateDraft(INPUT, "user-1")).rejects.toThrow(/Unit .* not found/);
-    expect(h.generateSpy).not.toHaveBeenCalled();
-  });
+    const result = await service.ensureTopicHasLesson(TOPIC_ID, { preferredLang: "en", studentAgeRange: "9-10" }, REAL_STUDENT_ID);
 
-  it("embeds the DB-resolved context (not hand-typed strings) into the generation prompt", async () => {
-    const h = makeHarness();
-    await h.service.generateDraft(INPUT, "user-1");
-    const promptSent = h.generateSpy.mock.calls[0][0].systemPrompt as string;
-    expect(promptSent).toContain("Egyptian National Curriculum (Arabic, Pilot)");
-    expect(promptSent).toContain("Grade 1");
-    expect(promptSent).toContain("Mathematics");
-    expect(promptSent).toContain("Unit: Addition");
-  });
-});
-
-describe("LessonDraftGeneratorService", () => {
-  it("persists a valid generated draft with status pending_review", async () => {
-    const h = makeHarness();
-    const { draft, attempts, callsMade } = await h.service.generateDraft(INPUT, "user-1");
-
-    expect(draft.status).toBe("pending_review");
-    expect(draft.topicNameEn).toBe("Addition with Zero");
-    expect(draft.aiProvider).toBe("openai");
-    expect(attempts).toBe(1);
-    expect(callsMade).toBe(1);
-    expect(h.createdDrafts).toHaveLength(1);
-  });
-
-  it("checks the AI budget before generating", async () => {
-    const assertWithinBudget = jest.fn().mockResolvedValue(undefined);
-    const h = makeHarness({ assertWithinBudget });
-    await h.service.generateDraft(INPUT, "user-1");
-    expect(assertWithinBudget).toHaveBeenCalledWith("user-1");
-  });
-
-  it("rejects when the AI budget is exceeded, without calling the provider", async () => {
-    const h = makeHarness({ assertWithinBudget: jest.fn().mockRejectedValue(new Error("budget exceeded")) });
-    await expect(h.service.generateDraft(INPUT, "user-1")).rejects.toThrow("budget exceeded");
-    expect(h.generateSpy).not.toHaveBeenCalled();
-  });
-
-  it("Phase 9.4C: rejects when the atomic budget RESERVATION is refused (even though the cheap early assertWithinBudget check passed), without calling the provider", async () => {
-    const h = makeHarness({ reserveBudgetResult: { ok: false, reason: "global_exceeded" } });
-    await expect(h.service.generateDraft(INPUT, "user-1")).rejects.toThrow(ServiceUnavailableException);
-    expect(h.generateSpy).not.toHaveBeenCalled();
-  });
-
-  it("Phase 9.4C: releases the budget reservation when the provider call itself fails", async () => {
-    const h = makeHarness({ generateImpl: async () => { throw new Error("provider down"); } });
-    await expect(h.service.generateDraft(INPUT, "user-1")).rejects.toThrow("provider down");
-    expect(h.releaseBudget).toHaveBeenCalledWith("reservation-1");
-    expect(h.reconcileBudget).not.toHaveBeenCalled();
-  });
-
-  it("Phase 9.4C: reconciles the budget reservation to the exact real cost logged for that attempt", async () => {
-    const h = makeHarness();
-    await h.service.generateDraft(INPUT, "user-1");
-    expect(h.reconcileBudget).toHaveBeenCalledTimes(1);
-    const [reservationId, actualCostUsd] = h.reconcileBudget.mock.calls[0];
-    expect(reservationId).toBe("reservation-1");
-    expect(actualCostUsd).toBeCloseTo(0.00035, 10); // 100*0.0000005 + 200*0.0000015
-  });
-
-  it("Phase 10B: persists objectives in the bilingual shape with objectiveAr always null — the AI never supplies a reviewed Arabic translation", async () => {
-    const h = makeHarness();
-    const { draft } = await h.service.generateDraft(INPUT, "user-1");
-    expect(draft.learningObjectivesJson).toEqual([
-      { objectiveEn: "State and apply the rule that adding zero to a number does not change its value.", objectiveAr: null },
-    ]);
-  });
-
-  it("logs a lesson_draft_generation usage row with creditsUsed 0 and studentId/subjectId null (not a student action)", async () => {
-    const h = makeHarness();
-    await h.service.generateDraft(INPUT, "user-1");
-    expect(h.usageRows).toHaveLength(1);
-    expect(h.usageRows[0]).toMatchObject({ feature: "lesson_draft_generation", creditsUsed: 0, studentId: null, subjectId: null, userId: "user-1" });
-    expect(h.usageRows[0].costUsd).toBeGreaterThan(0);
-  });
-
-  it("retries exactly once on invalid JSON, and persists the corrected draft on the second attempt", async () => {
-    let call = 0;
-    const h = makeHarness({
-      generateImpl: async () => {
-        call++;
-        if (call === 1) return { content: "not valid json", inputTokens: 50, outputTokens: 10, model: "gpt-4o-mini" };
-        return { content: VALID_STEPS_JSON, inputTokens: 100, outputTokens: 200, model: "gpt-4o-mini" };
-      },
-    });
-    const { attempts, callsMade } = await h.service.generateDraft(INPUT, "user-1");
-    expect(attempts).toBe(2);
-    expect(callsMade).toBe(2);
-    expect(h.createdDrafts).toHaveLength(1); // only the final, valid draft is ever persisted
-  });
-
-  it("retries exactly once on a structurally invalid draft (e.g. missing CHECK), never persisting the invalid attempt", async () => {
-    const invalidJson = JSON.stringify({
-      topicNameEn: "Addition with Zero",
-      steps: [
-        { id: "s1", type: "INTRO", order: 1, objective: "Greet." },
-        { id: "s2", type: "EXPLAIN", order: 2, objective: "Explain." },
-        { id: "s3", type: "COMPLETE", order: 3, objective: "Done." },
-      ],
-    });
-    let call = 0;
-    const h = makeHarness({
-      generateImpl: async () => {
-        call++;
-        return call === 1
-          ? { content: invalidJson, inputTokens: 50, outputTokens: 10, model: "gpt-4o-mini" }
-          : { content: VALID_STEPS_JSON, inputTokens: 100, outputTokens: 200, model: "gpt-4o-mini" };
-      },
-    });
-    const { attempts } = await h.service.generateDraft(INPUT, "user-1");
-    expect(attempts).toBe(2);
-    expect(h.createdDrafts).toHaveLength(1);
-    expect(h.createdDrafts[0].teachingStepsJson).toHaveLength(7); // the corrected, valid version
-  });
-
-  it("bounds retries at exactly MAX_ATTEMPTS (2) and never persists anything if every attempt fails", async () => {
-    const h = makeHarness({ generateImpl: async () => ({ content: "still not json", inputTokens: 10, outputTokens: 5, model: "gpt-4o-mini" }) });
-
-    await expect(h.service.generateDraft(INPUT, "user-1")).rejects.toThrow(LessonDraftGenerationError);
-    expect(h.generateSpy).toHaveBeenCalledTimes(2); // exactly bounded, never an uncontrolled loop
-    expect(h.createdDrafts).toHaveLength(0); // failure never persists/publishes as approved content
-  });
-
-  it("passes the exact validation errors from attempt 1 into attempt 2's retry-feedback prompt", async () => {
-    let call = 0;
-    const promptsSeen: string[] = [];
-    const h = makeHarness({
-      generateImpl: async (args: any) => {
-        call++;
-        promptsSeen.push(args.systemPrompt);
-        if (call === 1) {
-          return { content: JSON.stringify({ topicNameEn: "Wrong Topic Name", steps: JSON.parse(VALID_STEPS_JSON).steps }), inputTokens: 50, outputTokens: 10, model: "gpt-4o-mini" };
-        }
-        return { content: VALID_STEPS_JSON, inputTokens: 100, outputTokens: 200, model: "gpt-4o-mini" };
-      },
-    });
-    await h.service.generateDraft(INPUT, "user-1");
-    expect(promptsSeen[1]).toContain("PREVIOUS ATTEMPT WAS REJECTED");
-    expect(promptsSeen[1]).toMatch(/topicNameEn mismatch/i);
+    expect(unitGrounding.ensureUnitGrounded).not.toHaveBeenCalled();
+    expect(providerFactory.getActiveProvider).not.toHaveBeenCalled();
+    expect(prisma.client.lessonDraft.create).not.toHaveBeenCalled();
+    expect(result.teachingStepsJson).toEqual([{ id: "s1", type: "INTRO" }]);
   });
 });

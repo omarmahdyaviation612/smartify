@@ -47,6 +47,9 @@ export function StudentLinkCodeCard({ isAr }: { isAr: boolean }) {
   return <div className="rounded-sf-lg border border-neutral-200 bg-white p-6">
     <h2 className="font-semibold text-navy-900">{isAr ? "ربط ولي الأمر" : "Link a parent"}</h2>
     <p className="my-2 text-sm text-neutral-600">{isAr ? "أنشئ رابطًا وشاركه مع ولي أمرك لإتمام الربط." : "Create a link and share it with your parent to connect accounts."}</p>
+    <p className="mb-3 text-xs text-neutral-500">{isAr
+      ? "ميزة ولي الأمر قيد الطرح حاليًا. يحتاج والدك/والدتك إلى تفعيل وصول ولي الأمر على حسابه في سمارتيفاي قبل أن يتمكن من استخدام هذا الرابط."
+      : "Parent access is currently being rolled out. Your parent will need Parent access enabled on their Smartify account before they can use this link."}</p>
     {code ? <>
       <p className="mb-3 rounded bg-neutral-100 p-3 text-center text-xl font-bold tracking-widest">{code}</p>
       <div className="flex flex-wrap gap-2">

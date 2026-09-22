@@ -10,6 +10,7 @@ import { OnboardingService } from "./onboarding.service";
  * score a student sees is computed here and must be right.
  */
 describe("OnboardingService", () => {
+  const mockQuestionGenerator = { ensurePoolForTopic: jest.fn() } as any;
   const curriculum = { id: "curriculum-A", code: "EG_NATIONAL" };
   const gradeInCurriculumA = { id: "grade-1", curriculumId: "curriculum-A" };
   const gradeInCurriculumB = { id: "grade-2", curriculumId: "curriculum-B" };
@@ -43,7 +44,7 @@ describe("OnboardingService", () => {
   describe("saveProfile — cross-entity validation", () => {
     it("rejects a grade that belongs to a DIFFERENT curriculum than the one selected", async () => {
       const prisma = makePrismaMock({ grade: gradeInCurriculumB });
-      const service = new OnboardingService(prisma);
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
 
       await expect(service.saveProfile("user-1", baseInput)).rejects.toThrow(BadRequestException);
     });
@@ -51,7 +52,7 @@ describe("OnboardingService", () => {
     it("rejects an unknown curriculum code", async () => {
       const prisma = makePrismaMock();
       prisma.client.curriculum.findUnique.mockResolvedValueOnce(null);
-      const service = new OnboardingService(prisma);
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
 
       await expect(service.saveProfile("user-1", baseInput)).rejects.toThrow(BadRequestException);
     });
@@ -59,7 +60,7 @@ describe("OnboardingService", () => {
     it("rejects when a submitted subject doesn't actually belong to the selected grade", async () => {
       // Student claims 2 subjects but only 1 is actually found under the grade.
       const prisma = makePrismaMock({ subjects: [subjectInGrade1] });
-      const service = new OnboardingService(prisma);
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
 
       await expect(
         service.saveProfile("user-1", { ...baseInput, subjectIds: ["subject-1", "subject-does-not-belong-here"] }),
@@ -68,7 +69,7 @@ describe("OnboardingService", () => {
 
     it("accepts a valid grade+subject combination that actually belongs to the curriculum", async () => {
       const prisma = makePrismaMock();
-      const service = new OnboardingService(prisma);
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
 
       await expect(service.saveProfile("user-1", baseInput)).resolves.toBeDefined();
       expect(prisma.client.studentSubject.createMany).toHaveBeenCalled();
@@ -102,7 +103,7 @@ describe("OnboardingService", () => {
 
     it("CASE 7 — excludes isPlaceholder:true Questions from the query itself, not just a post-filter", async () => {
       const prisma = makeProfilePrismaMock({ studentSubjects: [SUBJECT_WITH_TOPICS] });
-      const service = new OnboardingService(prisma);
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
 
       await service.getDiagnosticQuestions("user-1");
 
@@ -119,7 +120,7 @@ describe("OnboardingService", () => {
         studentSubjects: [SUBJECT_WITH_TOPICS],
         findManyImpl: ({ where }: any) => ALL_QUESTIONS.filter((q) => where.topicId.in.includes(q.topicId) && q.isPlaceholder === where.isPlaceholder),
       });
-      const service = new OnboardingService(prisma);
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
 
       const result = await service.getDiagnosticQuestions("user-1");
       expect(result).toEqual([]);
@@ -131,7 +132,7 @@ describe("OnboardingService", () => {
           { subjectId: "subject-math", subject: { units: [{ topics: [{ id: "topic-math-1" }] }] } },
         ],
       });
-      const service = new OnboardingService(prisma);
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
 
       await service.getDiagnosticQuestions("user-1");
 
@@ -140,6 +141,23 @@ describe("OnboardingService", () => {
       // topic belonging to some other, unselected subject is never included
       // because it was never in `studentSubjects` to begin with.
       expect(call.where.topicId.in).toEqual(["topic-math-1"]);
+    });
+
+    it("launch-speed lazy-generation (2026-09-19): ensures a pool for exactly one topic per selected subject (its first, by order) before querying, without blocking on every topic", async () => {
+      mockQuestionGenerator.ensurePoolForTopic.mockClear();
+      const prisma = makeProfilePrismaMock({
+        studentSubjects: [
+          { subjectId: "subject-math", subject: { units: [{ topics: [{ id: "topic-math-1" }, { id: "topic-math-2" }] }] } },
+          { subjectId: "subject-eng", subject: { units: [{ topics: [{ id: "topic-eng-1" }] }] } },
+        ],
+      });
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
+
+      await service.getDiagnosticQuestions("user-1");
+
+      expect(mockQuestionGenerator.ensurePoolForTopic).toHaveBeenCalledTimes(2);
+      expect(mockQuestionGenerator.ensurePoolForTopic).toHaveBeenCalledWith("topic-math-1", "user-1");
+      expect(mockQuestionGenerator.ensurePoolForTopic).toHaveBeenCalledWith("topic-eng-1", "user-1");
     });
   });
 
@@ -167,7 +185,7 @@ describe("OnboardingService", () => {
     it("scores each answer against the question's real correctAnswerJson, not the submitted answer blindly", async () => {
       const questions = [makeQuestion("q1", "subj-math", "A"), makeQuestion("q2", "subj-math", "B")];
       const prisma = makeDiagnosticPrismaMock(questions);
-      const service = new OnboardingService(prisma);
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
 
       const result = await service.submitDiagnostic("user-1", [
         { questionId: "q1", answer: "A" }, // correct
@@ -185,7 +203,7 @@ describe("OnboardingService", () => {
         makeQuestion("q2", "subj-science", "B"),
       ];
       const prisma = makeDiagnosticPrismaMock(questions);
-      const service = new OnboardingService(prisma);
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
 
       const result = await service.submitDiagnostic("user-1", [
         { questionId: "q1", answer: "A" }, // correct, math
@@ -203,7 +221,7 @@ describe("OnboardingService", () => {
         makeQuestion("q3", "subj-science", "B"),
       ];
       const prisma = makeDiagnosticPrismaMock(questions);
-      const service = new OnboardingService(prisma);
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
 
       // Math: 0/2 correct (0%). Science: 1/1 correct (100%).
       const result = await service.submitDiagnostic("user-1", [
@@ -218,14 +236,14 @@ describe("OnboardingService", () => {
 
     it("rejects an empty answer submission", async () => {
       const prisma = makeDiagnosticPrismaMock([]);
-      const service = new OnboardingService(prisma);
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
 
       await expect(service.submitDiagnostic("user-1", [])).rejects.toThrow(BadRequestException);
     });
 
     it("silently skips answers referencing a question ID that doesn't exist, rather than crashing", async () => {
       const prisma = makeDiagnosticPrismaMock([makeQuestion("q1", "subj-math", "A")]);
-      const service = new OnboardingService(prisma);
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
 
       const result = await service.submitDiagnostic("user-1", [
         { questionId: "q1", answer: "A" },

@@ -3,6 +3,7 @@ import type { Locale } from "./marketing";
 export interface LessonCopy {
   startLesson: string;
   starting: string;
+  startingFirstTime: string;
   continueLabel: string;
   answerPlaceholder: string;
   askPlaceholder: string;
@@ -30,11 +31,19 @@ export interface LessonCopy {
   backToDashboard: string;
   visualComingSoon: string;
   visualAlt: string;
+  checkTitle: string;
+  checkSubmit: string;
+  checkSubmitting: string;
+  checkResult: (correct: number, total: number) => string;
+  checkParentNotified: (n: number) => string;
+  checkNoParentLinked: string;
+  checkError: string;
 }
 
 const en: LessonCopy = {
   startLesson: "Start Lesson",
   starting: "Starting...",
+  startingFirstTime: "Getting your lesson ready for the first time — almost there!",
   continueLabel: "Continue",
   answerPlaceholder: "Type your answer or ask a question...",
   askPlaceholder: "Ask a question, or tap Continue...",
@@ -62,11 +71,19 @@ const en: LessonCopy = {
   backToDashboard: "Back to Dashboard",
   visualComingSoon: "A picture for this part of the lesson is on its way.",
   visualAlt: "An illustration showing today's math idea using pictures instead of numbers.",
+  checkTitle: "Quick check — let's see what stuck!",
+  checkSubmit: "Submit",
+  checkSubmitting: "Checking...",
+  checkResult: (correct: number, total: number) => `You got ${correct} out of ${total}.`,
+  checkParentNotified: (n: number) => (n === 1 ? "We've let your parent know how it went." : `We've let ${n} parents know how it went.`),
+  checkNoParentLinked: "Nice work! (Link a parent from your dashboard to have results sent automatically.)",
+  checkError: "Couldn't submit the check — please try again.",
 };
 
 const ar: LessonCopy = {
   startLesson: "ابدأ الدرس",
   starting: "جاري البدء...",
+  startingFirstTime: "بنجهز درسك لأول مرة — تقريبًا خلصنا!",
   continueLabel: "متابعة",
   answerPlaceholder: "اكتب إجابتك أو اسأل سؤالًا...",
   askPlaceholder: "اسأل سؤالًا، أو اضغط متابعة...",
@@ -94,6 +111,13 @@ const ar: LessonCopy = {
   backToDashboard: "العودة إلى لوحة التحكم",
   visualComingSoon: "الصورة الخاصة بهذا الجزء من الدرس في الطريق.",
   visualAlt: "رسم توضيحي يشرح فكرة الرياضيات في هذا الدرس باستخدام الصور بدلاً من الأرقام.",
+  checkTitle: "تأكيد سريع — يلا نشوف قد إيه فاهم!",
+  checkSubmit: "إرسال",
+  checkSubmitting: "جاري التحقق...",
+  checkResult: (correct: number, total: number) => `إجابتك صح في ${correct} من ${total}.`,
+  checkParentNotified: (n: number) => (n === 1 ? "أبلغنا ولي أمرك بالنتيجة." : `أبلغنا ${n} من أولياء الأمور بالنتيجة.`),
+  checkNoParentLinked: "أحسنت! (اربط ولي أمر من لوحة التحكم عشان تتبعت له النتايج تلقائيًا.)",
+  checkError: "تعذر إرسال التحقق — حاول مرة أخرى.",
 };
 
 export function getLessonCopy(locale: Locale): LessonCopy {

@@ -76,11 +76,8 @@ export class AdminInstapayService {
 
     const externalEventId = `instapay:${submission.id}`;
     if (submission.kind === "SUBSCRIPTION") {
-      await this.billingService.applyWebhookEvent("instapay", {
-        type: "subscription.activated",
-        externalSubscriptionId: submission.referenceId,
-        externalEventId,
-      });
+      if (!submission.subscriptionId) throw new BadRequestException("Malformed submission: missing subscription.");
+      await this.billingService.activateInstapaySubscription(submission.subscriptionId, externalEventId);
     } else {
       if (!submission.packPurchaseId) throw new BadRequestException("Malformed submission: missing pack purchase.");
       await this.questionPacks.applyPaidPurchase("instapay", submission.packPurchaseId, externalEventId);

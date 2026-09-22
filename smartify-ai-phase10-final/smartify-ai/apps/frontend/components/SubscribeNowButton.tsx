@@ -8,18 +8,16 @@ import type { Locale } from "@/content/marketing";
 interface SubscribeNowButtonProps {
   locale: Locale;
   label: string;
-  planId: string;
   notSignedInMessage?: string;
 }
 
 /**
  * Mirrors FreeTrialButton's existing not-signed-in handling for
- * consistency. When the visitor is already signed in, the chosen plan ID
- * is carried into /billing so they don't have to re-pick it — billing's
- * own plan list still validates the ID belongs to their curriculum before
- * using it, so this is just a convenience default, never a trust boundary.
+ * consistency. Subject-based pricing (2026-09-20) — there is no plan ID
+ * to carry forward anymore; a signed-in visitor is sent straight to
+ * /billing, where they pick their own subjects from their real grade.
  */
-export function SubscribeNowButton({ locale, label, planId, notSignedInMessage = "يجب عليك التسجيل أولاً" }: SubscribeNowButtonProps) {
+export function SubscribeNowButton({ locale, label, notSignedInMessage = "يجب عليك التسجيل أولاً" }: SubscribeNowButtonProps) {
   const router = useRouter();
   const { isLoaded, isSignedIn } = useAuth();
 
@@ -32,7 +30,7 @@ export function SubscribeNowButton({ locale, label, planId, notSignedInMessage =
       return;
     }
 
-    router.push(`/${locale}/billing?planId=${planId}`);
+    router.push(`/${locale}/billing`);
   };
 
   return (

@@ -4,6 +4,20 @@ import { PrismaService } from "../prisma/prisma.service";
 import { PaymentProviderFactory } from "../payments/payment-provider.factory";
 import { loadBackendEnv } from "@smartify/config";
 import { TutorQuestionPacksService } from "../tutor-question-packs/tutor-question-packs.service";
+import { ReferralService } from "../referral/referral.service";
+
+/**
+ * Subject-based pricing (2026-09-20) — Subscription.selectedSubjectIds is a
+ * plain Json column (not a typed relation), so every read needs the same
+ * defensive parse: a real string array, or an empty array for anything
+ * else (null, a historical plan-based row that never set it, or malformed
+ * data) — never throws, since this is read at activation time from data
+ * this same service already wrote.
+ */
+function parseSelectedSubjectIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v): v is string => typeof v === "string");
+}
 
 @Injectable()
 export class BillingService {
@@ -11,7 +25,29 @@ export class BillingService {
     private readonly prisma: PrismaService,
     private readonly providerFactory: PaymentProviderFactory,
     private readonly questionPacks: TutorQuestionPacksService,
+    private readonly referralService: ReferralService,
   ) {}
+
+  /**
+   * Grants StudentSubject rows for every purchased subject at activation
+   * time (subscription.activated webhook, or InstaPay confirm) — the
+   * ONLY place "purchased access" is applied. Deliberately reuses the
+   * EXISTING StudentSubject table/constraint (createMany + skipDuplicates
+   * against its @@unique([studentId, subjectId])), so every existing
+   * subject-level entitlement check elsewhere in the codebase (Practice's
+   * assertSubjectOwned, Quiz, etc. — all read StudentSubject already)
+   * needs zero changes. A no-op for a historical plan-based subscription
+   * (selectedSubjectIds null) — those students' subjects were already
+   * granted through the old onboarding-time flow.
+   */
+  private async grantSelectedSubjects(tx: any, studentId: string, selectedSubjectIds: unknown): Promise<void> {
+    const subjectIds = parseSelectedSubjectIds(selectedSubjectIds);
+    if (subjectIds.length === 0) return;
+    await tx.studentSubject.createMany({
+      data: subjectIds.map((subjectId) => ({ studentId, subjectId })),
+      skipDuplicates: true,
+    });
+  }
 
   private async getProfileOrThrow(userId: string) {
     const profile = await this.prisma.client.studentProfile.findUnique({ where: { userId } });
@@ -19,35 +55,46 @@ export class BillingService {
     return profile;
   }
 
-  /** Plans available for the student's own curriculum — never lets them buy a plan for a curriculum they're not enrolled in. */
-  async getAvailablePlans(userId: string) {
+  /**
+   * Subject-based pricing (2026-09-20) — every Subject in the student's
+   * own grade, each with its own independent priceEGP (never a bundle/
+   * plan price). A Subject with priceEGP null is still listed (so the
+   * student can see it exists) but flagged unpriced — the frontend/
+   * checkout must never let one be selected. Never lets a student see
+   * (or later select) a Subject outside their own grade.
+   */
+  async getAvailableSubjects(userId: string) {
     const profile = await this.getProfileOrThrow(userId);
-    const [plans, grade] = await Promise.all([
-      this.prisma.client.pricingPlan.findMany({
-      where: { curriculumId: profile.curriculumId, isActive: true },
-      orderBy: { monthlyPriceEGP: "asc" },
-      }),
-      this.prisma.client.grade.findUnique({
-        where: { id: profile.gradeId },
-        include: { subjects: { orderBy: { nameEn: "asc" } } },
-      }),
-    ]);
-
-    const subjects = grade?.subjects ?? [];
-    return plans.map((plan) => ({
-      ...plan,
-      gradeLevel: grade?.level ?? null,
-      subjects,
-      basicSubjectIds: subjects.slice(0, plan.includedSubjects).map((subject) => subject.id),
+    const subjects = await this.prisma.client.subject.findMany({
+      where: { gradeId: profile.gradeId, isActive: true },
+      orderBy: { nameEn: "asc" },
+    });
+    return subjects.map((subject) => ({
+      id: subject.id,
+      nameEn: subject.nameEn,
+      nameAr: subject.nameAr,
+      priceEGP: subject.priceEGP != null ? Number(subject.priceEGP) : null,
     }));
   }
 
   async getCurrentSubscription(userId: string) {
     const profile = await this.getProfileOrThrow(userId);
-    return this.prisma.client.subscription.findUnique({
+    const subscription = await this.prisma.client.subscription.findUnique({
       where: { studentId: profile.id },
       include: { pricingPlan: true },
     });
+    if (!subscription) return null;
+
+    // Subject-based pricing (2026-09-20): a plan-based historical row has
+    // pricingPlan populated and selectedSubjectIds null; a new
+    // subject-priced row has the reverse. Resolve the real subject names
+    // for display either way, without trusting the JSON list blindly.
+    const selectedSubjectIds = parseSelectedSubjectIds(subscription.selectedSubjectIds);
+    const subjects = selectedSubjectIds.length > 0
+      ? await this.prisma.client.subject.findMany({ where: { id: { in: selectedSubjectIds } }, select: { id: true, nameEn: true, nameAr: true } })
+      : [];
+
+    return { ...subscription, subjects };
   }
 
   /** No client identifiers and no writes: revisiting or retrying never grants access. */
@@ -75,58 +122,60 @@ export class BillingService {
   }
 
   /**
-   * Validates the plan/subject selection and upserts a "pending" Subscription
-   * row for it — shared by the Stripe checkout path and the InstaPay manual
-   * path below. Neither path activates anything here; this only records
-   * WHAT the student is trying to buy, at a snapshotted price.
+   * Subject-based pricing (2026-09-20) — validates the selected subjects
+   * and upserts a "pending" Subscription row for them, at a
+   * server-computed, snapshotted price: the SUM of each selected
+   * Subject's own priceEGP, nothing else. No plan, no bundle, no
+   * included-subjects discount. Shared by the Stripe checkout path and
+   * the InstaPay manual path below. Neither path activates (grants)
+   * anything here — this only records WHAT the student is trying to buy,
+   * at what price; only ever computed from trusted server-side Subject
+   * data, never from a client-supplied total.
    */
-  private async resolvePendingSubscription(
-    userId: string,
-    input: { pricingPlanId: string; additionalSubjectsCount?: number; subjectIds?: string[] },
-  ) {
+  private async resolvePendingSubscription(userId: string, input: { subjectIds: string[] }) {
     const profile = await this.getProfileOrThrow(userId);
-    const plan = await this.prisma.client.pricingPlan.findUnique({ where: { id: input.pricingPlanId } });
-
-    if (!plan || plan.curriculumId !== profile.curriculumId || !plan.isActive) {
-      throw new BadRequestException("This plan is not available for your curriculum.");
-    }
 
     const selectedSubjectIds = [...new Set(input.subjectIds ?? [])];
-    if (selectedSubjectIds.length > 0) {
-      const gradeSubjects = await this.prisma.client.subject.findMany({ where: { gradeId: profile.gradeId } });
-      const validSubjectIds = new Set(gradeSubjects.map((subject) => subject.id));
-      if (selectedSubjectIds.some((id) => !validSubjectIds.has(id))) {
-        throw new BadRequestException("One or more selected subjects are invalid.");
-      }
+    if (selectedSubjectIds.length === 0) {
+      throw new BadRequestException("Select at least one subject.");
     }
-    const extra = selectedSubjectIds.length > 0
-      ? Math.max(0, selectedSubjectIds.length - plan.includedSubjects)
-      : Math.max(0, input.additionalSubjectsCount ?? 0);
-    const monthlyTotalEGP = Number(plan.monthlyPriceEGP) + extra * Number(plan.additionalSubjectPriceEGP);
+
+    const subjects = await this.prisma.client.subject.findMany({ where: { id: { in: selectedSubjectIds }, gradeId: profile.gradeId, isActive: true } });
+    if (subjects.length !== selectedSubjectIds.length) {
+      throw new BadRequestException("One or more selected subjects are invalid.");
+    }
+    const unpriced = subjects.filter((subject) => subject.priceEGP == null);
+    if (unpriced.length > 0) {
+      throw new BadRequestException(`The following subject(s) are not yet available for purchase: ${unpriced.map((s) => s.nameEn).join(", ")}.`);
+    }
+
+    const monthlyTotalEGP = subjects.reduce((sum, subject) => sum + Number(subject.priceEGP), 0);
 
     const subscription = await this.prisma.client.subscription.upsert({
       where: { studentId: profile.id },
-      update: { pricingPlanId: plan.id, additionalSubjectsCount: extra, monthlyTotalEGP, status: "pending" },
+      update: { pricingPlanId: null, additionalSubjectsCount: 0, selectedSubjectIds, monthlyTotalEGP, status: "pending" },
       create: {
         studentId: profile.id,
-        pricingPlanId: plan.id,
-        additionalSubjectsCount: extra,
+        pricingPlanId: null,
+        additionalSubjectsCount: 0,
+        selectedSubjectIds,
         monthlyTotalEGP,
         status: "pending",
       },
     });
 
-    return { plan, extra, monthlyTotalEGP, subscription };
+    return { subjects, monthlyTotalEGP, subscription };
   }
 
   /**
-   * Starts checkout for a plan. Creates a local Subscription row in
-   * "pending" status BEFORE redirecting to the payment provider, so the
-   * webhook has something concrete to activate — the row is the source
-   * of truth, the provider session is just how money actually moves.
+   * Starts checkout for the student's selected subjects. Creates a local
+   * Subscription row in "pending" status BEFORE redirecting to the
+   * payment provider, so the webhook has something concrete to activate —
+   * the row is the source of truth, the provider session is just how
+   * money actually moves.
    */
-  async startCheckout(userId: string, input: { pricingPlanId: string; additionalSubjectsCount?: number; subjectIds?: string[] }) {
-    const { plan, extra, monthlyTotalEGP, subscription } = await this.resolvePendingSubscription(userId, input);
+  async startCheckout(userId: string, input: { subjectIds: string[] }) {
+    const { subjects, monthlyTotalEGP, subscription } = await this.resolvePendingSubscription(userId, input);
 
     const { provider, providerKey } = await this.providerFactory.getActiveProvider();
     const env = loadBackendEnv();
@@ -135,7 +184,7 @@ export class BillingService {
       studentUserId: userId,
       subscriptionId: subscription.id,
       amountEGP: monthlyTotalEGP,
-      description: `Smartify AI — ${plan.levelCodeEn} (${plan.includedSubjects + extra} subjects)`,
+      description: `Smartify AI — ${subjects.map((s) => s.nameEn).join(", ")}`,
       successUrl: `${env.FRONTEND_URL}/billing/success`,
       cancelUrl: `${env.FRONTEND_URL}/billing`,
     });
@@ -156,7 +205,7 @@ export class BillingService {
    * against this reference. Nothing here grants any entitlement; only
    * AdminInstapayService.confirm() does, via the existing applyWebhookEvent.
    */
-  async startInstapayCheckout(userId: string, input: { pricingPlanId: string; additionalSubjectsCount?: number; subjectIds?: string[] }) {
+  async startInstapayCheckout(userId: string, input: { subjectIds: string[] }) {
     const env = loadBackendEnv();
     if (!env.INSTAPAY_RECIPIENT_NAME || !env.INSTAPAY_RECIPIENT_HANDLE) {
       throw new ServiceUnavailableException("InstaPay is not configured on this environment yet.");
@@ -290,6 +339,16 @@ export class BillingService {
               ...(event.externalProviderSubscriptionId ? { externalProviderSubscriptionId: event.externalProviderSubscriptionId } : {}),
             },
           });
+          // Subject-based pricing (2026-09-20): grant access to exactly
+          // what was paid for, in the SAME transaction as activation —
+          // either both commit or neither does. No-op for a historical
+          // plan-based row (selectedSubjectIds null).
+          await this.grantSelectedSubjects(tx, subscription.studentId, subscription.selectedSubjectIds);
+          // Referral V1 (2026-09-20): this is the referred student's
+          // FIRST successful paid activation trigger point — see
+          // ReferralService.earnRewardWithinTransaction's own doc comment
+          // for why this is safe against resubscribes and webhook retries.
+          await this.referralService.earnRewardWithinTransaction(tx, subscription.studentId);
         } else {
           // Scoped to the SAME identifier used to find the row (never the
           // checkout session id) — a stale/substituted id cannot match.
@@ -301,6 +360,53 @@ export class BillingService {
       });
     } catch (err: any) {
       // The unique event marker and entitlement change commit together.
+      if (err?.code !== "P2002") throw err;
+    }
+  }
+
+  /**
+   * InstaPay confirm's own activation path (AdminInstapayService.confirm(),
+   * SUBSCRIPTION kind only) — deliberately NOT routed through
+   * applyWebhookEvent. That method is built for real payment-provider
+   * webhooks, which only ever carry the provider's own external reference
+   * and must re-derive which Subscription row it belongs to by matching
+   * Subscription.externalSubscriptionId. InstaPay is a manual, out-of-band
+   * flow: a student can reopen checkout after already submitting a receipt
+   * (page reload, double-click, browser back/forward), which mints a fresh
+   * reference and silently overwrites externalSubscriptionId on the same
+   * Subscription row — orphaning the earlier reference the receipt was
+   * actually submitted against. Found 2026-09-19 via a real stuck "Checkout
+   * is not available for reconciliation yet." confirm failure: the
+   * submission's referenceId no longer matched its own Subscription's
+   * externalSubscriptionId. InstapayPaymentSubmission.subscriptionId is a
+   * durable FK captured once at submission time and never rewritten, so
+   * activating by that id directly sidesteps the whole reference-drift
+   * class of bug rather than papering over one instance of it. Shares the
+   * same WebhookEventLog idempotency guarantee as applyWebhookEvent so a
+   * retried confirm() still can't double-activate.
+   */
+  async activateInstapaySubscription(subscriptionId: string, externalEventId: string) {
+    try {
+      await this.prisma.client.$transaction(async (tx) => {
+        await tx.webhookEventLog.create({
+          data: { provider: "instapay", externalEventId, eventType: "subscription.activated" },
+        });
+        const subscription = await tx.subscription.findUnique({ where: { id: subscriptionId } });
+        if (!subscription) throw new NotFoundException("Subscription not found for this payment.");
+        const now = new Date();
+        const periodEnd = new Date(now);
+        periodEnd.setMonth(periodEnd.getMonth() + 1);
+        await tx.subscription.updateMany({
+          where: { id: subscription.id, status: "pending" },
+          data: { status: "active", currentPeriodStart: now, currentPeriodEnd: periodEnd },
+        });
+        // Subject-based pricing (2026-09-20) — see applyWebhookEvent's
+        // identical call for the full rationale.
+        await this.grantSelectedSubjects(tx, subscription.studentId, subscription.selectedSubjectIds);
+        // Referral V1 (2026-09-20) — see applyWebhookEvent's identical call.
+        await this.referralService.earnRewardWithinTransaction(tx, subscription.studentId);
+      });
+    } catch (err: any) {
       if (err?.code !== "P2002") throw err;
     }
   }

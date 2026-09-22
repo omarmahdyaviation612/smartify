@@ -49,6 +49,29 @@ export const SMARTIFY_TTS_INSTRUCTIONS =
   "care about. Do not change, add, or omit any words, numbers, or mathematical content from the given text — " +
   "speak exactly what is written.";
 
+// Launch-speed addition (2026-09-19): SMARTIFY_TTS_INSTRUCTIONS above
+// hardcodes "Speak in warm, natural Egyptian Arabic" — correct for the
+// Egyptian-curriculum content this was written for, but wrong once British
+// IG (English-medium) content exists too: a student reading an English
+// lesson was hearing it narrated with Egyptian-Arabic voice direction,
+// which OpenAI's TTS model apparently followed literally enough to sound
+// like Arabic speech over English words. Same persona/warmth, English
+// delivery instead. TutorSpeechService picks between the two per call
+// based on the ACTUAL text being spoken (containsArabicScript), not the
+// student's profile language setting — content language is the ground
+// truth for what a text-to-speech call should sound like.
+export const SMARTIFY_TTS_INSTRUCTIONS_EN =
+  "Speak in warm, natural English, unless the text itself is formal. " +
+  "Personality: a kind, encouraging elementary-school teacher talking directly to a young child — human and " +
+  "conversational, never an announcer or narrator. Warm and genuinely encouraging without sounding childish, " +
+  "cartoonish, or exaggerated/theatrical. Pronounce words and numbers clearly and precisely. When explaining a " +
+  "math step or reading an equation, slow down slightly and add a short natural pause right around the numbers " +
+  "and the equals sign, as a real teacher would when making sure a child follows along. When the text expresses " +
+  "praise for a correct answer, sound genuinely pleased and warm, not over-the-top. When the text is " +
+  "calming/supportive after a mistake, sound patient and reassuring, never disappointed or flat. Avoid a robotic, " +
+  "flat, or metronomic cadence — vary pacing and warmth like a real person speaking to a child they care about. " +
+  "Do not change, add, or omit any words, numbers, or content from the given text — speak exactly what is written.";
+
 // Exactly the values already validated in Phase 2/3 live QA — changing the
 // SystemConfig row is how you change these now, not editing this constant.
 export const DEFAULT_TTS_CONFIG: TtsConfig = {

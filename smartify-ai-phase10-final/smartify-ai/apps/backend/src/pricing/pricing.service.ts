@@ -5,12 +5,38 @@ import { PrismaService } from "../prisma/prisma.service";
 export class PricingService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Public pricing table, grouped by curriculum — the only source the frontend reads from. */
+  /**
+   * Public pricing table, grouped by curriculum -> grade -> Subject
+   * (2026-09-20: replaces the old PricingPlan bundle-tier source — every
+   * Subject is now priced independently, there is no "N subjects
+   * included" concept for new purchases). Sourced from Subject.priceEGP,
+   * the same field admins edit and the same field billing.service.ts
+   * sums at checkout, so this page can never drift from real pricing. A
+   * Subject with priceEGP === null is listed with priceEGP: null so the
+   * frontend can show it as "not yet available" rather than purchasable.
+   */
   async getPublicPricing() {
     const curricula = await this.prisma.client.curriculum.findMany({
-      where: { isActive: true },
-      include: {
-        pricingPlans: { where: { isActive: true }, orderBy: { monthlyPriceEGP: "asc" } },
+      where: { isActive: true, grades: { some: { isActive: true } } },
+      orderBy: { code: "asc" },
+      select: {
+        code: true,
+        nameEn: true,
+        nameAr: true,
+        grades: {
+          where: { isActive: true },
+          orderBy: { level: "asc" },
+          select: {
+            nameEn: true,
+            nameAr: true,
+            level: true,
+            subjects: {
+              where: { isActive: true },
+              orderBy: { nameEn: "asc" },
+              select: { id: true, nameEn: true, nameAr: true, priceEGP: true },
+            },
+          },
+        },
       },
     });
 
@@ -25,13 +51,16 @@ export class PricingService {
         code: c.code,
         nameEn: c.nameEn,
         nameAr: c.nameAr,
-        tiers: c.pricingPlans.map((p) => ({
-          id: p.id, // lets the frontend carry the selected plan into checkout without the student re-picking it
-          levelEn: p.levelCodeEn,
-          levelAr: p.levelCodeAr,
-          monthlyPriceEGP: p.monthlyPriceEGP,
-          includedSubjects: p.includedSubjects,
-          additionalSubjectPriceEGP: p.additionalSubjectPriceEGP,
+        grades: c.grades.map((g) => ({
+          nameEn: g.nameEn,
+          nameAr: g.nameAr,
+          level: g.level,
+          subjects: g.subjects.map((s) => ({
+            id: s.id,
+            nameEn: s.nameEn,
+            nameAr: s.nameAr,
+            priceEGP: s.priceEGP != null ? Number(s.priceEGP) : null,
+          })),
         })),
       })),
     };

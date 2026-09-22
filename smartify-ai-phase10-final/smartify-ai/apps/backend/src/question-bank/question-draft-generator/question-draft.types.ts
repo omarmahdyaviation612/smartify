@@ -1,3 +1,5 @@
+import type { GroundingNotes } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
+
 /**
  * The input contract for the (Phase 10E: architecture-only, never actually
  * invoked with a real provider) Question Bank generation pipeline.
@@ -18,13 +20,22 @@ export interface QuestionGenerationInput {
   studentAgeRange: string;
 }
 
-/** Curriculum/grade/subject/unit/topic names resolved live from the DB — never hand-typed. */
+/**
+ * Curriculum/grade/subject/unit/topic names resolved live from the DB —
+ * never hand-typed. `groundingNotesJson`/`groundingVersion` (2026-09-19)
+ * are the parent Unit's cached real-textbook grounding — null whenever
+ * the Unit hasn't been extracted yet (or has no source PDF mapped), in
+ * which case generation falls back to the pre-grounding behavior unchanged.
+ */
 export interface ResolvedTopicContext {
   curriculumNameEn: string;
   gradeNameEn: string;
   subjectNameEn: string;
   unitNameEn: string;
   topicNameEn: string;
+  groundingNotesJson: GroundingNotes | null;
+  groundingVersion: number | null;
+  lessonObjectives: string[];
 }
 
 /**

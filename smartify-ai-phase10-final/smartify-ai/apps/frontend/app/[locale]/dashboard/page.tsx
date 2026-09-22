@@ -11,6 +11,11 @@ import { useApiClient } from "@/lib/api-client";
 import { ComingSoonCard } from "@/components/ComingSoonCard";
 import type { Locale } from "@/content/marketing";
 import { StudentLinkCodeCard } from "@/components/StudentLinkCodeCard";
+import { FreeTrialCard } from "@/components/FreeTrialCard";
+import { ReferralCard } from "@/components/ReferralCard";
+import { useCurrentUser } from "@/lib/use-current-user";
+
+const ADMIN_ROLES = ["SUPER_ADMIN", "ADMIN"];
 
 interface SubjectScore {
   nameEn: string;
@@ -36,6 +41,7 @@ interface ActivityItem {
 }
 interface PilotLesson {
   topicId: string;
+  subjectId: string;
   nameEn: string;
   nameAr: string;
   unitNameEn: string;
@@ -73,16 +79,43 @@ export default function DashboardPage() {
   const navCopy = getMarketingCopy(locale);
   const router = useRouter();
   const { apiFetch } = useApiClient();
+  const { user, loading: userLoading } = useCurrentUser();
+  const isAdminRole = !!user && ADMIN_ROLES.includes(user.role);
 
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [notOnboarded, setNotOnboarded] = useState(false);
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null);
+
+  // Admin home dashboard (2026-09-20) — ADMIN/SUPER_ADMIN never see the
+  // Student dashboard; this is a UX convenience only, the real security
+  // boundary is the backend RolesGuard on every /admin/* route.
+  useEffect(() => {
+    if (isAdminRole) {
+      router.replace(`/${locale}/admin`);
+    }
+  }, [isAdminRole, locale, router]);
 
   useEffect(() => {
+    if (userLoading || isAdminRole) return;
     apiFetch<DashboardSummary>("/dashboard/summary")
-      .then(setSummary)
+      .then((data) => {
+        setSummary(data);
+        if (data.subjects[0]) setSelectedSubjectId(data.subjects[0].id);
+      })
       .catch(() => setNotOnboarded(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [userLoading, isAdminRole]);
+
+  if (userLoading || isAdminRole) {
+    return (
+      <>
+        <Navbar locale={locale} copy={navCopy} />
+        <main className="flex min-h-[60vh] items-center justify-center">
+          <p className="text-neutral-500">{copy.loading}</p>
+        </main>
+      </>
+    );
+  }
 
   if (notOnboarded) {
     return (
@@ -124,16 +157,40 @@ export default function DashboardPage() {
           <p className="mt-2 text-neutral-600">{copy.subtitle}</p>
 
           <div className="mt-4 flex flex-wrap gap-3">
-            <Link href={`/${locale}/practice`}>
+            <Link href={`/${locale}/practice${selectedSubjectId ? `?subjectId=${selectedSubjectId}` : ""}`}>
               <SmartifyButton variant="secondary">{isAr ? "التدريب" : "Practice"}</SmartifyButton>
             </Link>
-            <Link href={`/${locale}/quizzes`}>
+            <Link href={`/${locale}/quizzes${selectedSubjectId ? `?subjectId=${selectedSubjectId}` : ""}`}>
               <SmartifyButton variant="secondary">{isAr ? "الاختبارات" : "Quizzes"}</SmartifyButton>
             </Link>
             <Link href={`/${locale}/billing`}>
               <SmartifyButton variant="secondary">{isAr ? "الاشتراك" : "Subscription"}</SmartifyButton>
             </Link>
           </div>
+
+          {/* Subject switcher — controls every section below (lessons, AI
+              Tutor, and the Practice/Quizzes quick links above), so moving
+              from e.g. Math to Science is one click from the top of the
+              page rather than buried inside a single card. */}
+          {summary.subjects.length > 1 && (
+            <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-neutral-100 pt-6" role="tablist" aria-label={isAr ? "اختر مادة" : "Choose a subject"}>
+              <span className="text-sm font-medium text-neutral-500">{isAr ? "المادة:" : "Subject:"}</span>
+              {summary.subjects.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={selectedSubjectId === s.id}
+                  onClick={() => setSelectedSubjectId(s.id)}
+                  className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
+                    selectedSubjectId === s.id ? "bg-ai-gradient text-white" : "border border-neutral-200 text-neutral-600 hover:border-neutral-300"
+                  }`}
+                >
+                  {isAr ? s.nameAr : s.nameEn}
+                </button>
+              ))}
+            </div>
+          )}
         </header>
 
         <div className="grid gap-6 lg:grid-cols-3">
@@ -153,7 +210,7 @@ export default function DashboardPage() {
 
           {summary.aiTutorAvailable && summary.subjects.length > 0 ? (
             <Link
-              href={`/${locale}/tutor?subjectId=${summary.subjects[0].id}`}
+              href={`/${locale}/tutor?subjectId=${selectedSubjectId ?? summary.subjects[0].id}`}
               className="rounded-sf-lg border border-neutral-200 bg-ai-gradient p-6 text-white transition-opacity hover:opacity-95"
             >
               <h2 className="font-semibold">{copy.sections.aiTutor.title}</h2>
@@ -164,12 +221,23 @@ export default function DashboardPage() {
           ) : (
             <ComingSoonCard title={copy.sections.aiTutor.title} body={copy.sections.aiTutor.body} badgeLabel={copy.comingSoon} />
           )}
-          {/* Interactive Lessons pilot — real, from teachingStepsJson topics + this student's own LessonSession status */}
+          {/* Lessons — real, every Topic for the student's selected subjects (title-only ones generate on first open) + this student's own LessonSession status */}
           <div className="rounded-sf-lg border border-neutral-200 bg-white p-6 lg:col-span-2">
-            <h2 className="mb-4 font-semibold text-navy-900">{copy.sections.pilotLessons.title}</h2>
-            {summary.pilotLessons.length > 0 ? (
-              <ul className="space-y-3">
-                {summary.pilotLessons.map((lesson) => (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="font-semibold text-navy-900">{copy.sections.pilotLessons.title}</h2>
+              {selectedSubjectId && summary.subjects.length > 1 && (
+                <span className="text-xs text-neutral-400">
+                  {isAr
+                    ? summary.subjects.find((s) => s.id === selectedSubjectId)?.nameAr
+                    : summary.subjects.find((s) => s.id === selectedSubjectId)?.nameEn}
+                </span>
+              )}
+            </div>
+            {(() => {
+              const lessonsForSubject = summary.pilotLessons.filter((l) => l.subjectId === selectedSubjectId);
+              return lessonsForSubject.length > 0 ? (
+              <ul className="max-h-96 space-y-3 overflow-y-auto">
+                {lessonsForSubject.map((lesson) => (
                   <li key={lesson.topicId} className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-sm text-neutral-700">{isAr ? lesson.nameAr : lesson.nameEn}</p>
@@ -189,9 +257,10 @@ export default function DashboardPage() {
                   </li>
                 ))}
               </ul>
-            ) : (
-              <p className="text-sm text-neutral-500">{copy.sections.pilotLessons.empty}</p>
-            )}
+              ) : (
+                <p className="text-sm text-neutral-500">{copy.sections.pilotLessons.empty}</p>
+              );
+            })()}
           </div>
 
           <ComingSoonCard title={copy.sections.streak.title} body={copy.sections.streak.body} badgeLabel={copy.comingSoon} />
@@ -266,6 +335,8 @@ export default function DashboardPage() {
           <ComingSoonCard title={copy.sections.achievements.title} body={copy.sections.achievements.body} badgeLabel={copy.comingSoon} />
           <ComingSoonCard title={copy.sections.upcomingExams.title} body={copy.sections.upcomingExams.body} badgeLabel={copy.comingSoon} />
           <StudentLinkCodeCard isAr={isAr} />
+          <FreeTrialCard isAr={isAr} locale={locale} />
+          <ReferralCard isAr={isAr} locale={locale} />
         </div>
       </SmartifyContainer>
     </main>

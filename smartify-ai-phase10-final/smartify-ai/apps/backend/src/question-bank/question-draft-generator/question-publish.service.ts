@@ -144,4 +144,64 @@ export class QuestionPublishService {
 
     return { questionId: result.id, alreadyPublished: false };
   }
+
+  /**
+   * Launch-speed lazy-generation path (2026-09-19): publishes a draft
+   * produced by QuestionDraftGeneratorService.generateAutoQuestionBatch()
+   * with no reviewDraft()/approve() step in between — the draft's
+   * promptAr/explanationAr are already AI-supplied by construction. The
+   * resulting Question is flagged `needsReview: true` for a later audit
+   * pass. Deliberately a separate method from publish() above, so the
+   * original human-reviewed pipeline's guarantees (status must be
+   * "approved") can never be weakened by this addition.
+   */
+  async autoPublish(draftId: string): Promise<QuestionPublishResult> {
+    const draft = await this.prisma.client.questionDraft.findUnique({ where: { id: draftId } });
+    if (!draft) throw new NotFoundException(`QuestionDraft ${draftId} not found.`);
+
+    if (draft.publishedQuestionId) {
+      this.logger.log(`Draft ${draftId} is already published as Question ${draft.publishedQuestionId} — returning existing result.`);
+      return { questionId: draft.publishedQuestionId, alreadyPublished: true };
+    }
+
+    const topic = await this.prisma.client.topic.findUnique({
+      where: { id: draft.topicId },
+      include: { lessons: { select: { isPlaceholder: true } } },
+    });
+    const topicExists = !!topic;
+    const topicIsPlaceholder = !topic || !topic.lessons.some((l) => !l.isPlaceholder);
+
+    const validation = validateQuestionDraft(draft, { topicExists, topicIsPlaceholder, requireReviewedContent: true });
+    if (!validation.valid) {
+      throw new BadRequestException(`Draft failed validation: ${validation.errors.join("; ")}`);
+    }
+
+    const result = await this.prisma.client.$transaction(async (tx) => {
+      const question = await tx.question.create({
+        data: {
+          topicId: draft.topicId,
+          type: draft.type,
+          difficulty: draft.difficulty,
+          promptEn: draft.promptEn,
+          promptAr: draft.promptAr,
+          optionsJson: draft.optionsJson as any,
+          correctAnswerJson: draft.correctAnswerJson as any,
+          explanationEn: draft.explanationEn,
+          explanationAr: draft.explanationAr,
+          isAiGenerated: true,
+          needsReview: true, // AI-authored bilingual content, never human-reviewed — see this method's doc comment
+          isPlaceholder: false,
+        },
+      });
+
+      await tx.questionDraft.update({
+        where: { id: draft.id },
+        data: { status: "published", publishedQuestionId: question.id, publishedAt: new Date() },
+      });
+
+      return question;
+    });
+
+    return { questionId: result.id, alreadyPublished: false };
+  }
 }

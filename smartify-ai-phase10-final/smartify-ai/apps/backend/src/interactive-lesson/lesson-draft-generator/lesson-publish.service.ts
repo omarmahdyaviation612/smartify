@@ -180,4 +180,117 @@ export class LessonPublishService {
       alreadyPublished: false,
     };
   }
+
+  /**
+   * Launch-speed lazy-generation path (2026-09-18): publishes a draft
+   * produced by LessonDraftGeneratorService.generateAutoDraft() straight
+   * into an EXISTING (title-only, teachingStepsJson: null) Topic row,
+   * with no reviewObjectives()/approve() step in between — the draft's
+   * objectives are already bilingual (AI-supplied) by construction. The
+   * resulting Lesson is flagged `needsReview: true` for a later audit
+   * pass. Deliberately a separate method from publish() above rather
+   * than a flag on it, so the original human-reviewed pipeline's
+   * guarantees (status must be "approved", every objectiveAr
+   * human-reviewed) can never be weakened by this addition.
+   */
+  async autoPublishIntoTopic(
+    draftId: string,
+    topicId: string,
+    generationMetadata?: { generationSource: "LEGACY_TITLE_ONLY" | "TEXTBOOK_GROUNDED"; groundingVersionUsed: number | null; generationPromptVersion: string },
+  ): Promise<LessonPublishResult> {
+    const draft = await this.prisma.client.lessonDraft.findUnique({ where: { id: draftId } });
+    if (!draft) throw new NotFoundException(`LessonDraft ${draftId} not found.`);
+
+    if (draft.publishedTopicId) {
+      this.logger.log(`Draft ${draftId} is already published as Topic ${draft.publishedTopicId} — returning existing result.`);
+      const lesson = await this.prisma.client.lesson.findFirst({ where: { topicId: draft.publishedTopicId } });
+      const learningObjectives = lesson
+        ? await this.prisma.client.learningObjective.findMany({ where: { lessonId: lesson.id } })
+        : [];
+      return {
+        topicId: draft.publishedTopicId,
+        lessonId: lesson?.id ?? "",
+        learningObjectiveIds: learningObjectives.map((o) => o.id),
+        alreadyPublished: true,
+      };
+    }
+
+    const objectives = parseBilingualObjectives(draft.learningObjectivesJson);
+    if (!allObjectivesReviewed(objectives)) {
+      throw new BadRequestException("Auto-generated draft is missing an Arabic objective — cannot auto-publish.");
+    }
+
+    const result = await this.prisma.client.$transaction(async (tx) => {
+      // 2026-09-19: regeneration support. This Topic may already have been
+      // published once before (regenerate-topic-content.ts re-runs this
+      // exact method with a brand-new draft once grounding becomes
+      // available). LessonDraft.publishedTopicId is @unique — "at most one
+      // draft claims to have published a given Topic" — so a second draft
+      // publishing the SAME Topic must first hand that claim over: clear
+      // it from whichever old draft(s) currently hold it, then delete the
+      // old Lesson/LearningObjective rows this method itself created last
+      // time (never touches a real human-reviewed Lesson from the OTHER
+      // pipeline, since this method only ever creates isAiGenerated:true
+      // ones). Without this, a second regeneration would either crash on
+      // the unique constraint or silently leave stale duplicate Lesson
+      // rows other code (e.g. question generation's own-lesson-objectives
+      // lookup) would then read alongside the new one.
+      await tx.lessonDraft.updateMany({ where: { publishedTopicId: topicId }, data: { publishedTopicId: null } });
+      const staleLessons = await tx.lesson.findMany({ where: { topicId, isAiGenerated: true }, select: { id: true } });
+      if (staleLessons.length > 0) {
+        const staleLessonIds = staleLessons.map((l) => l.id);
+        await tx.learningObjective.deleteMany({ where: { lessonId: { in: staleLessonIds } } });
+        await tx.lesson.deleteMany({ where: { id: { in: staleLessonIds } } });
+      }
+
+      const topic = await tx.topic.update({
+        where: { id: topicId },
+        data: {
+          teachingStepsJson: draft.teachingStepsJson as any,
+          // 2026-09-19: records HOW this Topic's content was generated —
+          // never touched again automatically once set (only a deliberate,
+          // manual regeneration via regenerate-topic-content.ts changes it).
+          generationSource: generationMetadata?.generationSource ?? "LEGACY_TITLE_ONLY",
+          groundingVersionUsed: generationMetadata?.groundingVersionUsed ?? null,
+          generationPromptVersion: generationMetadata?.generationPromptVersion ?? null,
+          contentGeneratedAt: new Date(),
+        },
+      });
+
+      const lesson = await tx.lesson.create({
+        data: {
+          topicId: topic.id,
+          nameEn: draft.topicNameEn,
+          nameAr: draft.topicNameAr,
+          order: 1,
+          isAiGenerated: true,
+          needsReview: true, // AI-authored objectives, never human-reviewed — see this method's doc comment
+          isPlaceholder: false,
+        },
+      });
+
+      const createdObjectives = [];
+      for (const objective of objectives) {
+        createdObjectives.push(
+          await tx.learningObjective.create({
+            data: { lessonId: lesson.id, descriptionEn: objective.objectiveEn, descriptionAr: objective.objectiveAr! },
+          }),
+        );
+      }
+
+      await tx.lessonDraft.update({
+        where: { id: draft.id },
+        data: { status: "published", publishedTopicId: topic.id, publishedAt: new Date() },
+      });
+
+      return { topic, lesson, createdObjectives };
+    });
+
+    return {
+      topicId: result.topic.id,
+      lessonId: result.lesson.id,
+      learningObjectiveIds: result.createdObjectives.map((o) => o.id),
+      alreadyPublished: false,
+    };
+  }
 }

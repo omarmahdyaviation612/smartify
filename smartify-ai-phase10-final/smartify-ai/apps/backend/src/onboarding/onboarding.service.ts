@@ -1,10 +1,14 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { QuestionDraftGeneratorService } from "../question-bank/question-draft-generator/question-draft-generator.service";
 import type { StudentOnboardingInput } from "@smartify/validation";
 
 @Injectable()
 export class OnboardingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly questionGenerator: QuestionDraftGeneratorService,
+  ) {}
 
   /**
    * Creates or updates the StudentProfile for the current user and sets
@@ -84,12 +88,29 @@ export class OnboardingService {
     const profile = await this.getProfileOrThrow(userId);
     const studentSubjects = await this.prisma.client.studentSubject.findMany({
       where: { studentId: profile.id },
-      include: { subject: { include: { units: { include: { topics: true } } } } },
+      include: {
+        subject: {
+          include: { units: { orderBy: { order: "asc" }, include: { topics: { orderBy: { order: "asc" } } } } },
+        },
+      },
     });
 
     const topicIds = studentSubjects.flatMap((ss) => ss.subject.units.flatMap((u) => u.topics.map((t) => t.id)));
     if (topicIds.length === 0) {
       throw new BadRequestException("No subjects selected yet — complete the subject step first.");
+    }
+
+    // Launch-speed lazy-generation path (2026-09-19): a brand-new subject
+    // (nothing ever opened by any student yet) previously left this query
+    // with zero non-placeholder rows, so the diagnostic silently looked
+    // "unavailable" for every student who picked it — see the Lesson-page
+    // and Practice-page versions of this same bug. Bounded to one topic
+    // per selected subject (its first, by order) rather than every topic,
+    // so onboarding never blocks on generating a whole subject's worth of
+    // content; ensurePoolForTopic is a no-op once a pool exists.
+    for (const ss of studentSubjects) {
+      const firstTopicId = ss.subject.units[0]?.topics[0]?.id;
+      if (firstTopicId) await this.questionGenerator.ensurePoolForTopic(firstTopicId, userId);
     }
 
     // A small, mixed-difficulty spread — enough to produce a meaningful

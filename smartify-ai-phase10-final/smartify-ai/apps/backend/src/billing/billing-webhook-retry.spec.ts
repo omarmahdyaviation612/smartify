@@ -1,5 +1,10 @@
 import { BillingService } from "./billing.service";
 
+// Referral V1 (2026-09-20) — BillingService calls this unconditionally at
+// activation now; mocked as a no-op collaborator (this file is about
+// webhook retry/idempotency, not referral behavior).
+const referralServiceMock = { earnRewardWithinTransaction: jest.fn().mockResolvedValue(undefined) } as any;
+
 describe("payment webhook retries", () => {
   // Transactional persistence boundary: rollback discards all tentative state.
   function setup() {
@@ -35,7 +40,7 @@ describe("payment webhook retries", () => {
       state=draft;
       return result;
     }};
-    return { service: new BillingService({client:db} as any, {} as any, {} as any), state:()=>state, fail:(value:boolean)=>{fail=value;}, replaceSession:()=>{replaceSession=true;} };
+    return { service: new BillingService({client:db} as any, {} as any, {} as any, referralServiceMock), state:()=>state, fail:(value:boolean)=>{fail=value;}, replaceSession:()=>{replaceSession=true;} };
   }
   const event = {type:"subscription.activated",externalSubscriptionId:"cs_own",externalEventId:"evt"};
   it("rolls back the event marker when activation fails, then permits retry", async () => {

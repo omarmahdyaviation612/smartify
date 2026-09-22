@@ -1,0 +1,691 @@
+{
+  "entries": [
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 5",
+      "gradeNameAr": "الصف الخامس الابتدائي",
+      "gradeLevel": 5,
+      "subjectNameEn": "Arabic Language",
+      "subjectNameAr": "اللغة العربية",
+      "icon": "language",
+      "sourceFile": "Arabic_langugae_prim5_t1.pdf",
+      "units": [
+        {
+          "order": 1,
+          "nameEn": "Our Nile Is a Trust",
+          "nameAr": "نيلنا أمانة",
+          "sourcePage": 7,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "The Secret of Life",
+              "nameAr": "سر الحياة"
+            },
+            {
+              "order": 2,
+              "nameEn": "Why I Did Not Pollute the River's Water",
+              "nameAr": "لم ألوث ماء النهر"
+            },
+            {
+              "order": 3,
+              "nameEn": "The Problem-Solving Hero",
+              "nameAr": "بطل حل المشكلات"
+            },
+            {
+              "order": 4,
+              "nameEn": "The Tale of Giving",
+              "nameAr": "حكاية عطاء"
+            }
+          ]
+        },
+        {
+          "order": 2,
+          "nameEn": "The Art of Communication",
+          "nameAr": "فن التواصل",
+          "sourcePage": 53,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "The Bridge of Communication",
+              "nameAr": "جسر التواصل"
+            },
+            {
+              "order": 2,
+              "nameEn": "The Language of the Text",
+              "nameAr": "لغة النص"
+            },
+            {
+              "order": 3,
+              "nameEn": "The Message Across Time",
+              "nameAr": "الرسالة عبر الزمن"
+            },
+            {
+              "order": 4,
+              "nameEn": "My Brother, Humankind",
+              "nameAr": "أخي الإنسان"
+            }
+          ]
+        },
+        {
+          "order": 3,
+          "nameEn": "The Beauty of Difference",
+          "nameAr": "جمال الاختلاف",
+          "sourcePage": 99,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "Diversity Is Life",
+              "nameAr": "التنوع حياة"
+            },
+            {
+              "order": 2,
+              "nameEn": "How Does the World Become More Beautiful?",
+              "nameAr": "كيف يصبح العالم أجمل؟"
+            },
+            {
+              "order": 3,
+              "nameEn": "Confused in Front of the Flower Seller",
+              "nameAr": "حائر أمام بائع الزهور"
+            },
+            {
+              "order": 4,
+              "nameEn": "The Beauty of Diversity",
+              "nameAr": "جمال التنوع"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 5",
+      "gradeNameAr": "الصف الخامس الابتدائي",
+      "gradeLevel": 5,
+      "subjectNameEn": "Mathematics",
+      "subjectNameAr": "الرياضيات",
+      "icon": "calculator",
+      "sourceFile": "Math_Ar_prim5_t1.pdf",
+      "units": [
+        {
+          "order": 1,
+          "nameEn": "Place Value of Decimal Numbers and Computing with Them",
+          "nameAr": "القيمة المكانية للأعداد العشرية وحسابها",
+          "sourcePage": 3,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "Decimals to the Thousandths",
+              "nameAr": "الكسور العشرية حتى جزء من الألف"
+            },
+            {
+              "order": 2,
+              "nameEn": "Changing Place Values",
+              "nameAr": "تغيير القيم المكانية"
+            },
+            {
+              "order": 3,
+              "nameEn": "Composing and Decomposing Decimals",
+              "nameAr": "تكوين الكسور العشرية وتحليلها"
+            },
+            {
+              "order": 4,
+              "nameEn": "Comparing Decimals",
+              "nameAr": "مقارنة الكسور العشرية"
+            },
+            {
+              "order": 5,
+              "nameEn": "Rounding Decimals",
+              "nameAr": "تقريب الكسور العشرية"
+            },
+            {
+              "order": 6,
+              "nameEn": "Estimating Sums of Decimal Numbers",
+              "nameAr": "تقدير مجموع الأعداد العشرية"
+            },
+            {
+              "order": 7,
+              "nameEn": "Modeling Addition of Decimals",
+              "nameAr": "نمذجة جمع الكسور العشرية"
+            },
+            {
+              "order": 8,
+              "nameEn": "Modeling Subtraction of Decimals",
+              "nameAr": "نمذجة طرح الكسور العشرية"
+            },
+            {
+              "order": 9,
+              "nameEn": "Estimating the Difference Between Two Decimal Numbers",
+              "nameAr": "تقدير الفرق بين عددين عشريين"
+            },
+            {
+              "order": 10,
+              "nameEn": "Subtracting Decimals to the Thousandths",
+              "nameAr": "طرح الكسور العشرية حتى جزء من الألف"
+            },
+            {
+              "order": 11,
+              "nameEn": "Word Problems on Decimals",
+              "nameAr": "مسائل كلامية على الكسور العشرية"
+            }
+          ]
+        },
+        {
+          "order": 2,
+          "nameEn": "Relationships Between Numbers",
+          "nameAr": "العلاقات بين الأعداد",
+          "sourcePage": 44,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "Mathematical Expressions, Equations, and Variables",
+              "nameAr": "التعبيرات الرياضية والمعادلات والمتغيرات"
+            },
+            {
+              "order": 2,
+              "nameEn": "Variables in Equations",
+              "nameAr": "المتغيرات في المعادلات"
+            },
+            {
+              "order": 3,
+              "nameEn": "Stories and Numbers",
+              "nameAr": "القصص والأعداد"
+            },
+            {
+              "order": 4,
+              "nameEn": "Factoring a Number into Prime Factors",
+              "nameAr": "تحليل العدد إلى عوامل أولية"
+            },
+            {
+              "order": 5,
+              "nameEn": "Greatest Common Factor (GCF)",
+              "nameAr": "العامل المشترك الأكبر (أ.م.ع.أ)"
+            },
+            {
+              "order": 6,
+              "nameEn": "Identifying Multiples",
+              "nameAr": "تحديد المضاعفات"
+            },
+            {
+              "order": 7,
+              "nameEn": "Least Common Multiple (LCM)",
+              "nameAr": "المضاعف المشترك الأصغر (م.م.أ)"
+            },
+            {
+              "order": 8,
+              "nameEn": "Factors or Multiples?",
+              "nameAr": "عوامل أم مضاعفات؟"
+            }
+          ]
+        },
+        {
+          "order": 3,
+          "nameEn": "Multiplication of Whole Numbers",
+          "nameAr": "ضرب الأعداد الصحيحة",
+          "sourcePage": 65,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "Using the Rectangle Area Model in Multiplication",
+              "nameAr": "استخدام نموذج مساحة المستطيل في عملية الضرب"
+            },
+            {
+              "order": 2,
+              "nameEn": "The Distributive Property in Multiplication",
+              "nameAr": "خاصية التوزيع في عملية الضرب"
+            },
+            {
+              "order": 3,
+              "nameEn": "Multiplying by a Two-Digit Number Using the Standard Algorithm",
+              "nameAr": "الضرب في عدد مكوّن من رقمين باستخدام الخوارزمية المعيارية"
+            },
+            {
+              "order": 4,
+              "nameEn": "Multiplying Multi-Digit Numbers",
+              "nameAr": "ضرب الأعداد متعددة الأرقام"
+            },
+            {
+              "order": 5,
+              "nameEn": "Word Problems on Multiplication",
+              "nameAr": "مسائل كلامية على الضرب"
+            }
+          ]
+        },
+        {
+          "order": 4,
+          "nameEn": "Division of Whole Numbers",
+          "nameAr": "القسمة على أعداد صحيحة",
+          "sourcePage": 81,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "Division Using the Rectangle Area Model",
+              "nameAr": "القسمة باستخدام نموذج مساحة المستطيل"
+            },
+            {
+              "order": 2,
+              "nameEn": "Estimating the Quotient",
+              "nameAr": "تقدير خارج القسمة"
+            },
+            {
+              "order": 3,
+              "nameEn": "Using the Division Algorithm",
+              "nameAr": "استخدام خوارزمية القسمة"
+            },
+            {
+              "order": 4,
+              "nameEn": "The Relationship Between Division and Multiplication",
+              "nameAr": "علاقة القسمة بالضرب"
+            },
+            {
+              "order": 5,
+              "nameEn": "Multi-Step Word Problems",
+              "nameAr": "مسائل كلامية متعددة الخطوات"
+            }
+          ]
+        },
+        {
+          "order": 5,
+          "nameEn": "Multiplication and Division with Decimals",
+          "nameAr": "عمليتا الضرب والقسمة مع الكسور العشرية",
+          "sourcePage": 92,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "Multiplying by Powers of 10",
+              "nameAr": "الضرب في قوى العدد 10"
+            },
+            {
+              "order": 2,
+              "nameEn": "Multiplying Decimals by Whole Numbers",
+              "nameAr": "ضرب الكسور العشرية في أعداد صحيحة"
+            },
+            {
+              "order": 3,
+              "nameEn": "Multiplying Tenths by Tenths",
+              "nameAr": "ضرب الأجزاء من عشرة في أجزاء من عشرة"
+            },
+            {
+              "order": 4,
+              "nameEn": "Multiplying Decimals Using the Rectangle Area Model",
+              "nameAr": "ضرب الكسور العشرية باستخدام نموذج مساحة المستطيل"
+            },
+            {
+              "order": 5,
+              "nameEn": "Multiplying Decimals to the Hundredths",
+              "nameAr": "ضرب الكسور العشرية حتى جزء من مائة"
+            },
+            {
+              "order": 6,
+              "nameEn": "Multiplying Decimals to the Thousandths",
+              "nameAr": "ضرب الكسور العشرية حتى جزء من الألف"
+            },
+            {
+              "order": 7,
+              "nameEn": "Decimals and the Metric System",
+              "nameAr": "الكسور العشرية والنظام المتري"
+            },
+            {
+              "order": 8,
+              "nameEn": "Measurement, Decimals, and Powers of 10",
+              "nameAr": "القياس والكسور العشرية وقوى العدد 10"
+            },
+            {
+              "order": 9,
+              "nameEn": "Solving Multi-Step Word Problems",
+              "nameAr": "حل مسائل كلامية متعددة الخطوات"
+            },
+            {
+              "order": 10,
+              "nameEn": "Dividing by Powers of 10",
+              "nameAr": "القسمة على قوى العدد 10"
+            },
+            {
+              "order": 11,
+              "nameEn": "Patterns and Relationships in Powers of 10",
+              "nameAr": "الأنماط والعلاقات في قوى العدد 10"
+            },
+            {
+              "order": 12,
+              "nameEn": "Dividing Decimals by Whole Numbers",
+              "nameAr": "قسمة كسور عشرية على أعداد صحيحة"
+            },
+            {
+              "order": 13,
+              "nameEn": "Dividing Decimals by Decimals",
+              "nameAr": "قسمة كسور عشرية على كسور عشرية"
+            }
+          ]
+        },
+        {
+          "order": 6,
+          "nameEn": "Numerical Expressions and Patterns",
+          "nameAr": "التعبيرات العددية والأنماط",
+          "sourcePage": 121,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "Order of Operations",
+              "nameAr": "ترتيب إجراء العمليات الحسابية"
+            },
+            {
+              "order": 2,
+              "nameEn": "Numerical Expressions Involving Parentheses",
+              "nameAr": "تعبيرات عددية تتضمن أقواسًا"
+            },
+            {
+              "order": 3,
+              "nameEn": "Writing a Numerical Expression to Represent a Situation",
+              "nameAr": "كتابة تعبير عددي لتمثيل موقف ما"
+            },
+            {
+              "order": 4,
+              "nameEn": "Identifying Numerical Patterns",
+              "nameAr": "تحديد الأنماط العددية"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 5",
+      "gradeNameAr": "الصف الخامس الابتدائي",
+      "gradeLevel": 5,
+      "subjectNameEn": "English Language",
+      "subjectNameAr": "اللغة الإنجليزية",
+      "icon": "language",
+      "sourceFile": "English_language_prim5_t1.pdf",
+      "units": [
+        {
+          "order": 1,
+          "nameEn": "Food, Nature, and Culture",
+          "nameAr": "الغذاء والطبيعة والثقافة",
+          "sourcePage": 7,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "Life Along the Nile",
+              "nameAr": "الحياة على ضفاف النيل"
+            },
+            {
+              "order": 2,
+              "nameEn": "Food in the Hot Desert",
+              "nameAr": "الغذاء في الصحراء الحارة"
+            },
+            {
+              "order": 3,
+              "nameEn": "The Giving Tree",
+              "nameAr": "الشجرة المعطاءة"
+            },
+            {
+              "order": 4,
+              "nameEn": "Let's Make a Recipe!",
+              "nameAr": "هيا نحضّر وصفة!"
+            }
+          ]
+        },
+        {
+          "order": 2,
+          "nameEn": "My Healthy Body",
+          "nameAr": "جسمي الصحي",
+          "sourcePage": 25,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "Sports for Better Health",
+              "nameAr": "الرياضة من أجل صحة أفضل"
+            },
+            {
+              "order": 2,
+              "nameEn": "My Habits: Then and Now",
+              "nameAr": "عاداتي: قبل والآن"
+            },
+            {
+              "order": 3,
+              "nameEn": "Heart and Blood",
+              "nameAr": "القلب والدم"
+            },
+            {
+              "order": 4,
+              "nameEn": "Life Savers in Action",
+              "nameAr": "منقذو الحياة في العمل"
+            }
+          ]
+        },
+        {
+          "order": 3,
+          "nameEn": "When Nature Changes",
+          "nameAr": "عندما تتغير الطبيعة",
+          "sourcePage": 41,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "Weather Wonders and Warnings!",
+              "nameAr": "عجائب الطقس وتحذيراته!"
+            },
+            {
+              "order": 2,
+              "nameEn": "Extreme Weather in Ancient Egypt",
+              "nameAr": "الطقس المتطرف في مصر القديمة"
+            },
+            {
+              "order": 3,
+              "nameEn": "The Two Frogs",
+              "nameAr": "الضفدعان"
+            },
+            {
+              "order": 4,
+              "nameEn": "Once Upon My Imagination",
+              "nameAr": "ذات خيال"
+            },
+            {
+              "order": 5,
+              "nameEn": "A Collage",
+              "nameAr": "لوحة مُلصقة (كولاج)"
+            }
+          ]
+        },
+        {
+          "order": 4,
+          "nameEn": "My Community",
+          "nameAr": "مجتمعي",
+          "sourcePage": 61,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "Places in Our Community",
+              "nameAr": "أماكن في مجتمعنا"
+            },
+            {
+              "order": 2,
+              "nameEn": "Egyptian Villages",
+              "nameAr": "القرى المصرية"
+            },
+            {
+              "order": 3,
+              "nameEn": "Multiply It with Words!",
+              "nameAr": "اضربها بالكلمات!"
+            },
+            {
+              "order": 4,
+              "nameEn": "The New Administrative Capital",
+              "nameAr": "العاصمة الإدارية الجديدة"
+            }
+          ]
+        },
+        {
+          "order": 5,
+          "nameEn": "Our World, Our Resources",
+          "nameAr": "عالمنا، مواردنا",
+          "sourcePage": 77,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "The Gifts of Nature",
+              "nameAr": "هبات الطبيعة"
+            },
+            {
+              "order": 2,
+              "nameEn": "Metals and Minerals in Our World",
+              "nameAr": "المعادن والفلزات في عالمنا"
+            },
+            {
+              "order": 3,
+              "nameEn": "\"Just Watch!\"",
+              "nameAr": "فقط انتظر وشاهد!"
+            },
+            {
+              "order": 4,
+              "nameEn": "Who Am I?",
+              "nameAr": "من أنا؟"
+            },
+            {
+              "order": 5,
+              "nameEn": "A Poster",
+              "nameAr": "ملصق (بوستر)"
+            }
+          ]
+        },
+        {
+          "order": 6,
+          "nameEn": "The Talking Earth",
+          "nameAr": "الأرض الناطقة",
+          "sourcePage": 92,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "The Talking Earth",
+              "nameAr": "الأرض الناطقة"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 5",
+      "gradeNameAr": "الصف الخامس الابتدائي",
+      "gradeLevel": 5,
+      "subjectNameEn": "Islamic Religious Education",
+      "subjectNameAr": "التربية الدينية الإسلامية",
+      "icon": "book",
+      "sourceFile": "Islamic_prim5_tr1.pdf",
+      "units": [
+        {
+          "order": 1,
+          "nameEn": "Trust in Allah",
+          "nameAr": "الثقة بالله",
+          "sourcePage": 8,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "The Pillars of Faith",
+              "nameAr": "أركان الإيمان"
+            },
+            {
+              "order": 2,
+              "nameEn": "Surat Al-Ghashiyah",
+              "nameAr": "سورة الغاشية"
+            },
+            {
+              "order": 3,
+              "nameEn": "The Friday Prayer",
+              "nameAr": "صلاة الجمعة"
+            },
+            {
+              "order": 4,
+              "nameEn": "The Year of Sorrow",
+              "nameAr": "عام الحزن"
+            },
+            {
+              "order": 5,
+              "nameEn": "The Prophet of Allah Zakariyya, Peace Be Upon Him",
+              "nameAr": "نبي الله زكريا عليه السلام"
+            },
+            {
+              "order": 6,
+              "nameEn": "Trust in Allah",
+              "nameAr": "الثقة بالله"
+            }
+          ]
+        },
+        {
+          "order": 2,
+          "nameEn": "Faith and Love",
+          "nameAr": "الإيمان والمحبة",
+          "sourcePage": 31,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "Between Islam and Faith",
+              "nameAr": "بين الإسلام والإيمان"
+            },
+            {
+              "order": 2,
+              "nameEn": "Surat Al-A'la",
+              "nameAr": "سورة الأعلى"
+            },
+            {
+              "order": 3,
+              "nameEn": "The Two Eid Prayers",
+              "nameAr": "صلاة العيدين"
+            },
+            {
+              "order": 4,
+              "nameEn": "The Prophet's Journey to Ta'if and His Call to Its People",
+              "nameAr": "رحلة النبي إلى الطائف ودعوة أهلها"
+            },
+            {
+              "order": 5,
+              "nameEn": "The Prophet of Allah Isa (Jesus), Peace Be Upon Him",
+              "nameAr": "نبي الله عيسى عليه السلام"
+            },
+            {
+              "order": 6,
+              "nameEn": "Characteristics of the Believer: Love",
+              "nameAr": "من صفات المؤمن: المحبة"
+            }
+          ]
+        },
+        {
+          "order": 3,
+          "nameEn": "Faith and Friendship",
+          "nameAr": "الإيمان والصداقة",
+          "sourcePage": 59,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "From the Pillars of Faith: Belief in Allah the Almighty",
+              "nameAr": "من أركان الإيمان: الإيمان بالله تعالى"
+            },
+            {
+              "order": 2,
+              "nameEn": "Surat At-Tariq",
+              "nameAr": "سورة الطارق"
+            },
+            {
+              "order": 3,
+              "nameEn": "The Conditions for a Valid Prayer",
+              "nameAr": "شروط صحة الصلاة"
+            },
+            {
+              "order": 4,
+              "nameEn": "The Night Journey and the Ascension",
+              "nameAr": "الإسراء والمعراج"
+            },
+            {
+              "order": 5,
+              "nameEn": "Abu Bakr As-Siddiq, May Allah Be Pleased with Him",
+              "nameAr": "أبو بكر الصديق رضي الله عنه"
+            },
+            {
+              "order": 6,
+              "nameEn": "Friendship",
+              "nameAr": "الصداقة"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getQuizzesCopy } from "@/content/quizzes";
@@ -51,6 +51,8 @@ type QuizType = "topic_assessment" | "mock_exam";
 
 export default function QuizzesPage() {
   const { locale } = useParams<{ locale: Locale }>();
+  const searchParams = useSearchParams();
+  const requestedSubjectId = searchParams.get("subjectId");
   const isAr = locale === "ar";
   const copy = getQuizzesCopy(locale);
   const navCopy = getMarketingCopy(locale);
@@ -81,7 +83,9 @@ export default function QuizzesPage() {
       .then((data) => {
         if (!active) return;
         setSubjects(data.subjects);
-        if (data.subjects[0]) setSubjectId(data.subjects[0].id);
+        const requested = requestedSubjectId && data.subjects.some((s) => s.id === requestedSubjectId) ? requestedSubjectId : null;
+        if (requested) setSubjectId(requested);
+        else if (data.subjects[0]) setSubjectId(data.subjects[0].id);
         else setNotOnboarded(true);
       })
       .catch((err) => {

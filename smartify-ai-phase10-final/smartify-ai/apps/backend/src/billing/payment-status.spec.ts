@@ -9,7 +9,8 @@ describe("read-only payment verification", () => {
     } };
     const factory = { getProviderByKey: jest.fn().mockResolvedValue({ verifyCheckoutSession }) };
     const packs = { applyPaidPurchase: jest.fn() };
-    return { service: new BillingService(prisma as any, factory as any, packs as any) as any, prisma, factory, packs, verifyCheckoutSession };
+    const referralServiceMock = { earnRewardWithinTransaction: jest.fn().mockResolvedValue(undefined) };
+    return { service: new BillingService(prisma as any, factory as any, packs as any, referralServiceMock as any) as any, prisma, factory, packs, verifyCheckoutSession };
   }
   it("does not claim success with no subscription", async () => {
     const { service, factory } = setup(null);

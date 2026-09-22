@@ -40,7 +40,7 @@ describe("daily AI UTC boundaries", () => {
     jest.useFakeTimers().setSystemTime(new Date("2026-09-16T00:00:00.000Z"));
     const refund = jest.fn().mockResolvedValue(undefined);
     const service = new InteractiveLessonService({} as any, {} as any, {} as any,
-      { releaseDailySlot: refund } as any, { refundExtraCredit: refund } as any, {} as any);
+      { releaseDailySlot: refund } as any, { refundExtraCredit: refund } as any, {} as any, {} as any, {} as any);
     await (service as any).releaseEntitlement({ id: "student" }, "subject", { source, usageDate: new Date("2026-09-15T00:00:00.000Z") });
     expect(refund).toHaveBeenCalledWith("student", "subject", new Date("2026-09-15T00:00:00.000Z"));
   });

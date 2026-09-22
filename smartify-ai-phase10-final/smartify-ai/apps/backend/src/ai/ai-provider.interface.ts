@@ -5,9 +5,21 @@
  * Anthropic or a local model later means writing one new class here and
  * flipping AIProviderConfig.isActive in the database; no feature code changes.
  */
+/**
+ * A message's content is plain text almost everywhere in this app. The
+ * array-of-parts form (2026-09-19) exists ONLY for the offline unit-
+ * grounding extraction pipeline (UnitGroundingService), which must show a
+ * vision-capable model real rendered textbook page images — no other
+ * caller in this codebase sends images. Mirrors OpenAI's own multimodal
+ * content-parts shape so OpenAiProvider can forward it unchanged.
+ */
+export type AIMessageContent =
+  | string
+  | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+
 export interface AIGenerateRequest {
   systemPrompt: string;
-  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  messages: Array<{ role: "user" | "assistant"; content: AIMessageContent }>;
   maxOutputTokens?: number;
   /**
    * "json_object" forces the provider to return a single valid JSON

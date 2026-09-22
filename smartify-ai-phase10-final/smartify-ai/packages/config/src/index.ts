@@ -14,6 +14,8 @@ export const backendEnvSchema = z.object({
   CLERK_WEBHOOK_SIGNING_SECRET: z.string().min(1, "CLERK_WEBHOOK_SIGNING_SECRET is required"),
 
   OPENAI_API_KEY: z.string().optional(), // optional until Phase 6 (AI Tutor) is built
+  RESEND_API_KEY: z.string().optional(), // optional — parent-notification emails simply don't send until set (EmailService logs and no-ops)
+  RESEND_FROM_EMAIL: z.string().optional(), // must be on a domain verified in Resend; defaults to Resend's shared onboarding@resend.dev test sender when unset
   STRIPE_SECRET_KEY: z.string().optional(), // optional until a real payment provider is activated (Phase 8)
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   FRONTEND_URL: z.string().url().default("http://localhost:3000"),
@@ -26,6 +28,32 @@ export const backendEnvSchema = z.object({
   INSTAPAY_RECIPIENT_HANDLE: z.string().optional(), // mobile number or IPA address shown to students
   INSTAPAY_INSTRUCTIONS_EN: z.string().optional(),
   INSTAPAY_INSTRUCTIONS_AR: z.string().optional(),
+
+  // Absolute path to the curriculum-sources/ directory (real textbook
+  // PDFs — a sibling of this repo, never checked in). Local-dev/admin
+  // fallback for LocalCurriculumSourceStorage — used automatically when
+  // CURRICULUM_STORAGE_PROVIDER isn't "s3". Both the offline
+  // grounding-extraction script AND the live lazy-grounding path
+  // (UnitGroundingService.ensureUnitGrounded) can use this; production
+  // deployments should instead configure the CURRICULUM_S3_* vars below,
+  // since this depends on a directory existing on whatever machine the
+  // backend runs on.
+  CURRICULUM_SOURCES_DIR: z.string().optional(),
+
+  // Private cloud object storage for real textbook PDFs (2026-09-19) —
+  // see CurriculumSourceStorageFactory. All optional: unset means "use
+  // CURRICULUM_SOURCES_DIR instead" (see above). One S3-compatible client
+  // covers real AWS S3, Cloudflare R2, and MinIO — CURRICULUM_S3_ENDPOINT/
+  // FORCE_PATH_STYLE are only needed for the latter two. The bucket must
+  // be private; nothing in this codebase ever generates a public/signed
+  // URL for a textbook source and hands it to a student or the browser.
+  CURRICULUM_STORAGE_PROVIDER: z.enum(["local", "s3"]).optional(),
+  CURRICULUM_S3_BUCKET: z.string().optional(),
+  CURRICULUM_S3_REGION: z.string().optional(),
+  CURRICULUM_S3_ENDPOINT: z.string().optional(),
+  CURRICULUM_S3_ACCESS_KEY_ID: z.string().optional(),
+  CURRICULUM_S3_SECRET_ACCESS_KEY: z.string().optional(),
+  CURRICULUM_S3_FORCE_PATH_STYLE: z.coerce.boolean().optional(),
 });
 
 export type BackendEnv = z.infer<typeof backendEnvSchema>;

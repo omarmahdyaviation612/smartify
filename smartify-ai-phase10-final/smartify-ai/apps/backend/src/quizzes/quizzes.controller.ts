@@ -12,7 +12,7 @@ export class QuizzesController {
   getQuestions(
     @CurrentUser() user: any,
     @Query("subjectId") subjectId: string,
-    @Query("type") type: "topic_assessment" | "mock_exam",
+    @Query("type") type: "topic_assessment" | "mock_exam" | "lesson_check",
     @Query("topicId") topicId?: string,
   ) {
     return this.quizzesService.getQuizQuestions(user.id, subjectId, type, topicId);
@@ -24,7 +24,7 @@ export class QuizzesController {
     @Body()
     body: {
       subjectId: string;
-      type: "topic_assessment" | "mock_exam";
+      type: "topic_assessment" | "mock_exam" | "lesson_check";
       topicId?: string;
       answers: Array<{ questionId: string; answer: unknown }>;
     },

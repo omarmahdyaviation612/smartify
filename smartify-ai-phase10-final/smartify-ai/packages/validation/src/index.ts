@@ -63,6 +63,9 @@ export const updateSubjectSchema = z.object({
   nameAr: z.string().trim().min(1).max(200).optional(),
   icon: z.string().trim().max(100).optional(),
   isActive: z.boolean().optional(),
+  // Subject-based pricing (2026-09-20) — nullable so an admin can
+  // explicitly un-price a Subject (e.g. take it off sale) as well as set it.
+  priceEGP: z.number().nonnegative().finite().nullable().optional(),
 }).strict();
 
 // Phase 9.4B — SUPER_ADMIN AI spending controls. A dedicated endpoint (not
@@ -85,3 +88,59 @@ export const updatePricingPlanSchema = z.object({
   additionalSubjectPriceEGP: z.number().nonnegative().finite().optional(),
   isActive: z.boolean().optional(),
 }).strict();
+
+// Admin New Subject + Textbook Ingestion V1 — the shared Unit/Topic
+// structure shape re-validated server-side at confirmation time, for BOTH
+// a brand-new Subject's main textbook (confirmSubjectStructureSchema) and
+// an existing Subject's extra/story book (confirmExtraBookStructureSchema,
+// English Extra Book / Story support V1). sourcePageStart/sourcePageEnd on
+// a topic are accepted but never persisted (Topic has no page-range
+// columns) — kept optional here only so the preview UI can round-trip
+// them without the request being rejected as unknown.
+const tocUnitsSchema = z
+  .array(
+    z.object({
+      nameEn: z.string().trim().min(1).max(200),
+      nameAr: z.string().trim().min(1).max(200),
+      sourcePageStart: z.number().int().positive(),
+      sourcePageEnd: z.number().int().positive(),
+      topics: z
+        .array(
+          z.object({
+            nameEn: z.string().trim().min(1).max(200),
+            nameAr: z.string().trim().min(1).max(200),
+            sourcePageStart: z.number().int().positive().optional(),
+            sourcePageEnd: z.number().int().positive().optional(),
+          }),
+        )
+        .min(1),
+    }),
+  )
+  .min(1);
+
+// curriculumId and gradeId are included even though the Subject already
+// has a gradeId in the DB: the backend re-derives the Subject's REAL
+// grade/curriculum and rejects if it doesn't match what the client
+// believes it's confirming against, rather than trusting the client's own
+// relationship claim.
+export const confirmSubjectStructureSchema = z.object({
+  curriculumId: z.string().cuid(),
+  gradeId: z.string().cuid(),
+  units: tocUnitsSchema,
+}).strict();
+export type ConfirmSubjectStructureInput = z.infer<typeof confirmSubjectStructureSchema>;
+
+// English Extra Book / Story support V1 (2026-09-20) — no curriculumId/
+// gradeId here: this appends Units to an EXISTING Subject (identified by
+// the URL's :id, fetched authoritatively server-side), it never asserts a
+// Curriculum/Grade relationship the way creating a brand-new Subject does.
+// `bookLabel` must be the exact same human-chosen label used at upload
+// time — the backend re-derives the deterministic extra-book object key
+// from it and verifies that object actually exists in storage before
+// trusting it as this confirmation's source (see
+// AdminCurriculumService.confirmExtraBookStructure).
+export const confirmExtraBookStructureSchema = z.object({
+  bookLabel: z.string().trim().min(1).max(200),
+  units: tocUnitsSchema,
+}).strict();
+export type ConfirmExtraBookStructureInput = z.infer<typeof confirmExtraBookStructureSchema>;

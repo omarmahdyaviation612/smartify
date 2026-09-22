@@ -47,8 +47,8 @@ const en: DashboardCopy = {
     achievements: { title: "Achievements", body: "Badges and milestones are coming in a future phase." },
     upcomingExams: { title: "Upcoming Exams", body: "Exam scheduling isn't live yet." },
     pilotLessons: {
-      title: "Interactive Lessons (Pilot)",
-      empty: "No interactive lessons available yet.",
+      title: "Your Lessons",
+      empty: "No lessons available yet.",
       start: "Start",
       continueLabel: "Continue",
       completed: "Completed",
@@ -80,8 +80,8 @@ const ar: DashboardCopy = {
     achievements: { title: "الإنجازات", body: "الشارات والإنجازات قادمة في مرحلة لاحقة." },
     upcomingExams: { title: "الاختبارات القادمة", body: "جدولة الاختبارات غير مفعّلة بعد." },
     pilotLessons: {
-      title: "الدروس التفاعلية (تجريبي)",
-      empty: "لا توجد دروس تفاعلية متاحة بعد.",
+      title: "دروسك",
+      empty: "لا توجد دروس متاحة بعد.",
       start: "ابدأ",
       continueLabel: "متابعة",
       completed: "مكتمل",

@@ -4,7 +4,21 @@ import { AIProviderFactory } from "../../ai/ai-provider.factory";
 import { AIContextBuilderService } from "../../ai/context/ai-context-builder.service";
 import { AIUsageService } from "../../ai/usage/ai-usage.service";
 import { validateQuestionDraft } from "./question-draft-validator";
+import { QuestionPublishService } from "./question-publish.service";
+import { LessonDraftGeneratorService } from "../../interactive-lesson/lesson-draft-generator/lesson-draft-generator.service";
 import type { QuestionGenerationInput, ResolvedTopicContext } from "./question-draft.types";
+import type { GroundingNotes } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
+import { selectRelevantGrounding } from "../../ai/context/grounding-selector.util";
+import { checkGroundingConsistency } from "../../ai/context/grounding-consistency-validator";
+import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
+
+const AUTO_BATCH_MAX_ATTEMPTS = 2;
+
+// Practice serves 8 per session, Mock Exam up to 20 (see PracticeService/
+// QuizzesService's own requestedCount constants) — 8 gives Practice a full
+// pool immediately and Quiz/Mock Exam a real (if partial) one, without a
+// single lazy trigger paying for 20 questions before anyone asks for that many.
+const DEFAULT_POOL_TARGET = 8;
 
 // One initial attempt + one corrective retry if validation fails — never an
 // uncontrolled loop, matching LessonDraftGeneratorService's exact bound.
@@ -45,6 +59,8 @@ export class QuestionDraftGeneratorService {
     private readonly providerFactory: AIProviderFactory,
     private readonly contextBuilder: AIContextBuilderService,
     private readonly usageService: AIUsageService,
+    private readonly publisher: QuestionPublishService,
+    private readonly lessonGenerator: LessonDraftGeneratorService,
   ) {}
 
   /**
@@ -57,7 +73,7 @@ export class QuestionDraftGeneratorService {
       where: { id: topicId },
       include: {
         unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } },
-        lessons: { select: { isPlaceholder: true } },
+        lessons: { select: { isPlaceholder: true, objectives: { select: { descriptionEn: true } } } },
       },
     });
     if (!topic) {
@@ -71,6 +87,13 @@ export class QuestionDraftGeneratorService {
       unitNameEn: topic.unit.nameEn,
       topicNameEn: topic.nameEn,
       isPlaceholder: !topic.lessons.some((l) => !l.isPlaceholder),
+      groundingNotesJson: (topic.unit.groundingNotesJson as unknown as GroundingNotes | null) ?? null,
+      groundingVersion: topic.unit.groundingVersion ?? null,
+      // §7/§9: the Topic's own already-generated lesson objectives —
+      // second priority after grounding, ahead of unguided model knowledge,
+      // for question generation (this Topic's real lesson always generates
+      // before its question pool — see ensurePoolForTopic below).
+      lessonObjectives: topic.lessons.flatMap((l) => l.objectives.map((o) => o.descriptionEn)),
     };
   }
 
@@ -185,6 +208,233 @@ export class QuestionDraftGeneratorService {
       MAX_ATTEMPTS,
       lastErrors,
     );
+  }
+
+  /**
+   * Launch-speed lazy-generation path (2026-09-19): generates a POOL of
+   * bilingual QuestionDraft rows for a Topic in one AI call, for
+   * InteractiveLessonService/PracticeService/QuizzesService to top up a
+   * Topic's question pool on demand — no `learningFocus` input (the AI
+   * picks a spread of sub-skills itself) and the AI supplies promptAr/
+   * explanationAr directly, unlike generateDraft() above. Still persists
+   * normal QuestionDraft rows (status "pending_review") for an audit
+   * trail — the caller (via QuestionPublishService.autoPublish()) is
+   * what actually skips the human-review gate, not this method. Requires
+   * the Topic to already have a non-placeholder Lesson (same rule
+   * validateQuestionDraft/approve() already enforce for the human
+   * pipeline) — generate the lesson first.
+   */
+  async generateAutoQuestionBatch(topicId: string, count: number, requestingUserId: string) {
+    await this.usageService.assertWithinBudget(requestingUserId);
+
+    const topicContext = await this.resolveTopicContext(topicId);
+    if (topicContext.isPlaceholder) {
+      throw new ServiceUnavailableException("This topic has no real lesson yet — generate the lesson before questions.");
+    }
+
+    // 2026-09-19: same grounding-selection principle as generateAutoDraft —
+    // see its comment. Computed once, outside the retry loop.
+    const groundingSlice = selectRelevantGrounding(topicContext.groundingNotesJson, topicContext.topicNameEn);
+    if (groundingSlice) {
+      this.logger.log(`GROUNDED_TOPIC_GENERATION_STARTED topicId=${topicId} kind=questions`);
+    }
+
+    let lastErrors: string[] = [];
+    let callsMade = 0;
+
+    for (let attempt = 1; attempt <= AUTO_BATCH_MAX_ATTEMPTS; attempt++) {
+      const systemPrompt = this.contextBuilder.buildAutoQuestionBatchGenerationPrompt(
+        {
+          curriculumNameEn: topicContext.curriculumNameEn,
+          gradeNameEn: topicContext.gradeNameEn,
+          subjectNameEn: topicContext.subjectNameEn,
+          unitNameEn: topicContext.unitNameEn,
+          topicNameEn: topicContext.topicNameEn,
+          studentAgeRange: "6-12", // pool is shared across every student who reaches this topic, not generated per-student — a broad primary-school range, not one child's exact age
+        },
+        count,
+        attempt > 1 ? lastErrors : undefined,
+        groundingSlice,
+        topicContext.lessonObjectives,
+      );
+
+      const { provider, providerKey, model } = await this.providerFactory.getActiveProvider();
+
+      const estimatedUsd = await this.usageService.estimateMaxChatCostUsd({
+        providerKey,
+        inputText: systemPrompt + "Generate the question batch now.",
+      });
+      const reserveResult = await this.usageService.reserveBudget(requestingUserId, estimatedUsd);
+      if (!reserveResult.ok) {
+        throw new ServiceUnavailableException(
+          reserveResult.reason === "misconfigured"
+            ? "AI content generation is temporarily unavailable. Please try again later."
+            : "AI content generation is temporarily unavailable due to daily usage limits. Please try again later.",
+        );
+      }
+      const budgetReservationId = reserveResult.reservationId;
+
+      let result: Awaited<ReturnType<typeof provider.generate>>;
+      try {
+        result = await provider.generate({
+          systemPrompt,
+          messages: [{ role: "user", content: "Generate the question batch now." }],
+          responseFormat: "json_object",
+          // The provider's default (600) is sized for a single question or
+          // lesson-step-plan response — a bilingual N-question batch needs
+          // much more room, or the JSON gets truncated mid-object and
+          // every attempt fails as "invalid JSON" (found by hand: an
+          // 8-question batch silently truncates at the 600-token default).
+          maxOutputTokens: Math.min(4000, 350 * count + 400),
+        });
+      } catch (err) {
+        await this.usageService.releaseBudget(budgetReservationId).catch(() => undefined);
+        throw err;
+      }
+      callsMade++;
+
+      const actualCostUsd = await this.logUsage(requestingUserId, providerKey, model, result.inputTokens, result.outputTokens);
+      await this.usageService.reconcileBudget(budgetReservationId, actualCostUsd).catch(() => undefined);
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(result.content);
+      } catch {
+        lastErrors = ["Response was not valid JSON."];
+        this.logger.warn(`Auto question batch generation attempt ${attempt} produced invalid JSON.`);
+        continue;
+      }
+
+      const rawQuestions = (parsed as Record<string, unknown>)?.questions;
+      if (!Array.isArray(rawQuestions) || rawQuestions.length === 0) {
+        lastErrors = ["Missing or empty questions array."];
+        this.logger.warn(`Auto question batch generation attempt ${attempt}: ${lastErrors[0]}`);
+        continue;
+      }
+
+      const perItemErrors: string[] = [];
+      const validDrafts: Array<Record<string, unknown>> = [];
+      rawQuestions.forEach((q, index) => {
+        const validation = validateQuestionDraft(
+          { ...(q as Record<string, unknown>), topicId },
+          { topicExists: true, topicIsPlaceholder: false, requireReviewedContent: true },
+        );
+        if (validation.valid) {
+          validDrafts.push(q as Record<string, unknown>);
+        } else {
+          perItemErrors.push(`questions[${index}]: ${validation.errors.join("; ")}`);
+        }
+      });
+
+      // At least one usable question is enough to persist — a partially
+      // invalid batch still adds real value to the pool, unlike a single
+      // lesson draft where "mostly right" isn't a coherent thing to keep.
+      if (validDrafts.length > 0) {
+        // §10: grounding-consistency check on the accepted subset as a
+        // whole — only when grounding was actually supplied. Feeds the
+        // SAME retry loop as structural validation.
+        if (groundingSlice) {
+          const consistencyErrors = checkGroundingConsistency(
+            validDrafts.map((q) => q.promptEn as string),
+            groundingSlice,
+          );
+          if (consistencyErrors.length > 0) {
+            lastErrors = consistencyErrors;
+            this.logger.warn(`CONTENT_VALIDATION_FAILED topicId=${topicId} kind=questions attempt=${attempt}: ${consistencyErrors.join("; ")}`);
+            continue;
+          }
+        }
+
+        const drafts = [];
+        for (const q of validDrafts) {
+          drafts.push(
+            await this.prisma.client.questionDraft.create({
+              data: {
+                topicId,
+                type: q.type as any,
+                difficulty: q.difficulty as any,
+                promptEn: q.promptEn as string,
+                promptAr: q.promptAr as string,
+                optionsJson: (q.optionsJson ?? null) as any,
+                correctAnswerJson: q.correctAnswerJson as any,
+                explanationEn: (q.explanationEn as string | undefined) ?? null,
+                explanationAr: (q.explanationAr as string | undefined) ?? null,
+                status: "pending_review",
+                isAiGenerated: true,
+                aiProvider: providerKey,
+                aiModel: model,
+              },
+            }),
+          );
+        }
+        if (groundingSlice) {
+          this.logger.log(`GROUNDED_TOPIC_GENERATION_COMPLETED topicId=${topicId} kind=questions`);
+        }
+        return {
+          drafts,
+          attempts: attempt,
+          callsMade,
+          rejectedCount: perItemErrors.length,
+          generationSource: groundingSlice ? ("TEXTBOOK_GROUNDED" as const) : ("LEGACY_TITLE_ONLY" as const),
+        };
+      }
+
+      lastErrors = perItemErrors.length > 0 ? perItemErrors : ["No valid questions in the batch."];
+      this.logger.warn(`Auto question batch generation attempt ${attempt} failed validation: ${lastErrors.join("; ")}`);
+    }
+
+    throw new QuestionDraftGenerationError(
+      `Auto question batch generation failed validation after ${AUTO_BATCH_MAX_ATTEMPTS} attempt(s).`,
+      AUTO_BATCH_MAX_ATTEMPTS,
+      lastErrors,
+    );
+  }
+
+  /**
+   * Launch-speed lazy-generation path (2026-09-19): the single entry
+   * point InteractiveLessonService/PracticeService/QuizzesService all
+   * call. Cheap no-op when the Topic already has enough questions (a
+   * plain count query); otherwise generates+auto-publishes the shortfall
+   * in one batch call. Never throws — a missing/short question pool
+   * degrades to whatever already exists (exactly like Practice/Quiz
+   * already tolerate today), it never blocks a student from seeing a
+   * lesson or a smaller practice set.
+   *
+   * A Topic can only receive questions once it has a real (non-
+   * placeholder) Lesson (see validateQuestionDraft) — most topics were
+   * seeded title-only from a table of contents and reach Practice/Quiz
+   * before their Lesson page is ever opened, so this calls
+   * LessonDraftGeneratorService.ensureTopicHasLesson() FIRST (a cheap
+   * no-op once a lesson exists) rather than assuming one is already
+   * there. That single extra AI call, on this specific topic's first
+   * request from ANY entry point, is an intentional one-time cost — this
+   * IS the lazy-generation trigger for that topic's lesson too, not a
+   * fallback for a broken assumption.
+   *
+   * Budget attribution (2026-09-20 fix): the generated QUESTION POOL is
+   * shared, permanently-cached curriculum content — never per-student —
+   * so generateAutoQuestionBatch() below is billed to the fixed
+   * CONTENT_AUTHORING_ACTOR_ID, not `requestingUserId`. Before this fix,
+   * whichever real student happened to be first to reach Practice/Quiz
+   * for a topic with an empty pool paid, from their own per-student daily
+   * budget, for a batch of questions every future student then reuses for
+   * free. `requestingUserId` is still passed to ensureTopicHasLesson()
+   * unchanged (it only affects that method's generation-lock ownership
+   * bookkeeping — see its own 2026-09-20 fix comment — never AI spend).
+   */
+  async ensurePoolForTopic(topicId: string, requestingUserId: string, targetCount = DEFAULT_POOL_TARGET): Promise<void> {
+    const existing = await this.prisma.client.question.count({ where: { topicId, isPlaceholder: false } });
+    if (existing >= targetCount) return;
+
+    try {
+      await this.lessonGenerator.ensureTopicHasLesson(topicId, { preferredLang: "ar", studentAgeRange: "6-12" }, requestingUserId);
+      const { drafts } = await this.generateAutoQuestionBatch(topicId, targetCount - existing, CONTENT_AUTHORING_ACTOR_ID);
+      for (const draft of drafts) {
+        await this.publisher.autoPublish(draft.id);
+      }
+    } catch (err) {
+      this.logger.warn(`ensurePoolForTopic(${topicId}) could not top up the question pool: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /** Returns the computed costUsd so callers can reconcile the matching USD budget reservation to the exact same figure. */

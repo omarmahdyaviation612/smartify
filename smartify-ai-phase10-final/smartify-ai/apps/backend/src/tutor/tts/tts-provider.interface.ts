@@ -20,6 +20,16 @@
 export interface TtsSynthesizeRequest {
   /** Already-prepared speechText (markdown-stripped, Arabic-tashkeel-applied where relevant) — never raw displayText. */
   text: string;
+  /**
+   * Launch-speed addition (2026-09-19): overrides the provider's
+   * configured `instructions` for this one call — TutorSpeechService sets
+   * this to SMARTIFY_TTS_INSTRUCTIONS_EN when `text` isn't Arabic script,
+   * so English-medium (e.g. British IG) content isn't narrated with
+   * Egyptian-Arabic voice direction. Omitted (the common case, Arabic
+   * content) means "use the provider's own configured instructions",
+   * unchanged from before this field existed.
+   */
+  instructionsOverride?: string;
 }
 
 export interface TtsSynthesizeResult {

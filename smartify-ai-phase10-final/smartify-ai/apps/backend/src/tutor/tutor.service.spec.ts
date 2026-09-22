@@ -148,6 +148,24 @@ describe("TutorService", () => {
     expect(usageService.reconcileBudget).toHaveBeenCalledWith("reservation-1", 0.0001);
   });
 
+  it("E: a Tutor chat message is billed to the real student's userId, never CONTENT_AUTHORING_ACTOR_ID (budget-attribution regression, 2026-09-20 — the lazy-generation billing fix must not have touched this per-student runtime path)", async () => {
+    const { service, usageService } = makeService();
+    await service.sendMessage("user-1", { subjectId: "subject-1", message: "hi" });
+    expect(usageService.assertWithinBudget).toHaveBeenCalledWith("user-1");
+    expect(usageService.reserveBudget).toHaveBeenCalledWith("user-1", expect.any(Number));
+  });
+
+  it("2026-09-19 real-world bug: trims a trailing space the model emits, so the persisted AIMessage and the returned reply are byte-identical (a real 'Voice playback unavailable' report traced to /tutor/speech trimming its input before matching an untrimmed stored reply)", async () => {
+    const providerGenerate = jest.fn().mockResolvedValue({ content: "Here's a hint. ", inputTokens: 50, outputTokens: 30, model: "gpt-4o-mini" });
+    const { service, prisma } = makeService({ providerGenerate });
+    const result = await service.sendMessage("user-1", { subjectId: "subject-1", message: "hi" });
+    expect(result.reply).toBe("Here's a hint.");
+    const persistedCall = prisma.client.aIMessage.createMany.mock.calls[0][0];
+    const assistantRow = persistedCall.data.find((m: any) => m.role === "assistant");
+    expect(assistantRow.content).toBe("Here's a hint.");
+    expect(assistantRow.content).toBe(result.reply); // exact match — what /tutor/speech's anti-injection check requires
+  });
+
   it("allows students without an active subscription to use their one-time free trial", async () => {
     const { service, usageService } = makeService({ subscription: null });
     await expect(service.sendMessage("user-1", { subjectId: "subject-1", message: "hi" })).resolves.toMatchObject({ reply: "Here's a hint..." });

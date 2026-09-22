@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useClerk } from "@clerk/nextjs";
 import { SmartifyContainer } from "@smartify/ui";
 import { AdminGuard } from "@/components/AdminGuard";
 import { useApiClient } from "@/lib/api-client";
@@ -15,6 +16,23 @@ interface RevenueSummary {
   revenueByCurriculumEGP: Record<string, number>;
   aiCostUsdInWindow: number;
   note: string;
+}
+interface CurriculumStatusSummary {
+  summary: {
+    subjects: number;
+    units: number;
+    groundedUnits: number;
+    topics: number;
+    generatedTopics: number;
+    textbookGroundedTopics: number;
+  };
+}
+interface GrowthSummary {
+  trialUsers: number;
+  trialLessonsConsumed: number;
+  referralsCreated: number;
+  successfulReferrals: number;
+  referralRewardsIssued: number;
 }
 
 function AdminNavCard({ href, title, body, badge }: { href: string; title: string; body: string; badge?: number }) {
@@ -34,9 +52,13 @@ function AdminNavCard({ href, title, body, badge }: { href: string; title: strin
 export default function AdminOverviewPage() {
   const { locale } = useParams<{ locale: Locale }>();
   const { apiFetch } = useApiClient();
+  const { signOut } = useClerk();
   const [summary, setSummary] = useState<RevenueSummary | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [pendingInstapay, setPendingInstapay] = useState(0);
+  const [userCount, setUserCount] = useState<number | null>(null);
+  const [curriculumSummary, setCurriculumSummary] = useState<CurriculumStatusSummary["summary"] | null>(null);
+  const [growth, setGrowth] = useState<GrowthSummary | null>(null);
 
   useEffect(() => {
     apiFetch<RevenueSummary>("/admin/revenue/summary")
@@ -45,6 +67,15 @@ export default function AdminOverviewPage() {
     apiFetch<{ count: number }>("/admin/instapay/pending-count")
       .then((res) => setPendingInstapay(res.count))
       .catch(() => {});
+    apiFetch<Array<unknown>>("/users")
+      .then((res) => setUserCount(res.length))
+      .catch(() => {});
+    apiFetch<CurriculumStatusSummary>("/admin/curriculum/status")
+      .then((res) => setCurriculumSummary(res.summary))
+      .catch(() => {});
+    apiFetch<GrowthSummary>("/admin/revenue/growth-summary")
+      .then(setGrowth)
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -52,7 +83,16 @@ export default function AdminOverviewPage() {
     <AdminGuard allowedRoles={["SUPER_ADMIN", "ADMIN", "CONTENT_MANAGER", "SUPPORT"]}>
       <main className="py-12">
         <SmartifyContainer>
-          <h1 className="text-2xl font-bold text-navy-900">Admin</h1>
+          <div className="flex items-center justify-between">
+            <h1 className="text-2xl font-bold text-navy-900">Admin</h1>
+            <button
+              type="button"
+              onClick={() => signOut({ redirectUrl: `/${locale}` })}
+              className="rounded-sf border border-neutral-200 px-4 py-2 text-sm font-medium text-error-500 hover:border-error-500 hover:text-error-600"
+            >
+              {locale === "ar" ? "تسجيل الخروج" : "Sign out"}
+            </button>
+          </div>
 
           {summary && (
             <div className="mt-6 grid gap-4 sm:grid-cols-3">
@@ -77,12 +117,64 @@ export default function AdminOverviewPage() {
             </p>
           )}
 
+          {(userCount != null || curriculumSummary) && (
+            <div className="mt-4 grid gap-4 sm:grid-cols-4">
+              {userCount != null && (
+                <div className="rounded-sf-lg border border-neutral-200 bg-white p-6">
+                  <p className="text-sm text-neutral-500">Users</p>
+                  <p className="mt-1 text-2xl font-bold text-navy-900">{userCount}</p>
+                </div>
+              )}
+              {curriculumSummary && (
+                <>
+                  <div className="rounded-sf-lg border border-neutral-200 bg-white p-6">
+                    <p className="text-sm text-neutral-500">Subjects</p>
+                    <p className="mt-1 text-2xl font-bold text-navy-900">{curriculumSummary.subjects}</p>
+                  </div>
+                  <div className="rounded-sf-lg border border-neutral-200 bg-white p-6">
+                    <p className="text-sm text-neutral-500">Units</p>
+                    <p className="mt-1 text-2xl font-bold text-navy-900">{curriculumSummary.units}</p>
+                  </div>
+                  <div className="rounded-sf-lg border border-neutral-200 bg-white p-6">
+                    <p className="text-sm text-neutral-500">Topics</p>
+                    <p className="mt-1 text-2xl font-bold text-navy-900">{curriculumSummary.topics}</p>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {growth && (
+            <div className="mt-4 grid gap-4 sm:grid-cols-5">
+              <div className="rounded-sf-lg border border-neutral-200 bg-white p-6">
+                <p className="text-sm text-neutral-500">Trial users</p>
+                <p className="mt-1 text-2xl font-bold text-navy-900">{growth.trialUsers}</p>
+              </div>
+              <div className="rounded-sf-lg border border-neutral-200 bg-white p-6">
+                <p className="text-sm text-neutral-500">Trial lessons consumed</p>
+                <p className="mt-1 text-2xl font-bold text-navy-900">{growth.trialLessonsConsumed}</p>
+              </div>
+              <div className="rounded-sf-lg border border-neutral-200 bg-white p-6">
+                <p className="text-sm text-neutral-500">Referrals created</p>
+                <p className="mt-1 text-2xl font-bold text-navy-900">{growth.referralsCreated}</p>
+              </div>
+              <div className="rounded-sf-lg border border-neutral-200 bg-white p-6">
+                <p className="text-sm text-neutral-500">Successful referrals</p>
+                <p className="mt-1 text-2xl font-bold text-navy-900">{growth.successfulReferrals}</p>
+              </div>
+              <div className="rounded-sf-lg border border-neutral-200 bg-white p-6">
+                <p className="text-sm text-neutral-500">Rewards issued</p>
+                <p className="mt-1 text-2xl font-bold text-navy-900">{growth.referralRewardsIssued}</p>
+              </div>
+            </div>
+          )}
+
           <div className="mt-10 grid gap-4 sm:grid-cols-3">
             <AdminNavCard href={`/${locale}/admin/users`} title="Users" body="View accounts and manage roles." />
             <AdminNavCard
               href={`/${locale}/admin/curriculum`}
-              title="Curriculum & Pricing"
-              body="Manage grades, subjects, and EGP pricing plans."
+              title="Curriculum & Subject Pricing"
+              body="Manage grades, subjects, and each subject's own EGP price."
             />
             <AdminNavCard
               href={`/${locale}/admin/platform`}
@@ -94,6 +186,16 @@ export default function AdminOverviewPage() {
               title="InstaPay Payments"
               body="Review and confirm manual InstaPay payment submissions."
               badge={pendingInstapay}
+            />
+            <AdminNavCard
+              href={`/${locale}/admin/ai-usage`}
+              title="AI Cost & Budget"
+              body="Platform and per-student AI spend, budgets, and Subject breakdowns (Super Admin only)."
+            />
+            <AdminNavCard
+              href={`/${locale}/admin/referrals`}
+              title="Referrals"
+              body="Inspect referral/reward records (Super Admin only)."
             />
           </div>
         </SmartifyContainer>

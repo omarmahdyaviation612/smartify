@@ -4,19 +4,23 @@ import { Footer } from "@/components/Footer";
 import { SmartifyContainer } from "@smartify/ui";
 import { SubscribeNowButton } from "@/components/SubscribeNowButton";
 
-interface PricingTier {
+interface PricingSubject {
   id: string;
-  levelEn: string;
-  levelAr: string;
-  monthlyPriceEGP: string;
-  includedSubjects: number;
-  additionalSubjectPriceEGP: string;
+  nameEn: string;
+  nameAr: string;
+  priceEGP: number | null;
+}
+interface PricingGrade {
+  nameEn: string;
+  nameAr: string;
+  level: number;
+  subjects: PricingSubject[];
 }
 interface PricingCurriculum {
   code: string;
   nameEn: string;
   nameAr: string;
-  tiers: PricingTier[];
+  grades: PricingGrade[];
 }
 interface PricingResponse {
   currency: string;
@@ -28,8 +32,9 @@ export function generateStaticParams() {
   return [{ locale: "ar" }, { locale: "en" }];
 }
 
-// Pricing is fetched live from the backend — the source of truth is the
-// PricingPlan table (packages/database), never a hardcoded value here.
+// Pricing is fetched live from the backend — the source of truth is each
+// Subject's own priceEGP (packages/database), never a hardcoded value or
+// the legacy PricingPlan bundle tiers.
 async function getPricing(): Promise<PricingResponse | null> {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
   try {
@@ -77,34 +82,45 @@ export default async function PricingPage({ params }: { params: Promise<{ locale
                   <h2 className="mb-6 text-xl font-semibold text-navy-900">
                     {isAr ? curriculum.nameAr : curriculum.nameEn}
                   </h2>
-                  <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-                    {curriculum.tiers.map((tier) => (
-                      <div key={tier.levelEn} className="rounded-sf-lg border border-neutral-200 bg-white p-6">
-                        <h3 className="font-semibold text-navy-900">{isAr ? tier.levelAr : tier.levelEn}</h3>
-                        <p className="mt-3 text-3xl font-bold text-navy-900">
-                          {tier.monthlyPriceEGP} <span className="text-base font-normal text-neutral-500">{isAr ? "ج.م / شهريًا" : "EGP / mo"}</span>
-                        </p>
-                        <p className="mt-3 text-sm text-neutral-600">
-                          {isAr
-                            ? `يشمل ${tier.includedSubjects} مواد`
-                            : `Includes ${tier.includedSubjects} subjects`}
-                        </p>
-                        <p className="mt-1 text-sm text-neutral-500">
-                          {isAr
-                            ? `${tier.additionalSubjectPriceEGP} ج.م لكل مادة إضافية`
-                            : `${tier.additionalSubjectPriceEGP} EGP per additional subject`}
-                        </p>
-                        <SubscribeNowButton
-                          locale={locale}
-                          planId={tier.id}
-                          label={copy.pricing.ctaLabel}
-                          notSignedInMessage={isAr ? "يجب عليك التسجيل أولاً" : "You must sign up first"}
-                        />
-                      </div>
-                    ))}
+                  <div className="space-y-10">
+                    {curriculum.grades
+                      .filter((grade) => grade.subjects.length > 0)
+                      .map((grade) => (
+                        <div key={grade.level}>
+                          <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+                            {isAr ? grade.nameAr : grade.nameEn}
+                          </h3>
+                          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+                            {grade.subjects.map((subject) => {
+                              const available = subject.priceEGP != null;
+                              return (
+                                <div key={subject.id} className="rounded-sf-lg border border-neutral-200 bg-white p-6">
+                                  <h4 className="font-semibold text-navy-900">{isAr ? subject.nameAr : subject.nameEn}</h4>
+                                  {available ? (
+                                    <p className="mt-3 text-3xl font-bold text-navy-900">
+                                      {subject.priceEGP} <span className="text-base font-normal text-neutral-500">{isAr ? "ج.م / شهريًا" : "EGP / mo"}</span>
+                                    </p>
+                                  ) : (
+                                    <p className="mt-3 text-sm text-neutral-400">
+                                      {isAr ? "غير متاحة بعد" : "Not yet available"}
+                                    </p>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
                   </div>
                 </div>
               ))}
+              <div className="text-center">
+                <SubscribeNowButton
+                  locale={locale}
+                  label={copy.pricing.ctaLabel}
+                  notSignedInMessage={isAr ? "يجب عليك التسجيل أولاً" : "You must sign up first"}
+                />
+              </div>
             </div>
           )}
         </SmartifyContainer>

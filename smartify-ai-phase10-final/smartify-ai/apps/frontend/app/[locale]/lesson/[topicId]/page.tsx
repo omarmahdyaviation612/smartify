@@ -19,6 +19,8 @@ interface LessonState {
   started: boolean;
   sessionId?: string;
   conversationId?: string;
+  topicId?: string;
+  subjectId?: string;
   status?: string;
   currentStepIndex?: number;
   totalSteps?: number;
@@ -28,6 +30,13 @@ interface LessonState {
   content?: string | null;
   completed?: boolean;
   visual?: { type: string; status: "NOT_GENERATED" | "GENERATED"; url: string | null } | null;
+}
+
+interface LessonCheckQuestion {
+  id: string;
+  promptEn: string;
+  promptAr: string | null;
+  optionsJson: string[] | null;
 }
 
 // This page teaches ONE lesson step at a time — the database/lesson map
@@ -50,9 +59,22 @@ export default function InteractiveLessonPage() {
   const [resumed, setResumed] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [slowStart, setSlowStart] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notAvailable, setNotAvailable] = useState(false);
   const [visualFailed, setVisualFailed] = useState(false);
+
+  // Post-lesson understanding check — a short (3-question) quiz offered
+  // once the lesson itself is complete; submitting it is what triggers a
+  // parent-notification email server-side (QuizzesService.submitQuiz,
+  // type "lesson_check"). `checkQuestions === null` means "not fetched
+  // yet"; `[]` means "fetched, nothing available" (e.g. question
+  // generation is still catching up) — rendered differently.
+  const [checkQuestions, setCheckQuestions] = useState<LessonCheckQuestion[] | null>(null);
+  const [checkAnswers, setCheckAnswers] = useState<Record<string, string>>({});
+  const [checkSubmitting, setCheckSubmitting] = useState(false);
+  const [checkResult, setCheckResult] = useState<{ correctCount: number; total: number; parentsNotified: number } | null>(null);
+  const [checkError, setCheckError] = useState<string | null>(null);
 
   const [listening, setListening] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
@@ -209,9 +231,50 @@ export default function InteractiveLessonPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.visual?.url, state?.visual?.status]);
 
+  // Fetched exactly once, the first time the lesson reaches `completed` —
+  // never re-fetched on later re-renders (checkQuestions !== null guards
+  // that), so resuming an already-completed lesson doesn't silently
+  // re-offer a check the student may have already submitted this session.
+  useEffect(() => {
+    if (!state?.completed || !state.subjectId || checkQuestions !== null) return;
+    apiFetch<{ questions: LessonCheckQuestion[] }>(
+      `/quizzes/questions?subjectId=${state.subjectId}&type=lesson_check&topicId=${topicId}`,
+    )
+      .then((data) => setCheckQuestions(data.questions))
+      .catch(() => setCheckQuestions([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.completed, state?.subjectId]);
+
+  async function handleCheckSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!checkQuestions || !state?.subjectId) return;
+    setCheckSubmitting(true);
+    setCheckError(null);
+    try {
+      const answers = checkQuestions.filter((q) => checkAnswers[q.id] !== undefined).map((q) => ({ questionId: q.id, answer: checkAnswers[q.id] }));
+      const result = await apiFetch<{ correctCount: number; total: number; parentsNotified: number }>("/quizzes/submit", {
+        method: "POST",
+        body: JSON.stringify({ subjectId: state.subjectId, type: "lesson_check", topicId, answers }),
+      });
+      setCheckResult(result);
+    } catch {
+      setCheckError(copy.checkError);
+    } finally {
+      setCheckSubmitting(false);
+    }
+  }
+
   async function handleStart() {
     setBusy(true);
     setError(null);
+    // A never-opened Topic can trigger real, first-time content generation
+    // (and, for a never-grounded Unit, real-textbook grounding first) —
+    // both fully server-side and invisible to the student, but slower than
+    // the normal cached-content case. No technical detail is exposed here;
+    // this timer just swaps in a friendlier waiting message if the request
+    // is still running after a few seconds, and self-resolves back to the
+    // normal fast path on every later request to the same (now-cached) topic.
+    const slowStartTimer = setTimeout(() => setSlowStart(true), 6000);
     try {
       const result = await apiFetch<LessonState>(`/lesson/topics/${topicId}/advance`, { method: "POST" });
       setState(result);
@@ -222,6 +285,8 @@ export default function InteractiveLessonPage() {
     } catch (err: any) {
       setError(err?.message ?? copy.genericError);
     } finally {
+      clearTimeout(slowStartTimer);
+      setSlowStart(false);
       setBusy(false);
     }
   }
@@ -321,7 +386,7 @@ export default function InteractiveLessonPage() {
             {turns.length === 0 && !started && (
               <div className="flex h-full flex-col items-center justify-center gap-4">
                 <SmartifyButton type="button" variant="ai" onClick={handleStart} disabled={busy}>
-                  {busy ? copy.starting : copy.startLesson}
+                  {busy ? (slowStart ? copy.startingFirstTime : copy.starting) : copy.startLesson}
                 </SmartifyButton>
               </div>
             )}
@@ -391,6 +456,53 @@ export default function InteractiveLessonPage() {
               <div className="rounded-sf-lg bg-[--sf-bg-subtle] p-5 text-center">
                 <p className="font-semibold text-navy-900">{copy.completedTitle}</p>
                 <p className="mt-1 text-sm text-neutral-600">{copy.completedBody}</p>
+              </div>
+            )}
+
+            {completed && checkQuestions && checkQuestions.length > 0 && (
+              <div className="rounded-sf-lg border border-neutral-200 bg-white p-5">
+                <p className="mb-4 font-semibold text-navy-900">{copy.checkTitle}</p>
+                {checkResult ? (
+                  <div className="text-center text-sm">
+                    <p className="font-medium text-navy-900">{copy.checkResult(checkResult.correctCount, checkResult.total)}</p>
+                    <p className="mt-1 text-neutral-500">
+                      {checkResult.parentsNotified > 0 ? copy.checkParentNotified(checkResult.parentsNotified) : copy.checkNoParentLinked}
+                    </p>
+                  </div>
+                ) : (
+                  <form onSubmit={handleCheckSubmit} className="space-y-5">
+                    {checkQuestions.map((q, qi) => (
+                      <fieldset key={q.id}>
+                        <legend className="mb-2 text-sm text-neutral-700">
+                          {qi + 1}. {isAr && q.promptAr ? q.promptAr : q.promptEn}
+                        </legend>
+                        <div className="space-y-1">
+                          {(q.optionsJson ?? []).map((option) => (
+                            <label key={option} className="flex items-center gap-2 text-sm text-neutral-600">
+                              <input
+                                type="radio"
+                                name={q.id}
+                                value={option}
+                                checked={checkAnswers[q.id] === option}
+                                onChange={() => setCheckAnswers((prev) => ({ ...prev, [q.id]: option }))}
+                              />
+                              {option}
+                            </label>
+                          ))}
+                        </div>
+                      </fieldset>
+                    ))}
+                    {checkError && <p className="text-sm text-error-500">{checkError}</p>}
+                    <SmartifyButton
+                      type="submit"
+                      variant="ai"
+                      className="w-full"
+                      disabled={checkSubmitting || Object.keys(checkAnswers).length < checkQuestions.length}
+                    >
+                      {checkSubmitting ? copy.checkSubmitting : copy.checkSubmit}
+                    </SmartifyButton>
+                  </form>
+                )}
               </div>
             )}
           </div>

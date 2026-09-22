@@ -151,7 +151,7 @@ const en: MarketingCopy = {
   },
   pricing: {
     title: "Simple, Subject-Based Pricing",
-    body: "Pricing is set per curriculum and education level, in Egyptian Pounds, with a set number of subjects included and clear pricing for each additional subject.",
+    body: "Every subject has its own price, in Egyptian Pounds. Choose as many subjects as you'd like — your total is simply the sum of what you pick.",
     note: "Every subject includes a daily allowance of AI questions. Need more? Configurable question packages will be available soon.",
     ctaLabel: "Subscribe Now",
   },
@@ -246,7 +246,7 @@ const ar: MarketingCopy = {
   },
   pricing: {
     title: "أسعار بسيطة حسب المادة",
-    body: "يتم تحديد السعر حسب المنهج والمرحلة التعليمية، بالجنيه المصري، مع عدد محدد من المواد المشمولة وسعر واضح لكل مادة إضافية.",
+    body: "لكل مادة سعرها الخاص، بالجنيه المصري. اختر أي عدد من المواد تريده — إجماليك هو ببساطة مجموع ما تختاره.",
     note: "كل مادة تشمل عددًا يوميًا من أسئلة الذكاء الاصطناعي. تحتاج المزيد؟ باقات أسئلة إضافية قابلة للتفعيل ستكون متاحة قريبًا.",
     ctaLabel: "اشترك الآن",
   },

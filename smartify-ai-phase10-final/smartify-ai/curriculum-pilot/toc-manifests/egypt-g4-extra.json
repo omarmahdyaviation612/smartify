@@ -1,0 +1,120 @@
+{
+  "entries": [
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 4",
+      "gradeNameAr": "الصف الرابع الابتدائي",
+      "gradeLevel": 4,
+      "subjectNameEn": "Science",
+      "subjectNameAr": "العلوم",
+      "icon": "flask",
+      "sourceFile": "Science_Ar_prim4_t1.pdf",
+      "units": [
+        {
+          "order": 1,
+          "nameEn": "Nature Around Us",
+          "nameAr": "الطبيعة من حولنا",
+          "sourcePage": 6,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "Nature Around Us",
+              "nameAr": "الطبيعة من حولنا"
+            }
+          ]
+        },
+        {
+          "order": 2,
+          "nameEn": "How Do Insects Grow?",
+          "nameAr": "كيف تنمو الحشرات؟",
+          "sourcePage": 26,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "How Do Insects Grow?",
+              "nameAr": "كيف تنمو الحشرات؟"
+            }
+          ]
+        },
+        {
+          "order": 3,
+          "nameEn": "How Do Plants Grow?",
+          "nameAr": "كيف تنمو النباتات؟",
+          "sourcePage": 36,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "How Do Plants Grow?",
+              "nameAr": "كيف تنمو النباتات؟"
+            }
+          ]
+        },
+        {
+          "order": 4,
+          "nameEn": "Properties of Light",
+          "nameAr": "خصائص الضوء",
+          "sourcePage": 50,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "Properties of Light",
+              "nameAr": "خصائص الضوء"
+            }
+          ]
+        },
+        {
+          "order": 5,
+          "nameEn": "Properties of Sound",
+          "nameAr": "خصائص الصوت",
+          "sourcePage": 68,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "Properties of Sound",
+              "nameAr": "خصائص الصوت"
+            }
+          ]
+        },
+        {
+          "order": 6,
+          "nameEn": "The Power of Wind",
+          "nameAr": "قوة الرياح",
+          "sourcePage": 78,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "The Power of Wind",
+              "nameAr": "قوة الرياح"
+            }
+          ]
+        },
+        {
+          "order": 7,
+          "nameEn": "The Force of Rubber",
+          "nameAr": "قوة المطاط",
+          "sourcePage": 84,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "The Force of Rubber",
+              "nameAr": "قوة المطاط"
+            }
+          ]
+        },
+        {
+          "order": 8,
+          "nameEn": "Soil, Water, and Life in Egypt",
+          "nameAr": "التربة والماء والحياة في مصر",
+          "sourcePage": 92,
+          "topics": [
+            {
+              "order": 1,
+              "nameEn": "Soil, Water, and Life in Egypt",
+              "nameAr": "التربة والماء والحياة في مصر"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

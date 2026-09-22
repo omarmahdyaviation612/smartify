@@ -1,0 +1,26 @@
+{
+  "curriculumSystem": "Egyptian Ministry of Education and Technical Education (وزارة التربية والتعليم والتعليم الفني)",
+  "stage": "Primary (ابتدائي)",
+  "grade": "Grade 1 Primary (الصف الأول الابتدائي)",
+  "subject": "Arabic Language (اللغة العربية)",
+  "language": "Arabic",
+  "term": "First Term / First Semester (الفصل الدراسي الأول)",
+  "academicYear": "UNKNOWN / NEEDS REVIEW — not printed on the cover or front-matter pages reviewed.",
+  "bookTitle": {
+    "ar": "اللغة العربية - الصف الأول الابتدائي - الفصل الدراسي الأول",
+    "en": "Arabic Language - Grade 1 Primary - First Term"
+  },
+  "sourceFilename": "Arabic_language_prim1_t1.pdf",
+  "sourceDirectory": "D:\\samrtify website\\curriculum-sources\\egypt moe\\grade 1\\ (external, private, read-only reference library — not part of this repository, not Git-tracked)",
+  "sourceUrl": "UNKNOWN — not recorded locally alongside the file",
+  "totalPages": 154,
+  "extractionMethod": "Unlike the Grade 1 Math book, this PDF DOES have an extractable text layer (confirmed via pdf-parse: 166,716 characters across 154 pages), but the extracted text runs in visual/glyph order rather than logical RTL reading order, so it was not used to author any content directly. Structure was instead identified by rendering pages to PNG images locally (via PyMuPDF/pymupdf running in this machine's own Python, no network call, no third-party OCR/vision service — the source file never left this machine) and reading the rendered pages visually, the same method used for the Math book's Docker+poppler rendering.",
+  "pagesActuallyViewed": "Table of contents (page 5, i.e. 'الفهرس'), the Unit 1 divider page (14) and its Nasheed page (16), plus the full 'حرف الألف' (Letter Alef, pages 17-19) and 'حرف الباء' (Letter Baa, pages 20-22) lessons, viewed to confirm the lesson template. The remaining ~140 pages of this book were not opened.",
+  "confidence": {
+    "unit_titles_and_page_numbers": "HIGH — read directly from the book's own printed table of contents (page 5).",
+    "unit_1_lesson_list_and_page_numbers": "HIGH — read directly from the table of contents; each lesson is one Arabic letter taught via an identical page template (confirmed by opening two of the eight letter lessons in full).",
+    "lesson_template_and_objectives_for_unit_1": "HIGH for Letter Alef and Letter Baa, read directly from the book's own printed per-lesson objective footers (e.g. 'يتعرف التلميذ شكل حرف (X)... ينطق التلميذ صوت (X)... يكتب التلميذ حرف (X)...'). MEDIUM (by template extrapolation, not individually opened) for the remaining six letters in Unit 1 (Meem, Haa, Jeem, Dal, Khaa, Taa) and for Units 2-4, since all letter lessons in this book follow the identical six-activity template with only the letter and its example words/pictures changed.",
+    "units_2_4_detail": "LOW — recorded at title-only depth from the table of contents; their internal lesson-level breakdown (letters taught, page numbers) was not opened this pass."
+  },
+  "copyrightSafetyNote": "As with the Math book: no textbook prose, no copied mnemonic rhymes/nasheed lyrics, no copied story text, and no copied exercise images/wording appear anywhere in curriculum-map.json or in any generated content. The book's own printed per-lesson objective statements are recorded as pedagogical facts (what is taught), not narrative content, and are otherwise re-expressed in Smartify's own words below."
+}

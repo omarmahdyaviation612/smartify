@@ -15,4 +15,14 @@ export class AdminRevenueController {
   getSummary(@Query("days") days?: string) {
     return this.service.getRevenueVsCostSummary(days ? Number(days) : undefined);
   }
+
+  @Get("growth-summary")
+  getGrowthSummary() {
+    return this.service.getGrowthSummary();
+  }
+
+  @Get("referrals")
+  listReferrals() {
+    return this.service.listReferrals();
+  }
 }

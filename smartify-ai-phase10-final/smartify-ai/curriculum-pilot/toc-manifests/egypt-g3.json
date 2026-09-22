@@ -1,0 +1,169 @@
+{
+  "entries": [
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 3", "gradeNameAr": "الصف الثالث الابتدائي", "gradeLevel": 3,
+      "subjectNameEn": "Arabic Language", "subjectNameAr": "اللغة العربية", "icon": "language",
+      "sourceFile": "Arabic_language_prim3_t1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "Work and Hope", "nameAr": "العمل والأمل", "sourcePage": 7,
+          "topics": [
+            { "order": 1, "nameEn": "Plant a Sprout", "nameAr": "ازرع نبتة" },
+            { "order": 2, "nameEn": "Please... Try Again", "nameAr": "من فضلك.. كرر المحاولة" },
+            { "order": 3, "nameEn": "The Hidden Hero", "nameAr": "البطل الخفي" },
+            { "order": 4, "nameEn": "Secrets of Success", "nameAr": "أسرار النجاح" }
+          ]
+        },
+        {
+          "order": 2, "nameEn": "My Beautiful Qualities", "nameAr": "صفاتي الجميلة", "sourcePage": 45,
+          "topics": [
+            { "order": 1, "nameEn": "The Flower and the Cactus", "nameAr": "الزهرة والصبار" },
+            { "order": 2, "nameEn": "Happiness in Helping", "nameAr": "السعادة في المساعدة" },
+            { "order": 3, "nameEn": "The First to Raise His Hand", "nameAr": "أول من رفع يده" },
+            { "order": 4, "nameEn": "Our Morals", "nameAr": "أخلاقنا" }
+          ]
+        },
+        {
+          "order": 3, "nameEn": "My Country's Literature", "nameAr": "أدب بلدي", "sourcePage": 84,
+          "topics": [
+            { "order": 1, "nameEn": "The Brave Sparrow", "nameAr": "العصفور الجريء" },
+            { "order": 2, "nameEn": "The Innovation Box", "nameAr": "صندوق الابتكار" },
+            { "order": 3, "nameEn": "A Page From History", "nameAr": "ورقة من التاريخ" },
+            { "order": 4, "nameEn": "My Homeland", "nameAr": "وطني" }
+          ]
+        }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 3", "gradeNameAr": "الصف الثالث الابتدائي", "gradeLevel": 3,
+      "subjectNameEn": "Mathematics", "subjectNameAr": "الرياضيات", "icon": "calculator",
+      "sourceFile": "Math_Ar_prim3_t1.pdf",
+      "units": [
+        { "order": 1, "nameEn": "Multiplication Rules", "nameAr": "قواعد الضرب", "sourcePage": 8,
+          "topics": [ { "order": 1, "nameEn": "Multiplication Rules", "nameAr": "قواعد الضرب" } ] },
+        { "order": 2, "nameEn": "Time and Duration", "nameAr": "الوقت والمدة الزمنية", "sourcePage": 20,
+          "topics": [ { "order": 1, "nameEn": "Time and Duration", "nameAr": "الوقت والمدة الزمنية" } ] },
+        { "order": 3, "nameEn": "Division", "nameAr": "القسمة", "sourcePage": 32,
+          "topics": [ { "order": 1, "nameEn": "Division", "nameAr": "القسمة" } ] },
+        { "order": 4, "nameEn": "Addition and Subtraction", "nameAr": "الجمع والطرح", "sourcePage": 44,
+          "topics": [ { "order": 1, "nameEn": "Addition and Subtraction", "nameAr": "الجمع والطرح" } ] },
+        { "order": 5, "nameEn": "Length", "nameAr": "الطول", "sourcePage": 54,
+          "topics": [ { "order": 1, "nameEn": "Length", "nameAr": "الطول" } ] },
+        { "order": 6, "nameEn": "Organizing Data", "nameAr": "تنظيم البيانات", "sourcePage": 62,
+          "topics": [ { "order": 1, "nameEn": "Organizing Data", "nameAr": "تنظيم البيانات" } ] },
+        { "order": 7, "nameEn": "Mental Math", "nameAr": "الحساب الذهني", "sourcePage": 76,
+          "topics": [ { "order": 1, "nameEn": "Mental Math", "nameAr": "الحساب الذهني" } ] },
+        { "order": 8, "nameEn": "Division with Remainder", "nameAr": "القسمة مع الباقي", "sourcePage": 82,
+          "topics": [ { "order": 1, "nameEn": "Division with Remainder", "nameAr": "القسمة مع الباقي" } ] },
+        { "order": 9, "nameEn": "Numbers Greater Than 1000", "nameAr": "أعداد أكبر من 1000", "sourcePage": 92,
+          "topics": [ { "order": 1, "nameEn": "Numbers Greater Than 1000", "nameAr": "أعداد أكبر من 1000" } ] },
+        { "order": 10, "nameEn": "Vertical Multiplication (Part One)", "nameAr": "الضرب الرأسي (الجزء الأول)", "sourcePage": 106,
+          "topics": [ { "order": 1, "nameEn": "Vertical Multiplication (Part One)", "nameAr": "الضرب الرأسي (الجزء الأول)" } ] }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 3", "gradeNameAr": "الصف الثالث الابتدائي", "gradeLevel": 3,
+      "subjectNameEn": "English Language", "subjectNameAr": "اللغة الإنجليزية", "icon": "language",
+      "sourceFile": "English_language_prim3_t1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "Let's Learn Together!", "nameAr": "هيا نتعلم معًا!", "sourcePage": 5,
+          "topics": [
+            { "order": 1, "nameEn": "Greetings and Introductions", "nameAr": "التحيات والتعارف" },
+            { "order": 2, "nameEn": "Classroom Rules", "nameAr": "قواعد الفصل" },
+            { "order": 3, "nameEn": "Describing People", "nameAr": "وصف الأشخاص" },
+            { "order": 4, "nameEn": "Daily Routines", "nameAr": "الروتين اليومي" }
+          ]
+        },
+        {
+          "order": 2, "nameEn": "My Family and I", "nameAr": "أسرتي وأنا", "sourcePage": 27,
+          "topics": [
+            { "order": 1, "nameEn": "Meet My Family", "nameAr": "تعرف على أسرتي" },
+            { "order": 2, "nameEn": "Family Traditions and Celebrations", "nameAr": "تقاليد واحتفالات الأسرة" },
+            { "order": 3, "nameEn": "My Family Helps Me Grow", "nameAr": "أسرتي تساعدني على النمو" },
+            { "order": 4, "nameEn": "Jobs in My Family", "nameAr": "وظائف في أسرتي" }
+          ]
+        },
+        {
+          "order": 3, "nameEn": "New Adventures", "nameAr": "مغامرات جديدة", "sourcePage": 43,
+          "topics": [
+            { "order": 1, "nameEn": "Places Around Me", "nameAr": "أماكن من حولي" },
+            { "order": 2, "nameEn": "Egypt's Landmarks", "nameAr": "معالم مصر" },
+            { "order": 3, "nameEn": "Map It Out", "nameAr": "ارسم الخريطة" },
+            { "order": 4, "nameEn": "A School Trip to the Zoo", "nameAr": "رحلة مدرسية إلى حديقة الحيوان" }
+          ]
+        },
+        {
+          "order": 4, "nameEn": "Let's Tell Stories!", "nameAr": "هيا نروي القصص!", "sourcePage": 67,
+          "topics": [
+            { "order": 1, "nameEn": "How We Feel", "nameAr": "كيف نشعر" },
+            { "order": 2, "nameEn": "A Helping Hand", "nameAr": "يد العون" },
+            { "order": 3, "nameEn": "A Big Win", "nameAr": "فوز كبير" }
+          ]
+        },
+        {
+          "order": 5, "nameEn": "Together Is Better", "nameAr": "معًا أفضل", "sourcePage": 81,
+          "topics": [
+            { "order": 1, "nameEn": "Teamwork & Chores", "nameAr": "العمل الجماعي والمهام المنزلية" },
+            { "order": 2, "nameEn": "Teamwork at School", "nameAr": "العمل الجماعي في المدرسة" },
+            { "order": 3, "nameEn": "Teamwork in Sports", "nameAr": "العمل الجماعي في الرياضة" },
+            { "order": 4, "nameEn": "I Help My Community!", "nameAr": "أساعد مجتمعي!" }
+          ]
+        },
+        {
+          "order": 6, "nameEn": "Dare to Dream", "nameAr": "تجرأ على الحلم", "sourcePage": 99,
+          "topics": [
+            { "order": 1, "nameEn": "My Goal, My Dream", "nameAr": "هدفي، حلمي" },
+            { "order": 2, "nameEn": "A Day To Remember", "nameAr": "يوم لا يُنسى" },
+            { "order": 3, "nameEn": "I Did It!", "nameAr": "لقد فعلتها!" },
+            { "order": 4, "nameEn": "Helping Others Succeed", "nameAr": "مساعدة الآخرين على النجاح" }
+          ]
+        }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 3", "gradeNameAr": "الصف الثالث الابتدائي", "gradeLevel": 3,
+      "subjectNameEn": "Islamic Religious Education", "subjectNameAr": "التربية الدينية الإسلامية", "icon": "book",
+      "sourceFile": "Islamic_religion_prim3_t1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "Trust in God", "nameAr": "الثقة بالله", "sourcePage": 8,
+          "topics": [
+            { "order": 1, "nameEn": "The Pillars of Faith", "nameAr": "أركان الإيمان" },
+            { "order": 2, "nameEn": "Surah Al-Ghashiyah", "nameAr": "سورة الغاشية" },
+            { "order": 3, "nameEn": "Friday Prayer", "nameAr": "صلاة الجمعة" },
+            { "order": 4, "nameEn": "The Year of Sorrow", "nameAr": "عام الحزن" },
+            { "order": 5, "nameEn": "Prophet Zakariya, Peace Be Upon Him", "nameAr": "نبي الله زكريا عليه السلام" },
+            { "order": 6, "nameEn": "Trust in God (Values and Ethics)", "nameAr": "الثقة بالله" }
+          ]
+        },
+        {
+          "order": 2, "nameEn": "Faith and Love", "nameAr": "الإيمان والمحبة", "sourcePage": 31,
+          "topics": [
+            { "order": 1, "nameEn": "Between Islam and Faith", "nameAr": "بين الإسلام والإيمان" },
+            { "order": 2, "nameEn": "Surah Al-A'la", "nameAr": "سورة الأعلى" },
+            { "order": 3, "nameEn": "The Two Eid Prayers", "nameAr": "صلاة العيدين" },
+            { "order": 4, "nameEn": "The Prophet's Journey to Ta'if and Calling Its People", "nameAr": "رحلة النبي إلى الطائف ودعوة أهلها" },
+            { "order": 5, "nameEn": "Prophet Isa (Jesus), Peace Be Upon Him", "nameAr": "نبي الله عيسى عليه السلام" },
+            { "order": 6, "nameEn": "Traits of a Believer: Love", "nameAr": "من صفات المؤمن: المحبة" }
+          ]
+        },
+        {
+          "order": 3, "nameEn": "Faith and Friendship", "nameAr": "الإيمان والصداقة", "sourcePage": 59,
+          "topics": [
+            { "order": 1, "nameEn": "Pillars of Faith: Belief in God Almighty", "nameAr": "من أركان الإيمان: الإيمان بالله تعالى" },
+            { "order": 2, "nameEn": "Surah At-Tariq", "nameAr": "سورة الطارق" },
+            { "order": 3, "nameEn": "Conditions for the Validity of Prayer", "nameAr": "شروط صحة الصلاة" },
+            { "order": 4, "nameEn": "The Night Journey and Ascension", "nameAr": "الإسراء والمعراج" },
+            { "order": 5, "nameEn": "Abu Bakr As-Siddiq, May God Be Pleased With Him", "nameAr": "أبو بكر الصديق رضي الله عنه" },
+            { "order": 6, "nameEn": "Friendship", "nameAr": "الصداقة" }
+          ]
+        }
+      ]
+    }
+  ]
+}

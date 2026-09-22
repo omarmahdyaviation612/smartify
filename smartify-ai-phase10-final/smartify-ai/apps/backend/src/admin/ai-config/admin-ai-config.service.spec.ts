@@ -162,3 +162,152 @@ describe("AdminAIConfigService — AI spending controls", () => {
     });
   });
 });
+
+/**
+ * Admin AI Cost / Budget Dashboard (2026-09-20) — read-only aggregation
+ * over the EXISTING AIUsage ledger. The split between student-runtime and
+ * platform content-authoring spend is exactly AIUsage.studentId being set
+ * vs null (never a hardcoded feature-name list), matching every real
+ * content-authoring call site in this codebase (which always passes
+ * studentId: null for CONTENT_AUTHORING_ACTOR_ID-billed rows).
+ */
+describe("AdminAIConfigService — AI Cost / Budget Dashboard", () => {
+  function makeService(opts: { aiUsage?: any[]; perUserBudgetUsd?: number | null; studentProfiles?: any[]; subjects?: any[] } = {}) {
+    const prisma = {
+      client: {
+        aIUsage: { findMany: jest.fn().mockResolvedValue(opts.aiUsage ?? []) },
+        systemConfig: {
+          findUnique: jest.fn().mockImplementation(({ where: { key } }: any) =>
+            key === "per_user_daily_ai_budget_usd" && opts.perUserBudgetUsd !== undefined
+              ? Promise.resolve(opts.perUserBudgetUsd === null ? null : { key, value: opts.perUserBudgetUsd })
+              : Promise.resolve(null),
+          ),
+        },
+        studentProfile: { findMany: jest.fn().mockResolvedValue(opts.studentProfiles ?? []) },
+        subject: { findMany: jest.fn().mockResolvedValue(opts.subjects ?? []) },
+      },
+    } as any;
+    return { service: new AdminAIConfigService(prisma, {} as any), prisma };
+  }
+
+  describe("getCostOverview", () => {
+    it("splits today's and this month's spend into student-runtime vs platform content-authoring, using studentId as the discriminator", async () => {
+      const { service } = makeService({
+        aiUsage: [
+          { costUsd: 1.5, studentId: "student-1" }, // real student (Lesson/Tutor/TTS)
+          { costUsd: 0.5, studentId: null }, // platform content-authoring (grounding/TOC/generation)
+          { costUsd: 2, studentId: "student-2" },
+        ],
+      });
+      const overview = await service.getCostOverview();
+      expect(overview.today).toEqual({ totalUsd: 4, studentRuntimeUsd: 3.5, platformAuthoringUsd: 0.5 });
+      expect(overview.month).toEqual({ totalUsd: 4, studentRuntimeUsd: 3.5, platformAuthoringUsd: 0.5 });
+    });
+
+    it("reports all zeros when there is no usage at all", async () => {
+      const { service } = makeService({ aiUsage: [] });
+      const overview = await service.getCostOverview();
+      expect(overview.today).toEqual({ totalUsd: 0, studentRuntimeUsd: 0, platformAuthoringUsd: 0 });
+    });
+  });
+
+  describe("listStudentSpend", () => {
+    it("aggregates real spend per student and computes remaining budget against the shared per-user cap", async () => {
+      const { service } = makeService({
+        aiUsage: [
+          { userId: "user-1", studentId: "student-1", costUsd: 0.1 },
+          { userId: "user-1", studentId: "student-1", costUsd: 0.05 },
+          { userId: "user-2", studentId: "student-2", costUsd: 0.3 },
+        ],
+        perUserBudgetUsd: 0.25,
+        studentProfiles: [
+          { id: "student-1", fullName: "Alice", user: { email: "alice@test.com" } },
+          { id: "student-2", fullName: "Bob", user: { email: "bob@test.com" } },
+        ],
+      });
+
+      const result = await service.listStudentSpend();
+
+      const alice = result.find((r) => r.studentId === "student-1")!;
+      expect(alice.todayUsd).toBeCloseTo(0.15);
+      expect(alice.windowUsd).toBeCloseTo(0.15);
+      expect(alice.fullName).toBe("Alice");
+      expect(alice.remainingTodayUsd).toBeCloseTo(0.1); // 0.25 - 0.15
+
+      const bob = result.find((r) => r.studentId === "student-2")!;
+      // Bob's spend (0.3) exceeds the per-user cap (0.25) — remaining floors at 0, never negative.
+      expect(bob.remainingTodayUsd).toBe(0);
+    });
+
+    it("reports remainingTodayUsd as null when no global per-user budget is configured — never a guessed limit", async () => {
+      const { service } = makeService({
+        aiUsage: [{ userId: "user-1", studentId: "student-1", costUsd: 0.1 }],
+        perUserBudgetUsd: null,
+        studentProfiles: [{ id: "student-1", fullName: "Alice", user: { email: "alice@test.com" } }],
+      });
+      const result = await service.listStudentSpend();
+      expect(result[0].perUserBudgetUsd).toBeNull();
+      expect(result[0].remainingTodayUsd).toBeNull();
+    });
+
+    it("sorts students by window spend, highest first", async () => {
+      const { service } = makeService({
+        aiUsage: [
+          { userId: "user-1", studentId: "student-1", costUsd: 0.05 },
+          { userId: "user-2", studentId: "student-2", costUsd: 0.5 },
+        ],
+        studentProfiles: [
+          { id: "student-1", fullName: "Alice", user: { email: "a@test.com" } },
+          { id: "student-2", fullName: "Bob", user: { email: "b@test.com" } },
+        ],
+      });
+      const result = await service.listStudentSpend();
+      expect(result.map((r) => r.studentId)).toEqual(["student-2", "student-1"]);
+    });
+
+    it("returns an empty list when no student has any AI usage", async () => {
+      const { service } = makeService({ aiUsage: [] });
+      expect(await service.listStudentSpend()).toEqual([]);
+    });
+  });
+
+  describe("getStudentSpendDetail", () => {
+    it("groups a student's spend by Subject, then by feature within each Subject", async () => {
+      const { service } = makeService({
+        aiUsage: [
+          { subjectId: "math", feature: "lesson_chat", costUsd: 0.4 },
+          { subjectId: "math", feature: "tutor_chat", costUsd: 0.1 },
+          { subjectId: "science", feature: "tutor_tts", costUsd: 0.2 },
+        ],
+        subjects: [{ id: "math", nameEn: "Math", nameAr: "رياضيات" }, { id: "science", nameEn: "Science", nameAr: "علوم" }],
+      });
+
+      const detail = await service.getStudentSpendDetail("student-1");
+
+      expect(detail.totalUsd).toBeCloseTo(0.7);
+      const math = detail.bySubject.find((s) => s.subjectId === "math")!;
+      expect(math.subjectNameEn).toBe("Math");
+      expect(math.costUsd).toBeCloseTo(0.5);
+      expect(math.byFeature).toEqual({ lesson_chat: 0.4, tutor_chat: 0.1 });
+      const science = detail.bySubject.find((s) => s.subjectId === "science")!;
+      expect(science.byFeature).toEqual({ tutor_tts: 0.2 });
+    });
+
+    it("groups rows with no subjectId (e.g. a gap in older data) under a distinct '(no subject)' bucket rather than crashing or merging incorrectly", async () => {
+      const { service } = makeService({ aiUsage: [{ subjectId: null, feature: "tutor_chat", costUsd: 0.2 }] });
+
+      const detail = await service.getStudentSpendDetail("student-1");
+      expect(detail.bySubject).toHaveLength(1);
+      expect(detail.bySubject[0].subjectId).toBeNull();
+      expect(detail.bySubject[0].subjectNameEn).toBe("(no subject)");
+    });
+
+    it("scopes the query to exactly this student — platform content-authoring rows (studentId null) can never leak in", async () => {
+      const { service, prisma } = makeService({ aiUsage: [{ subjectId: "math", feature: "lesson_chat", costUsd: 0.3 }] });
+
+      await service.getStudentSpendDetail("student-1");
+
+      expect(prisma.client.aIUsage.findMany.mock.calls[0][0].where.studentId).toBe("student-1");
+    });
+  });
+});

@@ -1,0 +1,130 @@
+{
+  "entries": [
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 5", "gradeNameAr": "الصف الخامس الابتدائي", "gradeLevel": 5,
+      "subjectNameEn": "Science", "subjectNameAr": "العلوم", "icon": "flask",
+      "sourceFile": "Science_Ar_prim5_t1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "Bones and Muscles", "nameAr": "العظام والعضلات", "sourcePage": 6,
+          "topics": [
+            { "order": 1, "nameEn": "Bones and Muscles", "nameAr": "العظام والعضلات" }
+          ]
+        },
+        {
+          "order": 2, "nameEn": "Changes in the Seasons", "nameAr": "التغيرات في الفصول", "sourcePage": 20,
+          "topics": [
+            { "order": 1, "nameEn": "Changes in the Seasons", "nameAr": "التغيرات في الفصول" }
+          ]
+        },
+        {
+          "order": 3, "nameEn": "Conditions for Germination", "nameAr": "شروط الإنبات", "sourcePage": 28,
+          "topics": [
+            { "order": 1, "nameEn": "Conditions for Germination", "nameAr": "شروط الإنبات" }
+          ]
+        },
+        {
+          "order": 4, "nameEn": "Conditions for Growth", "nameAr": "شروط النمو", "sourcePage": 44,
+          "topics": [
+            { "order": 1, "nameEn": "Conditions for Growth", "nameAr": "شروط النمو" }
+          ]
+        },
+        {
+          "order": 5, "nameEn": "From Flower to Fruit", "nameAr": "من الزهرة إلى الثمرة", "sourcePage": 52,
+          "topics": [
+            { "order": 1, "nameEn": "From Flower to Fruit", "nameAr": "من الزهرة إلى الثمرة" }
+          ]
+        },
+        {
+          "order": 6, "nameEn": "Human Growth and Reproduction", "nameAr": "نمو الإنسان والتكاثر", "sourcePage": 64,
+          "topics": [
+            { "order": 1, "nameEn": "Human Growth and Reproduction", "nameAr": "نمو الإنسان والتكاثر" }
+          ]
+        },
+        {
+          "order": 7, "nameEn": "Animal Growth and Reproduction", "nameAr": "نمو الحيوانات وتكاثرها", "sourcePage": 72,
+          "topics": [
+            { "order": 1, "nameEn": "Animal Growth and Reproduction", "nameAr": "نمو الحيوانات وتكاثرها" }
+          ]
+        },
+        {
+          "order": 8, "nameEn": "Weather Changes", "nameAr": "تغيرات الطقس", "sourcePage": 80,
+          "topics": [
+            { "order": 1, "nameEn": "Weather Changes", "nameAr": "تغيرات الطقس" }
+          ]
+        },
+        {
+          "order": 9, "nameEn": "The Water Cycle", "nameAr": "دورة الماء", "sourcePage": 92,
+          "topics": [
+            { "order": 1, "nameEn": "The Water Cycle", "nameAr": "دورة الماء" }
+          ]
+        }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 5", "gradeNameAr": "الصف الخامس الابتدائي", "gradeLevel": 5,
+      "subjectNameEn": "Social Studies", "subjectNameAr": "الدراسات الاجتماعية", "icon": "globe",
+      "sourceFile": "Social_studies_prim5_t1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "Egypt: A Distinctive Location and Diverse Nature", "nameAr": "مصر موقع متميز وطبيعة متنوعة", "sourcePage": 8,
+          "topics": [
+            { "order": 1, "nameEn": "Egypt's Astronomical Location", "nameAr": "موقع مصر الفلكي" },
+            { "order": 2, "nameEn": "Features of Egypt's Landscape", "nameAr": "مظاهر سطح مصر" },
+            { "order": 3, "nameEn": "Egypt's Climate", "nameAr": "مناخ مصر" },
+            { "order": 4, "nameEn": "Natural Plants and Wild Animals", "nameAr": "النباتات الطبيعية والحيوانات البرية" }
+          ]
+        },
+        {
+          "order": 2, "nameEn": "Ancient Egyptian Civilization", "nameAr": "الحضارة المصرية القديمة", "sourcePage": 40,
+          "topics": [
+            { "order": 1, "nameEn": "Factors Behind the Rise of Ancient Egyptian Civilization", "nameAr": "عوامل قيام الحضارة المصرية القديمة" },
+            { "order": 2, "nameEn": "Life of Ancient Egyptians: Prehistoric Ages", "nameAr": "حياة المصري القديم في عصور ما قبل التاريخ" },
+            { "order": 3, "nameEn": "Life of Ancient Egyptians: Historical Ages", "nameAr": "حياة المصري القديم في العصور التاريخية" },
+            { "order": 4, "nameEn": "Egypt in the Ptolemaic and Roman Eras", "nameAr": "مصر في عصري البطالمة والرومان" }
+          ]
+        },
+        {
+          "order": 3, "nameEn": "Treasures of Egypt", "nameAr": "كنوز مصر", "sourcePage": 68,
+          "topics": [
+            { "order": 1, "nameEn": "Mineral Wealth and Energy Sources", "nameAr": "الثروة المعدنية ومصادر الطاقة" },
+            { "order": 2, "nameEn": "Water Resources", "nameAr": "موارد المياه" },
+            { "order": 3, "nameEn": "National Projects: Egypt's Vision for the Future", "nameAr": "المشروعات القومية: رؤية مصر للمستقبل" }
+          ]
+        }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 5", "gradeNameAr": "الصف الخامس الابتدائي", "gradeLevel": 5,
+      "subjectNameEn": "Information and Communication Technology", "subjectNameAr": "تكنولوجيا المعلومات والاتصالات", "icon": "monitor",
+      "sourceFile": "ICT_ARABIC_Prim5_TR1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "The Role of Information Technology in Our Lives", "nameAr": "دور تكنولوجيا المعلومات في حياتنا", "sourcePage": 7,
+          "topics": [
+            { "order": 1, "nameEn": "Computer Peripheral Devices", "nameAr": "الأجهزة الملحقة بالحاسب الآلي" },
+            { "order": 2, "nameEn": "Networks and Their Types", "nameAr": "الشبكات وأنواعها" },
+            { "order": 3, "nameEn": "Smart Communication Systems", "nameAr": "أنظمة التواصل الذكية" },
+            { "order": 4, "nameEn": "Internet Connection Problems and How to Solve Them", "nameAr": "مشكلات الاتصال بالإنترنت وخطوات حلها" },
+            { "order": 5, "nameEn": "Digital Files and How to Handle Them", "nameAr": "الملفات الرقمية وكيفية التعامل معها" },
+            { "order": 6, "nameEn": "Sharing Information: When, Where, and How?", "nameAr": "مشاركة المعلومات: متى وأين وكيف؟" }
+          ]
+        },
+        {
+          "order": 2, "nameEn": "Digital Security and Safety Precautions", "nameAr": "احتياطات الأمن والسلامة الرقمية", "sourcePage": 27,
+          "topics": [
+            { "order": 1, "nameEn": "Methods of Protecting Data and Information", "nameAr": "أساليب حماية البيانات والمعلومات" },
+            { "order": 2, "nameEn": "Password Management", "nameAr": "إدارة كلمات المرور" },
+            { "order": 3, "nameEn": "How to Deal with Fraudulent Websites", "nameAr": "طرق التعامل مع المواقع الإلكترونية الاحتيالية" },
+            { "order": 4, "nameEn": "Copyright", "nameAr": "حقوق النشر" },
+            { "order": 5, "nameEn": "Preventive Security and Selecting Digital Sources", "nameAr": "الأمن الوقائي وانتقاء المصادر الرقمية" },
+            { "order": 6, "nameEn": "Documenting Information", "nameAr": "توثيق المعلومات" }
+          ]
+        }
+      ]
+    }
+  ]
+}

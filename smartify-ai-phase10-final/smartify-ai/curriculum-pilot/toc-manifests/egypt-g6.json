@@ -1,0 +1,335 @@
+{
+  "entries": [
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 6", "gradeNameAr": "الصف السادس الابتدائي", "gradeLevel": 6,
+      "subjectNameEn": "Arabic Language", "subjectNameAr": "اللغة العربية", "icon": "language",
+      "sourceFile": "Arabic_Primary6_T1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "I Develop Myself", "nameAr": "أطور ذاتي", "sourcePage": 7,
+          "topics": [
+            { "order": 1, "nameEn": "Samar Develops Herself", "nameAr": "سمر تطور نفسها" },
+            { "order": 2, "nameEn": "A Priceless Treasure", "nameAr": "كنز لا يقدر بثمن" },
+            { "order": 3, "nameEn": "Make Your Decision", "nameAr": "اصنع قرارك" },
+            { "order": 4, "nameEn": "To the Youth", "nameAr": "إلى الشباب" }
+          ]
+        },
+        {
+          "order": 2, "nameEn": "I Am Responsible", "nameAr": "أنا مسئول", "sourcePage": 53,
+          "topics": [
+            { "order": 1, "nameEn": "Who Are the Successful Ones?", "nameAr": "من هم الناجحون؟" },
+            { "order": 2, "nameEn": "The Power of Words", "nameAr": "قوة الكلمات" },
+            { "order": 3, "nameEn": "The Secret of Strength and Success", "nameAr": "سر القوة والنجاح" },
+            { "order": 4, "nameEn": "Builders of Glory", "nameAr": "بناة المجد" }
+          ]
+        },
+        {
+          "order": 3, "nameEn": "Science, Imagination, and the Future", "nameAr": "العلم والخيال والمستقبل", "sourcePage": 100,
+          "topics": [
+            { "order": 1, "nameEn": "From Imagination to Reality", "nameAr": "من الخيال إلى الواقع" },
+            { "order": 2, "nameEn": "Who Is Behind the Camera?", "nameAr": "من وراء الكاميرا؟" },
+            { "order": 3, "nameEn": "A Journey to the Future", "nameAr": "رحلة إلى المستقبل" },
+            { "order": 4, "nameEn": "The Happiness of Nations", "nameAr": "سعادة الأوطان" }
+          ]
+        }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 6", "gradeNameAr": "الصف السادس الابتدائي", "gradeLevel": 6,
+      "subjectNameEn": "Mathematics", "subjectNameAr": "الرياضيات", "icon": "calculator",
+      "sourceFile": "Math_Primary6_T1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "Divisibility, Factors and Multiples", "nameAr": "قابلية القسمة والعوامل والمضاعفات", "sourcePage": 1,
+          "topics": [
+            { "order": 1, "nameEn": "Divisibility", "nameAr": "قابلية القسمة" },
+            { "order": 2, "nameEn": "Prime Factorization", "nameAr": "تحليل العدد إلى عوامله الأولية" },
+            { "order": 3, "nameEn": "Writing Numerical Expressions Using GCF", "nameAr": "كتابة تعبيرات عددية باستخدام العامل المشترك الأكبر" },
+            { "order": 4, "nameEn": "Analyzing the Least Common Multiple", "nameAr": "تحليل المضاعف المشترك الأصغر" }
+          ]
+        },
+        {
+          "order": 2, "nameEn": "Rational Numbers", "nameAr": "الأعداد النسبية", "sourcePage": 15,
+          "topics": [
+            { "order": 1, "nameEn": "Using a Number Line to Describe Data", "nameAr": "استخدام خط الأعداد لوصف البيانات" },
+            { "order": 2, "nameEn": "Using a Number Line and Symbols to Compare Numbers", "nameAr": "استخدام خط الأعداد والرموز لمقارنة الأعداد" },
+            { "order": 3, "nameEn": "Analyzing Rational Numbers Using Models", "nameAr": "تحليل الأعداد النسبية باستخدام النماذج" },
+            { "order": 4, "nameEn": "Comparing and Ordering Rational Numbers", "nameAr": "مقارنة الأعداد النسبية وترتيبها" },
+            { "order": 5, "nameEn": "Exploring Absolute Value", "nameAr": "استكشاف القيمة المطلقة" },
+            { "order": 6, "nameEn": "Comparing Absolute Values", "nameAr": "مقارنة القيم المطلقة" }
+          ]
+        },
+        {
+          "order": 3, "nameEn": "Algebraic Expressions", "nameAr": "المقادير الجبرية", "sourcePage": 35,
+          "topics": [
+            { "order": 1, "nameEn": "Forming Mathematical Expressions", "nameAr": "تكوين تعبيرات رياضية" },
+            { "order": 2, "nameEn": "Analyzing Mathematical Expressions", "nameAr": "تحليل التعبيرات الرياضية" },
+            { "order": 3, "nameEn": "Writing Algebraic Expressions", "nameAr": "كتابة مقادير جبرية" },
+            { "order": 4, "nameEn": "Order of Operations and Exponents", "nameAr": "ترتيب العمليات والأسس" },
+            { "order": 5, "nameEn": "Evaluating Algebraic Expressions", "nameAr": "إيجاد قيمة المقدار الجبري" },
+            { "order": 6, "nameEn": "Applications of Algebraic Expressions", "nameAr": "تطبيقات على المقادير الجبرية" },
+            { "order": 7, "nameEn": "Identifying Equivalent Algebraic Expressions", "nameAr": "تحديد المقادير الجبرية المتكافئة" }
+          ]
+        },
+        {
+          "order": 4, "nameEn": "Equations and Inequalities", "nameAr": "المعادلات والمتباينات", "sourcePage": 59,
+          "topics": [
+            { "order": 1, "nameEn": "Solving Algebraic Equations", "nameAr": "حل المعادلات الجبرية" },
+            { "order": 2, "nameEn": "Exploring Inequalities", "nameAr": "استكشاف المتباينات" },
+            { "order": 3, "nameEn": "Solving Inequalities", "nameAr": "حل المتباينات" }
+          ]
+        },
+        {
+          "order": 5, "nameEn": "Dependent and Independent Variables", "nameAr": "المتغيرات التابعة والمستقلة", "sourcePage": 69,
+          "topics": [
+            { "order": 1, "nameEn": "The Relationship Between Dependent and Independent Variables", "nameAr": "العلاقة بين المتغير التابع والمتغير المستقل" },
+            { "order": 2, "nameEn": "Applications of Dependent and Independent Variables", "nameAr": "تطبيقات على المتغيرات التابعة والمستقلة" },
+            { "order": 3, "nameEn": "Analyzing the Relationship Between Dependent and Independent Variables", "nameAr": "تحليل العلاقة بين المتغير التابع والمستقل" },
+            { "order": 4, "nameEn": "Graphing Dependent and Independent Variables", "nameAr": "التمثيل البياني للمتغيرات التابعة والمستقلة" }
+          ]
+        },
+        {
+          "order": 6, "nameEn": "Data Distribution", "nameAr": "توزيع البيانات", "sourcePage": 81,
+          "topics": [
+            { "order": 1, "nameEn": "Data and Statistical Questions", "nameAr": "البيانات والأسئلة الإحصائية" },
+            { "order": 2, "nameEn": "Exploring Histograms", "nameAr": "استكشاف المدرج التكراري" },
+            { "order": 3, "nameEn": "Representing Data with Histograms", "nameAr": "تمثيل البيانات بالمدرج التكراري" },
+            { "order": 4, "nameEn": "Exploring Box Plots", "nameAr": "استكشاف المخطط الصندوقي" },
+            { "order": 5, "nameEn": "Applications of Data Displays", "nameAr": "تطبيقات على التمثيلات البيانية" }
+          ]
+        },
+        {
+          "order": 7, "nameEn": "Measures of Central Tendency and Spread", "nameAr": "مقاييس النزعة المركزية والانتشار", "sourcePage": 99,
+          "topics": [
+            { "order": 1, "nameEn": "Exploring the Balance of Data Sets", "nameAr": "استكشاف توازن مجموعات البيانات" },
+            { "order": 2, "nameEn": "Interpreting the Mean", "nameAr": "تفسير الوسط الحسابي" },
+            { "order": 3, "nameEn": "Exploring the Median, Mode, and Outliers", "nameAr": "استكشاف الوسيط والمنوال والقيم المتطرفة" },
+            { "order": 4, "nameEn": "Exploring the Range", "nameAr": "استكشاف المدى" }
+          ]
+        }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 6", "gradeNameAr": "الصف السادس الابتدائي", "gradeLevel": 6,
+      "subjectNameEn": "English Language", "subjectNameAr": "اللغة الإنجليزية", "icon": "language",
+      "sourceFile": "English_Primary6_T1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "Amazing Places in Egypt", "nameAr": "أماكن مذهلة في مصر", "sourcePage": 7,
+          "topics": [
+            { "order": 1, "nameEn": "A Day in Egypt", "nameAr": "يوم في مصر" },
+            { "order": 2, "nameEn": "The Beauty of Ras Mohamed", "nameAr": "جمال رأس محمد" },
+            { "order": 3, "nameEn": "Around Egypt", "nameAr": "حول مصر" },
+            { "order": 4, "nameEn": "A Day in My School", "nameAr": "يوم في مدرستي" },
+            { "order": 5, "nameEn": "Making a Poster About Daily Life in a Governorate", "nameAr": "عمل ملصق عن الحياة اليومية في محافظة" }
+          ]
+        },
+        {
+          "order": 2, "nameEn": "Our Nature", "nameAr": "طبيعتنا", "sourcePage": 20,
+          "topics": [
+            { "order": 1, "nameEn": "Caring for Plants", "nameAr": "العناية بالنباتات" },
+            { "order": 2, "nameEn": "How's the Weather in Your City?", "nameAr": "كيف حال الجو في مدينتك؟" },
+            { "order": 3, "nameEn": "The Wonderful Nile River", "nameAr": "نهر النيل العجيب" },
+            { "order": 4, "nameEn": "Unforgettable Trip to Wadi El Rayan", "nameAr": "رحلة لا تُنسى إلى وادي الريان" },
+            { "order": 5, "nameEn": "My Egyptian Wildlife Snapshot", "nameAr": "لقطة من الحياة البرية المصرية" }
+          ]
+        },
+        {
+          "order": 3, "nameEn": "Community Builders", "nameAr": "بناة المجتمع", "sourcePage": 36,
+          "topics": [
+            { "order": 1, "nameEn": "Jobs that Help the Community", "nameAr": "وظائف تساعد المجتمع" },
+            { "order": 2, "nameEn": "Let's Help our Community", "nameAr": "لنساعد مجتمعنا" },
+            { "order": 3, "nameEn": "The Proud Rose", "nameAr": "الوردة المتكبرة" },
+            { "order": 4, "nameEn": "A Biography of an Egyptian Hero", "nameAr": "سيرة بطل مصري" },
+            { "order": 5, "nameEn": "Let's Solve a Community Problem", "nameAr": "لنحل مشكلة مجتمعية" }
+          ]
+        },
+        {
+          "order": 4, "nameEn": "Resources Around Us", "nameAr": "الموارد من حولنا", "sourcePage": 54,
+          "topics": [
+            { "order": 1, "nameEn": "Egypt: Past and Present", "nameAr": "مصر: الماضي والحاضر" },
+            { "order": 2, "nameEn": "Let's Use Energy Wisely", "nameAr": "لنستخدم الطاقة بحكمة" },
+            { "order": 3, "nameEn": "Gifts from Under the Ground", "nameAr": "هبات من باطن الأرض" },
+            { "order": 4, "nameEn": "Man-Made Resources", "nameAr": "الموارد التي صنعها الإنسان" },
+            { "order": 5, "nameEn": "A Fact File About a Place in Egypt", "nameAr": "ملف معلومات عن مكان في مصر" }
+          ]
+        },
+        {
+          "order": 5, "nameEn": "Made in Egypt", "nameAr": "صنع في مصر", "sourcePage": 69,
+          "topics": [
+            { "order": 1, "nameEn": "A Trip Through Time: The Grand Egyptian Museum", "nameAr": "رحلة عبر الزمن: المتحف المصري الكبير" },
+            { "order": 2, "nameEn": "A Dream Comes True: Al Galala City", "nameAr": "حلم يتحقق: مدينة الجلالة" },
+            { "order": 3, "nameEn": "The Bundle of Sticks", "nameAr": "حزمة العصي" },
+            { "order": 4, "nameEn": "Egypt Goes Green", "nameAr": "مصر تتحول إلى اللون الأخضر" },
+            { "order": 5, "nameEn": "A Display Board About an Object in the Grand Egyptian Museum", "nameAr": "لوحة عرض عن قطعة في المتحف المصري الكبير" }
+          ]
+        },
+        {
+          "order": 6, "nameEn": "The Water Savers", "nameAr": "حُماة المياه", "sourcePage": 85,
+          "topics": [
+            { "order": 1, "nameEn": "The Water Savers", "nameAr": "حُماة المياه" }
+          ]
+        }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 6", "gradeNameAr": "الصف السادس الابتدائي", "gradeLevel": 6,
+      "subjectNameEn": "Islamic Religious Education", "subjectNameAr": "التربية الدينية الإسلامية", "icon": "book",
+      "sourceFile": "Islamic_Education_Primary6_T1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "Mercy and Gentleness", "nameAr": "الرحمة والرفق", "sourcePage": 7,
+          "topics": [
+            { "order": 1, "nameEn": "Belief in the Last Day", "nameAr": "الإيمان باليوم الآخر" },
+            { "order": 2, "nameEn": "Surat Al-Ma'arij: Recitation, Memorization and Interpretation", "nameAr": "سورة المعارج (تلاوة وحفظ وتفسير)" },
+            { "order": 3, "nameEn": "Reciting the Qur'an with Tarteel: Rules of Isti'adhah and Basmalah", "nameAr": "ورتل القرآن ترتيلًا: أحكام الاستعاذة والبسملة" },
+            { "order": 4, "nameEn": "Hajj (Pilgrimage)", "nameAr": "الحج" },
+            { "order": 5, "nameEn": "The Battle of Hunayn", "nameAr": "غزوة حنين" },
+            { "order": 6, "nameEn": "The Eminent Companion Abu Hurairah", "nameAr": "الصحابي الجليل أبو هريرة" },
+            { "order": 7, "nameEn": "Kindness to Animals", "nameAr": "الرفق بالحيوان" }
+          ]
+        },
+        {
+          "order": 2, "nameEn": "Brotherhood in Religion", "nameAr": "الأخوة في الدين", "sourcePage": 40,
+          "topics": [
+            { "order": 1, "nameEn": "Belief in Resurrection", "nameAr": "الإيمان بالبعث والنشور" },
+            { "order": 2, "nameEn": "Surat Al-Haqqah: Recitation, Memorization and Interpretation", "nameAr": "سورة الحاقة (تلاوة وحفظ وتفسير)" },
+            { "order": 3, "nameEn": "Reciting the Qur'an with Tarteel: Rules of the Silent Meem", "nameAr": "ورتل القرآن ترتيلًا: أحكام الميم الساكنة" },
+            { "order": 4, "nameEn": "The Pillars of Hajj", "nameAr": "أركان الحج" },
+            { "order": 5, "nameEn": "The Siege of Ta'if", "nameAr": "حصار الطائف" },
+            { "order": 6, "nameEn": "Imam Abu Hanifa al-Nu'man", "nameAr": "الإمام أبو حنيفة النعمان" },
+            { "order": 7, "nameEn": "Diligence in Seeking Knowledge", "nameAr": "الاجتهاد في العلم" }
+          ]
+        },
+        {
+          "order": 3, "nameEn": "Piety and Righteous Deeds", "nameAr": "التقوى والعمل الصالح", "sourcePage": 70,
+          "topics": [
+            { "order": 1, "nameEn": "Belief in Reckoning and Reward", "nameAr": "الإيمان بالحساب والجزاء" },
+            { "order": 2, "nameEn": "Surat Al-Qalam: Recitation, Memorization and Interpretation", "nameAr": "سورة القلم (تلاوة وحفظ وتفسير)" },
+            { "order": 3, "nameEn": "Etiquette of Hajj", "nameAr": "آداب الحج" },
+            { "order": 4, "nameEn": "The Battle of Tabuk", "nameAr": "غزوة تبوك" },
+            { "order": 5, "nameEn": "Imam Malik ibn Anas", "nameAr": "الإمام مالك بن أنس" },
+            { "order": 6, "nameEn": "Piety (Taqwa)", "nameAr": "التقوى" }
+          ]
+        }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 6", "gradeNameAr": "الصف السادس الابتدائي", "gradeLevel": 6,
+      "subjectNameEn": "Science", "subjectNameAr": "العلوم", "icon": "flask",
+      "sourceFile": "Science_Primary6_T1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "Conditions of Combustion", "nameAr": "شروط الاحتراق", "sourcePage": 6,
+          "topics": [ { "order": 1, "nameEn": "Conditions of Combustion", "nameAr": "شروط الاحتراق" } ]
+        },
+        {
+          "order": 2, "nameEn": "Respiration", "nameAr": "التنفس", "sourcePage": 18,
+          "topics": [ { "order": 1, "nameEn": "Respiration", "nameAr": "التنفس" } ]
+        },
+        {
+          "order": 3, "nameEn": "Digestion", "nameAr": "الهضم", "sourcePage": 24,
+          "topics": [ { "order": 1, "nameEn": "Digestion", "nameAr": "الهضم" } ]
+        },
+        {
+          "order": 4, "nameEn": "Circulation and Excretion", "nameAr": "الدورة الدموية والإخراج", "sourcePage": 34,
+          "topics": [ { "order": 1, "nameEn": "Circulation and Excretion", "nameAr": "الدورة الدموية والإخراج" } ]
+        },
+        {
+          "order": 5, "nameEn": "Photosynthesis", "nameAr": "البناء الضوئي", "sourcePage": 46,
+          "topics": [ { "order": 1, "nameEn": "Photosynthesis", "nameAr": "البناء الضوئي" } ]
+        },
+        {
+          "order": 6, "nameEn": "Water Transport in Plants", "nameAr": "انتقال الماء في النبات", "sourcePage": 54,
+          "topics": [ { "order": 1, "nameEn": "Water Transport in Plants", "nameAr": "انتقال الماء في النبات" } ]
+        },
+        {
+          "order": 7, "nameEn": "The Food Chain", "nameAr": "السلسلة الغذائية", "sourcePage": 62,
+          "topics": [ { "order": 1, "nameEn": "The Food Chain", "nameAr": "السلسلة الغذائية" } ]
+        },
+        {
+          "order": 8, "nameEn": "Food Chains in Egypt", "nameAr": "السلاسل الغذائية في مصر", "sourcePage": 68,
+          "topics": [ { "order": 1, "nameEn": "Food Chains in Egypt", "nameAr": "السلاسل الغذائية في مصر" } ]
+        },
+        {
+          "order": 9, "nameEn": "Properties of Solutions", "nameAr": "خصائص المحاليل", "sourcePage": 74,
+          "topics": [ { "order": 1, "nameEn": "Properties of Solutions", "nameAr": "خصائص المحاليل" } ]
+        },
+        {
+          "order": 10, "nameEn": "Reaction of Solutions with Metals", "nameAr": "تفاعل المحاليل مع الفلزات", "sourcePage": 82,
+          "topics": [ { "order": 1, "nameEn": "Reaction of Solutions with Metals", "nameAr": "تفاعل المحاليل مع الفلزات" } ]
+        }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 6", "gradeNameAr": "الصف السادس الابتدائي", "gradeLevel": 6,
+      "subjectNameEn": "Social Studies", "subjectNameAr": "الدراسات الاجتماعية", "icon": "globe",
+      "sourceFile": "Social_Studies_Primary6_T1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "Our Arab Homeland (Characteristics and Challenges)", "nameAr": "وطننا العربي (خصائص وتحديات)", "sourcePage": 8,
+          "topics": [
+            { "order": 1, "nameEn": "Our Arab Homeland (Location and Importance)", "nameAr": "وطننا العربي (الموقع - الأهمية)" },
+            { "order": 2, "nameEn": "The Terrain of Our Arab Homeland", "nameAr": "تضاريس وطننا العربي" },
+            { "order": 3, "nameEn": "Our Arab Homeland (Climate and Natural Vegetation)", "nameAr": "وطننا العربي (المناخ - النبات الطبيعي)" },
+            { "order": 4, "nameEn": "Environmental Challenges in Our Arab Homeland", "nameAr": "التحديات البيئية في وطننا العربي" }
+          ]
+        },
+        {
+          "order": 2, "nameEn": "The Islamic State: From Its Founding to Globalization", "nameAr": "الدولة الإسلامية من النشأة إلى العالمية", "sourcePage": 42,
+          "topics": [
+            { "order": 1, "nameEn": "The Arabian Peninsula (Before and After the Rise of Islam)", "nameAr": "شبه الجزيرة العربية (قبل وبعد ظهور الإسلام)" },
+            { "order": 2, "nameEn": "The Hijrah and the Universality of the Islamic Message", "nameAr": "الهجرة وعالمية الدعوة" },
+            { "order": 3, "nameEn": "The Achievements of the Rightly Guided Caliphs", "nameAr": "إنجازات الخلفاء الراشدين" },
+            { "order": 4, "nameEn": "The Islamic State (The Umayyads and Abbasids)", "nameAr": "الدولة الإسلامية (الأمويون - العباسيون)" }
+          ]
+        },
+        {
+          "order": 3, "nameEn": "Our Arab Homeland and Economic Development", "nameAr": "وطننا العربي والتنمية الاقتصادية", "sourcePage": 76,
+          "topics": [
+            { "order": 1, "nameEn": "Agricultural Activity in Our Arab Homeland", "nameAr": "النشاط الزراعي في وطننا العربي" },
+            { "order": 2, "nameEn": "Livestock and Fisheries Wealth in Our Arab Homeland", "nameAr": "الثروة الحيوانية والسمكية في وطننا العربي" },
+            { "order": 3, "nameEn": "Minerals and Energy Sources in Our Arab Homeland", "nameAr": "المعادن ومصادر الطاقة في وطننا العربي" },
+            { "order": 4, "nameEn": "Tourism Activity in Our Arab Homeland", "nameAr": "النشاط السياحي في وطننا العربي" }
+          ]
+        }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 6", "gradeNameAr": "الصف السادس الابتدائي", "gradeLevel": 6,
+      "subjectNameEn": "Information and Communication Technology", "subjectNameAr": "تكنولوجيا المعلومات والاتصالات", "icon": "monitor",
+      "sourceFile": "ICT_ARABIC_Prim6_TR1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "The Role of Information Technology in Our Lives", "nameAr": "دور تكنولوجيا المعلومات في حياتنا", "sourcePage": 8,
+          "topics": [
+            { "order": 1, "nameEn": "Computer Networks", "nameAr": "شبكات الكمبيوتر" },
+            { "order": 2, "nameEn": "Future Technology", "nameAr": "التكنولوجيا المستقبلية" },
+            { "order": 3, "nameEn": "Advanced Technology for People with Special Needs", "nameAr": "التكنولوجيا المتطورة لذوي الاحتياجات الخاصة" },
+            { "order": 4, "nameEn": "Digital Research Tools", "nameAr": "أدوات البحث الرقمي" },
+            { "order": 5, "nameEn": "How Device Operating Systems Work", "nameAr": "كيف تعمل أنظمة تشغيل الأجهزة" },
+            { "order": 6, "nameEn": "I Am a Website Designer", "nameAr": "أنا مصمم مواقع إنترنت" }
+          ]
+        },
+        {
+          "order": 2, "nameEn": "Digital Security and Safety Precautions", "nameAr": "احتياطات الأمن والسلامة الرقمية", "sourcePage": 29,
+          "topics": [
+            { "order": 1, "nameEn": "The World of Electronic Games: Fun and Safety", "nameAr": "عالم الألعاب الإلكترونية: متعة وأمان" },
+            { "order": 2, "nameEn": "Protecting My Digital Data", "nameAr": "حماية بياناتي الرقمية" },
+            { "order": 3, "nameEn": "Be a Cybersecurity Hero", "nameAr": "كن بطل الأمن السيبراني" },
+            { "order": 4, "nameEn": "Financial Transactions", "nameAr": "التداول المالي" },
+            { "order": 5, "nameEn": "Cloud Computing", "nameAr": "الحوسبة السحابية" },
+            { "order": 6, "nameEn": "Cloud Storage Applications", "nameAr": "تطبيقات التخزين السحابي" }
+          ]
+        }
+      ]
+    }
+  ]
+}

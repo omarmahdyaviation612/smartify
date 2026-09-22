@@ -79,16 +79,26 @@ export class DashboardService {
       include: { unit: true },
       orderBy: [{ unit: { order: "asc" } }, { order: "asc" }],
     });
-    const interactiveTopics = allTopics.filter((t) => t.teachingStepsJson !== null);
-    const interactiveTopicIds = interactiveTopics.map((t) => t.id);
-    const sessions = interactiveTopicIds.length
+    // Launch-speed lazy-generation path (2026-09-19): this used to filter
+    // to `teachingStepsJson !== null` — i.e. only topics someone had
+    // ALREADY opened once before. That made every topic invisible here
+    // until it was already generated, which nothing but this same list
+    // could ever trigger — a real student had no way to discover or start
+    // any lesson beyond the handful already seeded with content. Every
+    // real Topic (not just already-generated ones) is listed now; opening
+    // one via its Lesson link is exactly what triggers
+    // InteractiveLessonService.ensureTopicHasSteps() to generate it on
+    // the spot.
+    const allTopicIds = allTopics.map((t) => t.id);
+    const sessions = allTopicIds.length
       ? await this.prisma.client.lessonSession.findMany({
-          where: { studentId: profile.id, topicId: { in: interactiveTopicIds } },
+          where: { studentId: profile.id, topicId: { in: allTopicIds } },
         })
       : [];
     const sessionByTopic = new Map(sessions.map((s) => [s.topicId, s]));
-    const pilotLessons = interactiveTopics.map((t) => ({
+    const pilotLessons = allTopics.map((t) => ({
       topicId: t.id,
+      subjectId: t.unit.subjectId, // lets the frontend group/filter this flat list by subject — see `subjects` above for id -> name
       nameEn: t.nameEn,
       nameAr: t.nameAr,
       unitNameEn: t.unit.nameEn,

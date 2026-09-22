@@ -57,6 +57,148 @@ function makePrisma(overrides: any = {}) {
   return { client } as any;
 }
 
+describe("LessonPublishService.autoPublishIntoTopic — regeneration (2026-09-19)", () => {
+  /**
+   * Real bug found via live end-to-end testing (pnpm content:regenerate):
+   * LessonDraft.publishedTopicId is @unique — regenerating an already-
+   * published Topic with a brand-new draft crashed on that constraint,
+   * because the OLD draft still held the claim. Stateful in-memory harness
+   * (not the static mock above) since this needs real multi-call behavior:
+   * publish once, then publish AGAIN with a second draft for the same Topic.
+   */
+  function makeHarness() {
+    const state: { drafts: Record<string, any>; topics: Record<string, any>; lessons: Record<string, any>; objectives: Record<string, any> } = {
+      drafts: {},
+      topics: { "topic-1": { id: "topic-1", teachingStepsJson: null, generationSource: null } },
+      lessons: {},
+      objectives: {},
+    };
+    let lessonCounter = 0;
+
+    function client() {
+      return {
+        lessonDraft: {
+          findUnique: async ({ where: { id } }: any) => state.drafts[id] ?? null,
+          updateMany: async ({ where, data }: any) => {
+            let count = 0;
+            for (const d of Object.values(state.drafts) as any[]) {
+              if (d.publishedTopicId === where.publishedTopicId) {
+                Object.assign(d, data);
+                count++;
+              }
+            }
+            return { count };
+          },
+          update: async ({ where: { id }, data }: any) => {
+            Object.assign(state.drafts[id], data);
+            return state.drafts[id];
+          },
+        },
+        topic: {
+          update: async ({ where: { id }, data }: any) => {
+            Object.assign(state.topics[id], data);
+            return state.topics[id];
+          },
+        },
+        lesson: {
+          findMany: async ({ where }: any) =>
+            Object.values(state.lessons).filter((l: any) => l.topicId === where.topicId && (where.isAiGenerated === undefined || l.isAiGenerated === where.isAiGenerated)),
+          create: async ({ data }: any) => {
+            const lesson = { id: `lesson-${++lessonCounter}`, ...data };
+            state.lessons[lesson.id] = lesson;
+            return lesson;
+          },
+          deleteMany: async ({ where }: any) => {
+            const ids: string[] = where.id.in;
+            let count = 0;
+            for (const id of ids) if (state.lessons[id]) { delete state.lessons[id]; count++; }
+            return { count };
+          },
+        },
+        learningObjective: {
+          create: async ({ data }: any) => {
+            const objective = { id: `lo-${Object.keys(state.objectives).length + 1}`, ...data };
+            state.objectives[objective.id] = objective;
+            return objective;
+          },
+          deleteMany: async ({ where }: any) => {
+            const ids: string[] = where.lessonId.in;
+            let count = 0;
+            for (const [id, o] of Object.entries(state.objectives) as any) if (ids.includes(o.lessonId)) { delete state.objectives[id]; count++; }
+            return { count };
+          },
+        },
+      };
+    }
+
+    const db = client();
+    (db as any).$transaction = (callback: any) => callback(client());
+    const prisma = { client: db } as any;
+    const service = new LessonPublishService(prisma);
+    return { service, state };
+  }
+
+  function makeDraft(id: string, stepObjective: string) {
+    return {
+      id,
+      teachingStepsJson: VALID_STEPS.map((s, i) => (i === 0 ? { ...s, objective: stepObjective } : s)),
+      learningObjectivesJson: [{ objectiveEn: REVIEWED_OBJECTIVE_EN, objectiveAr: REVIEWED_OBJECTIVE_AR }],
+      topicNameEn: "Plant parts",
+      topicNameAr: "أجزاء النبات",
+      publishedTopicId: null,
+    };
+  }
+
+  it("regenerating an already-published Topic with a brand-new draft succeeds (does not crash on the publishedTopicId unique constraint)", async () => {
+    const h = makeHarness();
+    h.state.drafts["draft-old"] = makeDraft("draft-old", "OLD ungrounded content");
+    h.state.drafts["draft-new"] = makeDraft("draft-new", "NEW grounded content");
+
+    await h.service.autoPublishIntoTopic("draft-old", "topic-1");
+    expect(h.state.topics["topic-1"].teachingStepsJson[0].objective).toBe("OLD ungrounded content");
+    expect(h.state.drafts["draft-old"].publishedTopicId).toBe("topic-1");
+
+    // Regeneration: a SECOND, brand-new draft publishes into the SAME Topic.
+    await h.service.autoPublishIntoTopic("draft-new", "topic-1", {
+      generationSource: "TEXTBOOK_GROUNDED",
+      groundingVersionUsed: 1,
+      generationPromptVersion: "auto-lesson-v1",
+    });
+
+    expect(h.state.topics["topic-1"].teachingStepsJson[0].objective).toBe("NEW grounded content");
+    expect(h.state.topics["topic-1"].generationSource).toBe("TEXTBOOK_GROUNDED");
+  });
+
+  it("the publishedTopicId claim moves to the new draft, and the old draft's claim is cleared", async () => {
+    const h = makeHarness();
+    h.state.drafts["draft-old"] = makeDraft("draft-old", "OLD content");
+    h.state.drafts["draft-new"] = makeDraft("draft-new", "NEW content");
+
+    await h.service.autoPublishIntoTopic("draft-old", "topic-1");
+    await h.service.autoPublishIntoTopic("draft-new", "topic-1", { generationSource: "TEXTBOOK_GROUNDED", groundingVersionUsed: 1, generationPromptVersion: "auto-lesson-v1" });
+
+    expect(h.state.drafts["draft-old"].publishedTopicId).toBeNull();
+    expect(h.state.drafts["draft-new"].publishedTopicId).toBe("topic-1");
+  });
+
+  it("the old AI-generated Lesson/LearningObjective rows are cleaned up, not left as stale duplicates", async () => {
+    const h = makeHarness();
+    h.state.drafts["draft-old"] = makeDraft("draft-old", "OLD content");
+    h.state.drafts["draft-new"] = makeDraft("draft-new", "NEW content");
+
+    await h.service.autoPublishIntoTopic("draft-old", "topic-1");
+    const oldLessonCount = Object.keys(h.state.lessons).length;
+    expect(oldLessonCount).toBe(1);
+
+    await h.service.autoPublishIntoTopic("draft-new", "topic-1", { generationSource: "TEXTBOOK_GROUNDED", groundingVersionUsed: 1, generationPromptVersion: "auto-lesson-v1" });
+
+    // Still exactly one Lesson for this Topic — the old one was removed, not left alongside the new one.
+    const lessonsForTopic = Object.values(h.state.lessons).filter((l: any) => l.topicId === "topic-1");
+    expect(lessonsForTopic).toHaveLength(1);
+    expect(Object.keys(h.state.objectives)).toHaveLength(1); // old objective removed, new one created
+  });
+});
+
 describe("LessonPublishService.approve", () => {
   it("approves a valid pending_review draft with a resolvable target unit", async () => {
     const prisma = makePrisma();

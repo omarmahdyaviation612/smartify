@@ -49,4 +49,22 @@ export class AdminAIConfigController {
   updateSpendingControls(@Body() body: unknown) {
     return this.service.updateSpendingControls(parseBody(updateAISpendingControlsSchema, body));
   }
+
+  // Admin AI Cost / Budget Dashboard (2026-09-20) — read-only, reuses the
+  // existing AIUsage ledger and budget config above; same SUPER_ADMIN-only
+  // boundary as the rest of this controller.
+  @Get("cost-overview")
+  getCostOverview() {
+    return this.service.getCostOverview();
+  }
+
+  @Get("students-spend")
+  listStudentSpend(@Query("days") days?: string) {
+    return this.service.listStudentSpend(days ? Number(days) : undefined);
+  }
+
+  @Get("students/:studentId/spend")
+  getStudentSpendDetail(@Param("studentId") studentId: string, @Query("days") days?: string) {
+    return this.service.getStudentSpendDetail(studentId, days ? Number(days) : undefined);
+  }
 }

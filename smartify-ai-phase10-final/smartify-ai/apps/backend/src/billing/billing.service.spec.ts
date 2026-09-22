@@ -1,14 +1,22 @@
 import { BadRequestException } from "@nestjs/common";
 import { BillingService } from "./billing.service";
 
+// Referral V1 (2026-09-20) — BillingService calls this unconditionally at
+// activation now; mocked as a plain collaborator here (never exercising
+// its own transaction logic) since ReferralService's real behavior is
+// covered by referral.service.spec.ts, not this file.
+const referralServiceMock = { earnRewardWithinTransaction: jest.fn().mockResolvedValue(undefined) } as any;
+
 /**
- * Covers the core business rules that must never regress: a student
- * can't check out a plan for a curriculum they're not enrolled in, and
- * the total price is computed correctly from the plan + extra subjects.
- * Uses mocked Prisma + PaymentProviderFactory — no real provider or DB.
+ * Covers the core business rules that must never regress. Subject-based
+ * pricing (2026-09-20): a student can't check out a Subject outside their
+ * own grade, an unpriced Subject can never be bought, and the total is
+ * always the server-computed SUM of the selected Subjects' own priceEGP —
+ * never a client-supplied total, no bundle/plan discount. Uses mocked
+ * Prisma + PaymentProviderFactory — no real provider or DB.
  */
 describe("BillingService", () => {
-  const studentProfile = { id: "student-1", curriculumId: "curriculum-A" };
+  const studentProfile = { id: "student-1", curriculumId: "curriculum-A", gradeId: "grade-A" };
   const requiredEnv = {
     DATABASE_URL: "postgresql://test:test@localhost:5432/smartify_test",
     REDIS_URL: "redis://localhost:6379",
@@ -27,17 +35,20 @@ describe("BillingService", () => {
     process.env = originalEnv;
   });
 
-  function makePrismaMock(overrides: Partial<{ plan: any; subscriptionUpsert: jest.Mock; subscriptionFindFirst: any; webhookEventLogCreate: jest.Mock }> = {}) {
+  function makePrismaMock(
+    overrides: Partial<{ subjects: any[]; subscriptionUpsert: jest.Mock; subscriptionFindFirst: any; webhookEventLogCreate: jest.Mock }> = {},
+  ) {
     const prisma = {
       client: {
         studentProfile: { findUnique: jest.fn().mockResolvedValue(studentProfile) },
-        pricingPlan: { findUnique: jest.fn().mockResolvedValue(overrides.plan) },
+        subject: { findMany: jest.fn().mockResolvedValue(overrides.subjects ?? []) },
+        studentSubject: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
         subscription: {
           upsert: overrides.subscriptionUpsert ?? jest.fn().mockResolvedValue({ id: "sub-1" }),
           update: jest.fn().mockResolvedValue({}),
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           findUnique: jest.fn(),
-          findFirst: jest.fn().mockResolvedValue(overrides.subscriptionFindFirst ?? { id: "sub-1", externalSubscriptionId: "sess_1" }),
+          findFirst: jest.fn().mockResolvedValue(overrides.subscriptionFindFirst ?? { id: "sub-1", studentId: "student-1", externalSubscriptionId: "sess_1", selectedSubjectIds: null }),
         },
         webhookEventLog: {
           create: overrides.webhookEventLogCreate ?? jest.fn().mockResolvedValue({ id: "log-1" }),
@@ -58,47 +69,52 @@ describe("BillingService", () => {
     } as any;
   }
 
-  it("rejects checkout for a plan that belongs to a different curriculum than the student's", async () => {
-    const prisma = makePrismaMock({ plan: { id: "plan-1", curriculumId: "curriculum-B", isActive: true, monthlyPriceEGP: 300, additionalSubjectPriceEGP: 100 } });
-    const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any);
+  it("rejects checkout with no subjects selected", async () => {
+    const prisma = makePrismaMock();
+    const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
 
-    await expect(service.startCheckout("user-1", { pricingPlanId: "plan-1" })).rejects.toThrow(BadRequestException);
+    await expect(service.startCheckout("user-1", { subjectIds: [] })).rejects.toThrow(BadRequestException);
   });
 
-  it("rejects checkout for a plan that is not active", async () => {
-    const prisma = makePrismaMock({ plan: { id: "plan-1", curriculumId: "curriculum-A", isActive: false, monthlyPriceEGP: 300, additionalSubjectPriceEGP: 100 } });
-    const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any);
+  it("rejects checkout for a subject outside the student's own grade", async () => {
+    // subject.findMany is grade-scoped in the query itself — returning fewer subjects than requested means one didn't match.
+    const prisma = makePrismaMock({ subjects: [{ id: "math", nameEn: "Math", priceEGP: 100 }] });
+    const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
 
-    await expect(service.startCheckout("user-1", { pricingPlanId: "plan-1" })).rejects.toThrow(BadRequestException);
+    await expect(service.startCheckout("user-1", { subjectIds: ["math", "science-other-grade"] })).rejects.toThrow(BadRequestException);
   });
 
-  it("computes monthlyTotalEGP as base price + (extra subjects * additional subject price)", async () => {
+  it("rejects checkout for a subject that has no priceEGP set yet", async () => {
+    const prisma = makePrismaMock({ subjects: [{ id: "math", nameEn: "Math", priceEGP: 100 }, { id: "art", nameEn: "Art", priceEGP: null }] });
+    const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
+
+    await expect(service.startCheckout("user-1", { subjectIds: ["math", "art"] })).rejects.toThrow(/not yet available/);
+  });
+
+  it("computes monthlyTotalEGP as the sum of each selected Subject's own priceEGP — no bundle, no discount", async () => {
     const subscriptionUpsert = jest.fn().mockResolvedValue({ id: "sub-1" });
     const prisma = makePrismaMock({
-      plan: { id: "plan-1", curriculumId: "curriculum-A", isActive: true, monthlyPriceEGP: 300, additionalSubjectPriceEGP: 130, levelCodeEn: "Primary", includedSubjects: 3 },
+      subjects: [{ id: "math", nameEn: "Math", priceEGP: 150 }, { id: "science", nameEn: "Science", priceEGP: 175 }, { id: "art", nameEn: "Art", priceEGP: 90 }],
       subscriptionUpsert,
     });
-    const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any);
+    const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
 
-    await service.startCheckout("user-1", { pricingPlanId: "plan-1", additionalSubjectsCount: 2 });
+    await service.startCheckout("user-1", { subjectIds: ["math", "science", "art"] });
 
     const upsertArgs = subscriptionUpsert.mock.calls[0][0];
-    expect(upsertArgs.create.monthlyTotalEGP).toBe(300 + 2 * 130);
-    expect(upsertArgs.create.additionalSubjectsCount).toBe(2);
+    expect(upsertArgs.create.monthlyTotalEGP).toBe(150 + 175 + 90);
+    expect(upsertArgs.create.selectedSubjectIds).toEqual(["math", "science", "art"]);
+    expect(upsertArgs.create.pricingPlanId).toBeNull();
   });
 
-  it("treats a negative additionalSubjectsCount as zero rather than reducing the price", async () => {
+  it("a single selected subject costs exactly that subject's own price", async () => {
     const subscriptionUpsert = jest.fn().mockResolvedValue({ id: "sub-1" });
-    const prisma = makePrismaMock({
-      plan: { id: "plan-1", curriculumId: "curriculum-A", isActive: true, monthlyPriceEGP: 300, additionalSubjectPriceEGP: 130, levelCodeEn: "Primary", includedSubjects: 3 },
-      subscriptionUpsert,
-    });
-    const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any);
+    const prisma = makePrismaMock({ subjects: [{ id: "math", nameEn: "Math", priceEGP: 150 }], subscriptionUpsert });
+    const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
 
-    await service.startCheckout("user-1", { pricingPlanId: "plan-1", additionalSubjectsCount: -5 });
+    await service.startCheckout("user-1", { subjectIds: ["math"] });
 
-    const upsertArgs = subscriptionUpsert.mock.calls[0][0];
-    expect(upsertArgs.create.monthlyTotalEGP).toBe(300);
+    expect(subscriptionUpsert.mock.calls[0][0].create.monthlyTotalEGP).toBe(150);
   });
 
   describe("cancelSubscription", () => {
@@ -111,7 +127,7 @@ describe("BillingService", () => {
     it("cancels an InstaPay-paid subscription locally without calling any payment provider", async () => {
       const prisma = makeCancelPrisma({ id: "sub-1", status: "active", paymentProvider: "instapay", externalSubscriptionId: "SMAI-S-ABC" });
       const providerFactory = makeProviderFactoryMock();
-      const service = new BillingService(prisma, providerFactory, { applyPaidPurchase: jest.fn() } as any);
+      const service = new BillingService(prisma, providerFactory, { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
 
       await service.cancelSubscription("user-1");
 
@@ -128,7 +144,7 @@ describe("BillingService", () => {
       const cancelSubscription = jest.fn().mockResolvedValue(undefined);
       const providerFactory = makeProviderFactoryMock();
       providerFactory.getProviderByKey.mockResolvedValue({ cancelSubscription });
-      const service = new BillingService(prisma, providerFactory, { applyPaidPurchase: jest.fn() } as any);
+      const service = new BillingService(prisma, providerFactory, { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
 
       await service.cancelSubscription("user-1");
 
@@ -148,7 +164,7 @@ describe("BillingService", () => {
       const cancelSubscription = jest.fn().mockResolvedValue(undefined);
       const providerFactory = makeProviderFactoryMock();
       providerFactory.getProviderByKey.mockResolvedValue({ cancelSubscription });
-      const service = new BillingService(prisma, providerFactory, { applyPaidPurchase: jest.fn() } as any);
+      const service = new BillingService(prisma, providerFactory, { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
 
       await service.cancelSubscription("user-1");
 
@@ -163,7 +179,7 @@ describe("BillingService", () => {
   describe("applyWebhookEvent — idempotency (Phase 10)", () => {
     it("applies the subscription-activated effect on first delivery of an event", async () => {
       const prisma = makePrismaMock();
-      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any);
+      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
 
       await service.applyWebhookEvent("stripe", {
         type: "subscription.activated",
@@ -183,7 +199,7 @@ describe("BillingService", () => {
       const duplicateKeyError = Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
       const webhookEventLogCreate = jest.fn().mockRejectedValue(duplicateKeyError);
       const prisma = makePrismaMock({ webhookEventLogCreate });
-      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any);
+      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
 
       await service.applyWebhookEvent("stripe", {
         type: "subscription.activated",
@@ -204,7 +220,7 @@ describe("BillingService", () => {
       const realDbError = new Error("connection refused");
       const webhookEventLogCreate = jest.fn().mockRejectedValue(realDbError);
       const prisma = makePrismaMock({ webhookEventLogCreate });
-      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any);
+      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
 
       await expect(
         service.applyWebhookEvent("stripe", {
@@ -217,7 +233,7 @@ describe("BillingService", () => {
 
     it("ignores events with no externalSubscriptionId (nothing to reconcile) without erroring", async () => {
       const prisma = makePrismaMock();
-      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any);
+      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
 
       await expect(
         service.applyWebhookEvent("stripe", { type: "unknown", externalEventId: "evt_789" }),
@@ -236,7 +252,7 @@ describe("BillingService", () => {
       "a %s event with no externalProviderSubscriptionId at all is a silent no-op — it never reaches the DB",
       async (type) => {
         const prisma = makePrismaMock();
-        const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any);
+        const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
 
         await expect(
           service.applyWebhookEvent("stripe", { type, externalEventId: `evt_${type}` }),
@@ -250,21 +266,20 @@ describe("BillingService", () => {
 
   describe("checkout session substitution safety", () => {
     it("cannot activate at an earlier (abandoned) checkout session's price after the student starts a second, different checkout", async () => {
-      // Student starts checkout for Plan A (cheap) — row now points at session "cs_planA".
-      const planA = { id: "plan-a", curriculumId: "curriculum-A", isActive: true, monthlyPriceEGP: 300, additionalSubjectPriceEGP: 100, levelCodeEn: "Primary", includedSubjects: 3 };
-      const planB = { id: "plan-b", curriculumId: "curriculum-A", isActive: true, monthlyPriceEGP: 900, additionalSubjectPriceEGP: 100, levelCodeEn: "Secondary", includedSubjects: 3 };
-      let currentPlan = planA;
+      // Student starts checkout for Selection A (cheap: just Math) — row now points at session "cs_selA".
+      const selectionA = [{ id: "math", nameEn: "Math", priceEGP: 300 }];
+      const selectionB = [{ id: "math", nameEn: "Math", priceEGP: 300 }, { id: "science", nameEn: "Science", priceEGP: 600 }];
+      let currentSubjects = selectionA;
       let externalSubscriptionId = "";
       const prisma = makePrismaMock({
-        plan: undefined,
         subscriptionUpsert: jest.fn().mockImplementation(async () => ({ id: "sub-1" })),
       });
-      prisma.client.pricingPlan.findUnique = jest.fn().mockImplementation(async () => currentPlan);
+      prisma.client.subject.findMany = jest.fn().mockImplementation(async () => currentSubjects);
       prisma.client.subscription.update = jest.fn().mockImplementation(async ({ data }: any) => {
         if (data.externalSubscriptionId) externalSubscriptionId = data.externalSubscriptionId;
       });
       prisma.client.subscription.findFirst = jest.fn().mockImplementation(async ({ where }: any) =>
-        where.externalSubscriptionId === externalSubscriptionId ? { id: "sub-1", status: "pending" } : null,
+        where.externalSubscriptionId === externalSubscriptionId ? { id: "sub-1", studentId: "student-1", status: "pending", selectedSubjectIds: null } : null,
       );
       prisma.client.subscription.updateMany = jest.fn().mockImplementation(async ({ where }: any) =>
         where.externalSubscriptionId === externalSubscriptionId ? { count: 1 } : { count: 0 },
@@ -272,39 +287,104 @@ describe("BillingService", () => {
 
       const providerFactory = {
         getActiveProvider: jest.fn().mockImplementation(async () => ({
-          provider: { createCheckoutSession: jest.fn().mockResolvedValue({ checkoutUrl: "https://example.test/a", externalSessionId: "cs_planA" }) },
+          provider: { createCheckoutSession: jest.fn().mockResolvedValue({ checkoutUrl: "https://example.test/a", externalSessionId: "cs_selA" }) },
           providerKey: "stripe",
         })),
         getProviderByKey: jest.fn(),
       };
-      const service = new BillingService(prisma, providerFactory as any, { applyPaidPurchase: jest.fn() } as any);
-      await service.startCheckout("user-1", { pricingPlanId: "plan-a" });
-      expect(externalSubscriptionId).toBe("cs_planA");
+      const service = new BillingService(prisma, providerFactory as any, { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
+      await service.startCheckout("user-1", { subjectIds: ["math"] });
+      expect(externalSubscriptionId).toBe("cs_selA");
 
-      // Student changes their mind and starts checkout for Plan B instead —
-      // the SAME Subscription row (by studentId) now points at "cs_planB".
-      currentPlan = planB;
+      // Student changes their mind and starts checkout for Selection B instead —
+      // the SAME Subscription row (by studentId) now points at "cs_selB".
+      currentSubjects = selectionB;
       providerFactory.getActiveProvider.mockResolvedValueOnce({
-        provider: { createCheckoutSession: jest.fn().mockResolvedValue({ checkoutUrl: "https://example.test/b", externalSessionId: "cs_planB" }) },
+        provider: { createCheckoutSession: jest.fn().mockResolvedValue({ checkoutUrl: "https://example.test/b", externalSessionId: "cs_selB" }) },
         providerKey: "stripe",
       });
-      await service.startCheckout("user-1", { pricingPlanId: "plan-b" });
-      expect(externalSubscriptionId).toBe("cs_planB");
+      await service.startCheckout("user-1", { subjectIds: ["math", "science"] });
+      expect(externalSubscriptionId).toBe("cs_selB");
 
-      // The abandoned Plan A checkout is later completed anyway (e.g. the
-      // student never closed that browser tab). Its webhook must NOT
+      // The abandoned Selection A checkout is later completed anyway (e.g.
+      // the student never closed that browser tab). Its webhook must NOT
       // activate anything — the row it would need to match no longer
-      // points at that session (it now points at "cs_planB"), so this
+      // points at that session (it now points at "cs_selB"), so this
       // safely fails closed (NotFoundException, requesting a retry) rather
-      // than activating Plan A's price on a row that has since moved on.
+      // than activating Selection A's (cheaper) access on a row that has
+      // since moved on to Selection B.
       await expect(
         service.applyWebhookEvent("stripe", {
           type: "subscription.activated",
-          externalSubscriptionId: "cs_planA",
-          externalEventId: "evt_planA",
+          externalSubscriptionId: "cs_selA",
+          externalEventId: "evt_selA",
         }),
       ).rejects.toThrow();
       expect(prisma.client.subscription.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("subject entitlement granting at activation (subject-based pricing)", () => {
+    it("grants StudentSubject rows for every selected subject when a subscription activates", async () => {
+      const prisma = makePrismaMock({
+        subscriptionFindFirst: { id: "sub-1", studentId: "student-1", status: "pending", externalSubscriptionId: "sess_1", selectedSubjectIds: ["math", "science"] },
+      });
+      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
+
+      await service.applyWebhookEvent("stripe", { type: "subscription.activated", externalSubscriptionId: "sess_1", externalEventId: "evt_1" });
+
+      expect(prisma.client.studentSubject.createMany).toHaveBeenCalledWith({
+        data: [{ studentId: "student-1", subjectId: "math" }, { studentId: "student-1", subjectId: "science" }],
+        skipDuplicates: true,
+      });
+    });
+
+    it("does nothing (no createMany call) for a historical plan-based subscription with no selectedSubjectIds", async () => {
+      const prisma = makePrismaMock({
+        subscriptionFindFirst: { id: "sub-1", studentId: "student-1", status: "pending", externalSubscriptionId: "sess_1", selectedSubjectIds: null },
+      });
+      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
+
+      await service.applyWebhookEvent("stripe", { type: "subscription.activated", externalSubscriptionId: "sess_1", externalEventId: "evt_1" });
+
+      expect(prisma.client.studentSubject.createMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("referral reward earning at activation (Referral V1)", () => {
+    it("Stripe activation (applyWebhookEvent) calls earnRewardWithinTransaction for the activated student", async () => {
+      const referralService = { earnRewardWithinTransaction: jest.fn().mockResolvedValue(undefined) };
+      const prisma = makePrismaMock({
+        subscriptionFindFirst: { id: "sub-1", studentId: "student-1", status: "pending", externalSubscriptionId: "sess_1", selectedSubjectIds: null },
+      });
+      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralService as any);
+
+      await service.applyWebhookEvent("stripe", { type: "subscription.activated", externalSubscriptionId: "sess_1", externalEventId: "evt_1" });
+
+      expect(referralService.earnRewardWithinTransaction).toHaveBeenCalledWith(expect.anything(), "student-1");
+    });
+
+    it("confirmed InstaPay activation (activateInstapaySubscription) calls earnRewardWithinTransaction for the activated student", async () => {
+      const referralService = { earnRewardWithinTransaction: jest.fn().mockResolvedValue(undefined) };
+      const prisma = makePrismaMock();
+      prisma.client.subscription.findUnique.mockResolvedValue({ id: "sub-1", studentId: "student-1", status: "pending", selectedSubjectIds: null });
+      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralService as any);
+
+      await service.activateInstapaySubscription("sub-1", "evt_instapay_1");
+
+      expect(referralService.earnRewardWithinTransaction).toHaveBeenCalledWith(expect.anything(), "student-1");
+    });
+
+    it("a duplicate webhook delivery (externalEventId already logged) never calls earnRewardWithinTransaction at all", async () => {
+      const referralService = { earnRewardWithinTransaction: jest.fn().mockResolvedValue(undefined) };
+      const duplicateKeyError = Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
+      const webhookEventLogCreate = jest.fn().mockRejectedValue(duplicateKeyError);
+      const prisma = makePrismaMock({ webhookEventLogCreate });
+      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralService as any);
+
+      await service.applyWebhookEvent("stripe", { type: "subscription.activated", externalSubscriptionId: "sess_1", externalEventId: "evt_dup" });
+
+      expect(referralService.earnRewardWithinTransaction).not.toHaveBeenCalled();
     });
   });
 });

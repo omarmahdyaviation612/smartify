@@ -26,6 +26,9 @@ import { InstapayModule } from "./instapay/instapay.module";
 import { AdminInstapayModule } from "./admin/instapay/admin-instapay.module";
 import { InteractiveLessonModule } from "./interactive-lesson/interactive-lesson.module";
 import { QuestionBankModule } from "./question-bank/question-bank.module";
+import { UnitGroundingModule } from "./interactive-lesson/unit-grounding/unit-grounding.module";
+import { TrialModule } from "./trial/trial.module";
+import { ReferralModule } from "./referral/referral.module";
 
 @Module({
   imports: [
@@ -61,6 +64,9 @@ import { QuestionBankModule } from "./question-bank/question-bank.module";
     AdminInstapayModule,
     InteractiveLessonModule,
     QuestionBankModule,
+    UnitGroundingModule,
+    TrialModule,
+    ReferralModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

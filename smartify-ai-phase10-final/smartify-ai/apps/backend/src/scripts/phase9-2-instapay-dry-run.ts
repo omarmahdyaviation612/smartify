@@ -30,7 +30,13 @@ import { PrismaService } from "../prisma/prisma.service";
 
 const EG_NATIONAL_CURRICULUM_ID = "cmtyw8hn1000zuk62jeoyx33g";
 const REAL_GRADE_1_ID = "cmtyw9x6d00019youemjroiml";
-const PRIMARY_PRICING_PLAN_ID = "cmtyw8hps006buk62btaaus3b"; // "Primary" plan, 200 EGP/mo, EG_NATIONAL
+// Subject-based pricing (2026-09-20) replaced PricingPlan-based checkout —
+// this pre-existing hardcoded id is stale (this whole script predates that
+// change and hardcodes several dev-database-specific ids already). Left as
+// an explicitly empty placeholder rather than guessing real Subject ids;
+// re-running this dry run meaningfully now requires supplying real, priced
+// Subject ids for REAL_GRADE_1_ID below.
+const DRY_RUN_SUBJECT_IDS: string[] = [];
 
 const ADMIN_EMAIL = "qa-phase92-admin-bootstrap@smartify.test";
 const PAYER_CONFIRM_EMAIL = "qa-phase92-instapay-confirm@smartify.test";
@@ -106,7 +112,7 @@ async function main() {
 
   // ---------- CONFIRM PATH ----------
   const initiateConfirm = await withFreshApp((svc) =>
-    svc.instapay.initiateSubscription(ids.payerConfirmId, { pricingPlanId: PRIMARY_PRICING_PLAN_ID }),
+    svc.instapay.initiateSubscription(ids.payerConfirmId, { subjectIds: DRY_RUN_SUBJECT_IDS }),
   );
   log("CONFIRM-PATH: subscription initiated (InstaPay instructions shown to student)", initiateConfirm);
 
@@ -154,7 +160,7 @@ async function main() {
 
   // ---------- REJECT PATH ----------
   const initiateReject = await withFreshApp((svc) =>
-    svc.instapay.initiateSubscription(ids.payerRejectId, { pricingPlanId: PRIMARY_PRICING_PLAN_ID }),
+    svc.instapay.initiateSubscription(ids.payerRejectId, { subjectIds: DRY_RUN_SUBJECT_IDS }),
   );
   log("REJECT-PATH: subscription initiated", initiateReject);
 

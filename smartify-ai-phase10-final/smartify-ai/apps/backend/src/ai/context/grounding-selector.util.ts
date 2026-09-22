@@ -1,0 +1,85 @@
+import type { GroundingNotes, GroundingSlice } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
+
+/**
+ * A Unit's groundingNotesJson may describe several Topics' worth of
+ * content — generating one Topic must never receive the WHOLE Unit's
+ * grounding unfiltered (a Science Unit's "Plant parts" Topic must not
+ * drag in "Plant Life Cycle" content just because they share a Unit). This
+ * is the single, pure, DB/AI-free selection step between "the Unit has
+ * grounding" and "this one Topic's generation prompt gets a scoped slice
+ * of it" — TOPIC determines immediate teaching scope; UNIT grounding
+ * provides curriculum context; nothing here ever crosses a Unit boundary
+ * (the caller only ever has ONE Unit's GroundingNotes in hand to begin
+ * with, via the Topic's own `unit` relation).
+ */
+
+function normalizeTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[.,!?;:()'"]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Deliberately conservative — short/common words would make keyword overlap
+// match almost anything, defeating the point of scoping to one Topic.
+const STOPWORDS = new Set(["the", "a", "an", "of", "and", "in", "on", "to", "for", "with", "is", "are"]);
+
+function keywordsOf(title: string): Set<string> {
+  return new Set(
+    normalizeTitle(title)
+      .split(" ")
+      .filter((w) => w.length > 2 && !STOPWORDS.has(w)),
+  );
+}
+
+function overlapScore(a: Set<string>, b: Set<string>): number {
+  let score = 0;
+  for (const word of a) if (b.has(word)) score++;
+  return score;
+}
+
+export function selectRelevantGrounding(groundingNotesJson: GroundingNotes | null | undefined, topicNameEn: string): GroundingSlice | null {
+  if (!groundingNotesJson) return null;
+
+  const normalizedTopic = normalizeTitle(topicNameEn);
+  const exactHint = groundingNotesJson.topicHints?.find((h) => normalizeTitle(h.topicTitle) === normalizedTopic);
+
+  if (exactHint) {
+    const relevantNames = new Set(exactHint.relevantConcepts.map((c) => c.toLowerCase()));
+    return {
+      matchedViaHint: true,
+      learningObjectives: groundingNotesJson.learningObjectives,
+      concepts: groundingNotesJson.concepts.filter((c) => relevantNames.has(c.name.toLowerCase()) || exactHint.sourcePages.some((p) => c.sourcePages.includes(p))),
+      facts: groundingNotesJson.facts.filter((f) => exactHint.sourcePages.some((p) => f.sourcePages.includes(p))),
+      vocabulary: groundingNotesJson.vocabulary.filter((v) => exactHint.sourcePages.some((p) => v.sourcePages.includes(p))),
+    };
+  }
+
+  // No exact/normalized topicHints match — derive a conservative subset via
+  // topic-title keyword overlap against each concept's own name, rather
+  // than returning the entire Unit's grounding for every Topic under it.
+  const topicKeywords = keywordsOf(topicNameEn);
+  const scoredConcepts = groundingNotesJson.concepts
+    .map((c) => ({ concept: c, score: overlapScore(topicKeywords, keywordsOf(c.name)) }))
+    .filter((s) => s.score > 0);
+
+  if (scoredConcepts.length === 0) {
+    // Nothing recognizably related to this Topic's title anywhere in the
+    // Unit's grounding — safer to report "no relevant slice" than to guess
+    // and hand generation an arbitrary, unrelated subset.
+    return null;
+  }
+
+  const relevantConcepts = scoredConcepts.map((s) => s.concept);
+  const conceptNames = new Set(relevantConcepts.map((c) => c.name.toLowerCase()));
+  const relevantPages = new Set(relevantConcepts.flatMap((c) => c.sourcePages));
+
+  return {
+    matchedViaHint: false,
+    learningObjectives: groundingNotesJson.learningObjectives,
+    concepts: relevantConcepts,
+    facts: groundingNotesJson.facts.filter((f) => f.sourcePages.some((p) => relevantPages.has(p))),
+    vocabulary: groundingNotesJson.vocabulary.filter((v) => v.sourcePages.some((p) => relevantPages.has(p)) || conceptNames.has(v.term.toLowerCase())),
+  };
+}

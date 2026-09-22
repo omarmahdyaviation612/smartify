@@ -1,0 +1,71 @@
+{
+  "entries": [
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 4", "gradeNameAr": "الصف الرابع الابتدائي", "gradeLevel": 4,
+      "subjectNameEn": "Social Studies", "subjectNameAr": "الدراسات الاجتماعية", "icon": "globe",
+      "sourceFile": "Social_studies_prim4_t1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "Our Directions Shape Our Steps", "nameAr": "اتجاهاتنا ترسم خطواتنا", "sourcePage": 10,
+          "topics": [
+            { "order": 1, "nameEn": "Places and Directions Around Us", "nameAr": "الأماكن والاتجاهات من حولنا" },
+            { "order": 2, "nameEn": "The Map in Our Life", "nameAr": "الخريطة في حياتنا" },
+            { "order": 3, "nameEn": "Development of the Map", "nameAr": "تطور الخريطة" },
+            { "order": 4, "nameEn": "Sources of Gathering Information", "nameAr": "مصادر جمع المعلومات" }
+          ]
+        },
+        {
+          "order": 2, "nameEn": "Our City and Our Daily Life", "nameAr": "مدينتنا وحياتنا اليومية", "sourcePage": 40,
+          "topics": [
+            { "order": 1, "nameEn": "What Does Our City Look Like?", "nameAr": "كيف تبدو مدينتنا؟" },
+            { "order": 2, "nameEn": "The Development of Our City", "nameAr": "تطور مدينتنا" },
+            { "order": 3, "nameEn": "Service Places in Our City", "nameAr": "الأماكن الخدمية في مدينتنا" },
+            { "order": 4, "nameEn": "Our City in the Future", "nameAr": "مدينتنا في المستقبل" },
+            { "order": 5, "nameEn": "Where Is My Governorate Located?", "nameAr": "أين تقع محافظتي؟" }
+          ]
+        },
+        {
+          "order": 3, "nameEn": "Egypt, Our Homeland", "nameAr": "مصر وطننا", "sourcePage": 72,
+          "topics": [
+            { "order": 1, "nameEn": "The Flag of Our Homeland, Egypt", "nameAr": "عَلَم وطننا مصر" },
+            { "order": 2, "nameEn": "Egypt on the World Map", "nameAr": "مصر على خريطة العالم" },
+            { "order": 3, "nameEn": "The Terrain of Our Beautiful Land", "nameAr": "تضاريس أرضنا الجميلة" },
+            { "order": 4, "nameEn": "Egypt's Natural and Human Resources", "nameAr": "ثروات مصر الطبيعية والبشرية" },
+            { "order": 5, "nameEn": "Historical Landmarks in Egypt", "nameAr": "المَعَالِم التاريخية في مصر" }
+          ]
+        }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 4", "gradeNameAr": "الصف الرابع الابتدائي", "gradeLevel": 4,
+      "subjectNameEn": "Information and Communication Technology", "subjectNameAr": "تكنولوجيا المعلومات والاتصالات", "icon": "monitor",
+      "sourceFile": "ICT_ARABIC_Prim4_TR1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "The Role of Information Technology in Our Lives", "nameAr": "دور تكنولوجيا المعلومات فى حياتنا", "sourcePage": 5,
+          "topics": [
+            { "order": 1, "nameEn": "Tools of Scientific Exploration", "nameAr": "أدوات الاستكشافات العلمية" },
+            { "order": 2, "nameEn": "Computer Devices and Their Components", "nameAr": "أجهزة الحاسب ومكوناتها" },
+            { "order": 3, "nameEn": "Operating Systems", "nameAr": "أنظمة التشغيل" },
+            { "order": 4, "nameEn": "Assistive Technology", "nameAr": "التكنولوجيا المساعدة" },
+            { "order": 5, "nameEn": "Common Technological Problems and Their Solutions", "nameAr": "المشكلات التكنولوجية الشائعة وحلولها" },
+            { "order": 6, "nameEn": "Sources of Data Collection and Analysis", "nameAr": "مصادر جمع البيانات وتحليلها" }
+          ]
+        },
+        {
+          "order": 2, "nameEn": "Digital Security and Safety Precautions", "nameAr": "احتياطات الأمن والسلامة الرقمية", "sourcePage": 30,
+          "topics": [
+            { "order": 1, "nameEn": "Protection from Internet Risks", "nameAr": "الحماية من مخاطر شبكة الإنترنت" },
+            { "order": 2, "nameEn": "Correct and Ethical Use of Information Technology", "nameAr": "الاستخدام الصحيح والأخلاقى لتكنولوجيا المعلومات" },
+            { "order": 3, "nameEn": "Search Operations on the Internet", "nameAr": "عمليات البحث على شبكة الإنترنت" },
+            { "order": 4, "nameEn": "Entities Responsible for Solving Internet Problems", "nameAr": "الجهات المسئولة عن حل مشكلات الإنترنت" },
+            { "order": 5, "nameEn": "Digital Safety", "nameAr": "الأمان الرقمي" },
+            { "order": 6, "nameEn": "Applied Project", "nameAr": "مشروع تطبيقي" }
+          ]
+        }
+      ]
+    }
+  ]
+}

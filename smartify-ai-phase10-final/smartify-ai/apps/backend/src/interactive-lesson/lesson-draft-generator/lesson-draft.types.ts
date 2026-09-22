@@ -1,3 +1,5 @@
+import type { GroundingNotes } from "../unit-grounding/unit-grounding.types";
+
 /**
  * The input contract for the lesson content-generation pipeline (Phase 5/6).
  * Deliberately a TOPIC / LEARNING-OBJECTIVE MAP only — it must never carry
@@ -21,12 +23,21 @@ export interface LessonGenerationInput {
   studentAgeRange: string;
 }
 
-/** Curriculum/grade/subject/unit names resolved live from the DB — never hand-typed. */
+/**
+ * Curriculum/grade/subject/unit names resolved live from the DB — never
+ * hand-typed. `groundingNotesJson` (2026-09-19) is the Unit's cached
+ * real-textbook grounding, read alongside the same query — null whenever
+ * the Unit hasn't been extracted yet (or has no source PDF mapped at all),
+ * in which case generation falls back to the pre-grounding title-only
+ * behavior unchanged.
+ */
 export interface ResolvedUnitContext {
   curriculumNameEn: string;
   gradeNameEn: string;
   subjectNameEn: string;
   unitNameEn: string;
+  groundingNotesJson: GroundingNotes | null;
+  groundingVersion: number | null;
 }
 
 /**

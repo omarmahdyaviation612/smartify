@@ -1,0 +1,33 @@
+{
+  "entries": [
+    {
+      "curriculumCode": "BRITISH_INTL",
+      "gradeNameEn": "Year 5", "gradeNameAr": "السنة الخامسة", "gradeLevel": 5,
+      "subjectNameEn": "Science", "subjectNameAr": "العلوم", "icon": "flask",
+      "sourceFile": "science y5 .pdf",
+      "totalPages": 140,
+      "units": [
+        { "order": 1, "nameEn": "Plant parts", "nameAr": "أجزاء النبات", "sourcePage": 8,
+          "topics": [ { "order": 1, "nameEn": "Plant parts", "nameAr": "أجزاء النبات" } ] },
+        { "order": 2, "nameEn": "The life cycle of a flowering plant", "nameAr": "دورة حياة النبات المزهر", "sourcePage": 18,
+          "topics": [ { "order": 1, "nameEn": "The life cycle of a flowering plant", "nameAr": "دورة حياة النبات المزهر" } ] },
+        { "order": 3, "nameEn": "Adaptation", "nameAr": "التكيف", "sourcePage": 32,
+          "topics": [ { "order": 1, "nameEn": "Adaptation", "nameAr": "التكيف" } ] },
+        { "order": 4, "nameEn": "The digestive system", "nameAr": "الجهاز الهضمي", "sourcePage": 44,
+          "topics": [ { "order": 1, "nameEn": "The digestive system", "nameAr": "الجهاز الهضمي" } ] },
+        { "order": 5, "nameEn": "States of matter", "nameAr": "حالات المادة", "sourcePage": 57,
+          "topics": [ { "order": 1, "nameEn": "States of matter", "nameAr": "حالات المادة" } ] },
+        { "order": 6, "nameEn": "Forces", "nameAr": "القوى", "sourcePage": 74,
+          "topics": [ { "order": 1, "nameEn": "Forces", "nameAr": "القوى" } ] },
+        { "order": 7, "nameEn": "Sound", "nameAr": "الصوت", "sourcePage": 90,
+          "topics": [ { "order": 1, "nameEn": "Sound", "nameAr": "الصوت" } ] },
+        { "order": 8, "nameEn": "Magnetism", "nameAr": "المغناطيسية", "sourcePage": 104,
+          "topics": [ { "order": 1, "nameEn": "Magnetism", "nameAr": "المغناطيسية" } ] },
+        { "order": 9, "nameEn": "Planet Earth", "nameAr": "كوكب الأرض", "sourcePage": 114,
+          "topics": [ { "order": 1, "nameEn": "Planet Earth", "nameAr": "كوكب الأرض" } ] },
+        { "order": 10, "nameEn": "The Earth in space", "nameAr": "الأرض في الفضاء", "sourcePage": 129,
+          "topics": [ { "order": 1, "nameEn": "The Earth in space", "nameAr": "الأرض في الفضاء" } ] }
+      ]
+    }
+  ]
+}

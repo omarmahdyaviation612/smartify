@@ -5,9 +5,10 @@ import { BillingController } from "./billing.controller";
 import { BillingWebhookController } from "./billing-webhook.controller";
 import { BillingService } from "./billing.service";
 import { TutorQuestionPacksModule } from "../tutor-question-packs/tutor-question-packs.module";
+import { ReferralModule } from "../referral/referral.module";
 
 @Module({
-  imports: [AuthModule, PaymentsModule, TutorQuestionPacksModule],
+  imports: [AuthModule, PaymentsModule, TutorQuestionPacksModule, ReferralModule],
   controllers: [BillingController, BillingWebhookController],
   providers: [BillingService],
   exports: [BillingService],

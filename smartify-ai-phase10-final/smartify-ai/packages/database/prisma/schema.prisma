@@ -74,6 +74,13 @@ model StudentProfile {
   questionPackPurchases TutorQuestionPackPurchase[]
   extraQuestionCredits TutorExtraQuestionCredit[]
   instapaySubmissions InstapayPaymentSubmission[]
+
+  // Free Trial + Referral V1 (2026-09-20)
+  lessonTrial       LessonTrial?
+  lessonTrialConsumptions LessonTrialConsumption[]
+  referralCode      ReferralCode?
+  referralsMade     Referral[] @relation("ReferralsMade")
+  referredBy        Referral?  @relation("ReferredStudent")
 }
 
 model ParentProfile {
@@ -160,6 +167,23 @@ model Subject {
   icon     String?
   isActive Boolean @default(true)
 
+  // Real-textbook grounding (2026-09-19): path relative to the
+  // curriculum-sources/ directory, e.g. "British IG/year 5/science y5 .pdf".
+  // Nullable — a Subject with no mapped PDF simply never gets grounded
+  // (Unit.groundingNotesJson stays null), and generation falls back to the
+  // existing title-only behavior. See Unit.groundingNotesJson.
+  sourceFile String?
+
+  // Subject-based pricing (2026-09-20): replaces the old PricingPlan
+  // "curriculum bundle, N subjects included, extras cost more" model —
+  // every Subject now has its OWN independent monthly price, admin-set,
+  // never hardcoded. Null means "not yet priced by an admin" — such a
+  // Subject cannot be selected for checkout (BillingService rejects it
+  // explicitly rather than treating null as free). PricingPlan itself is
+  // left in the schema untouched, purely for historical Subscription rows
+  // created under the old model.
+  priceEGP Decimal?
+
   units           Unit[]
   studentSubjects StudentSubject[]
   assessments     Assessment[]
@@ -168,6 +192,8 @@ model Subject {
   tutorAnswerCache TutorAnswerCache[]
   freeTutorTrials FreeTutorTrial[]
   materials       LearningMaterial[]
+  lessonTrialConsumptions LessonTrialConsumption[]
+  referralRewards Referral[]
 
   @@index([gradeId])
 }
@@ -179,6 +205,17 @@ model StudentSubject {
   subjectId String
   subject   Subject        @relation(fields: [subjectId], references: [id])
   createdAt DateTime       @default(now())
+
+  // Referral reward V1 (2026-09-20): null = permanent access (every
+  // existing row, and every row granted by a real Subject purchase —
+  // BillingService.grantSelectedSubjects never sets this). A non-null
+  // value is a TIME-LIMITED grant (currently only ReferralService's "30
+  // free days for one Subject" reward) — entitlement checks that read
+  // this table (Practice/Quiz's assertSubjectOwned) must treat a row as
+  // owned only while expiresAt is null OR still in the future. Nothing
+  // ever deletes an expired row; access simply stops being granted once
+  // the check re-evaluates against the current time.
+  expiresAt DateTime?
 
   @@unique([studentId, subjectId])
 }
@@ -213,6 +250,63 @@ model Unit {
   order     Int
   term      Term?
 
+  // Real-textbook grounding (2026-09-19): the page range within
+  // Subject.sourceFile that this Unit's content was transcribed from —
+  // backfilled from curriculum-pilot/toc-manifests/*.json's sourcePage
+  // (start) and the next unit's sourcePage - 1 / the subject's totalPages
+  // (end). Nullable — a Unit with no mapped page range can't be grounded
+  // automatically; extraction then requires an explicit --pages override.
+  sourcePageStart Int?
+  sourcePageEnd   Int?
+
+  // English Extra Book / Story support V1 (2026-09-20): an exceptional
+  // per-Unit override of which R2 object this Unit's real source pages
+  // come from, for Units that belong to a Subject but were transcribed
+  // from a DIFFERENT PDF than that Subject's main textbook (e.g. an
+  // English "Story" book, distinct from the English course book). Null
+  // for every ordinary Unit — the effective source is then
+  // Subject.sourceFile exactly as before. Deliberately Unit-level, not a
+  // new Material/Textbook model — see UnitGroundingService's effective-
+  // source resolution (subject.sourceFile is the base case,
+  // sourceFileOverride wins when set).
+  sourceFileOverride String?
+
+  // The cached result of one offline "grounding extraction" run (see
+  // UnitGroundingService) — real, original, non-verbatim structured notes
+  // (concepts/facts/objectives/vocabulary — never copied textbook prose)
+  // derived from Subject.sourceFile's real pages. Generated ONCE per Unit,
+  // read forever after by every Topic's lazy generation under it — same
+  // "generate once, cache forever" pattern as Topic.teachingStepsJson.
+  // Null means "not yet grounded" (or no source PDF mapped at all) —
+  // generation gracefully falls back to today's title-only behavior, never
+  // blocks a student.
+  groundingNotesJson Json?
+  groundingGeneratedAt DateTime?
+  // Bumped only when the grounding EXTRACTION schema/methodology changes in
+  // a way that would make old groundingNotesJson stale — never touched by
+  // downstream lesson/question generation itself. Used (with
+  // generationPromptVersion on Topic) to identify already-generated content
+  // as eligible for a later, deliberate, admin-triggered regeneration —
+  // never an automatic one during a student's request.
+  groundingVersion Int?
+  groundingModel String?
+  groundingPromptVersion String?
+  // sha256 of (PDF bytes + page range + extraction-prompt version) — lets
+  // us detect that a source PDF or selected page range changed since this
+  // Unit was last grounded, without storing any textbook content itself.
+  groundingSourceFingerprint String?
+
+  // Production lazy-grounding single-flight lock (2026-09-19): when a real
+  // student's request discovers groundingNotesJson is null, it must not
+  // race every other simultaneous request for a Topic under this same Unit
+  // into starting its own PDF fetch + vision extraction. Claimed via an
+  // atomic UPDATE ... WHERE (see UnitGroundingService.ensureUnitGrounded),
+  // never a long-held DB transaction across the OpenAI call. Stale locks
+  // (a crashed worker) are reclaimed after a timeout — see the same
+  // method — so this can never permanently block a Unit.
+  groundingLockedAt DateTime?
+  groundingLockedBy String?
+
   topics Topic[]
   lessonDrafts LessonDraft[]
 
@@ -235,6 +329,29 @@ model Topic {
   // lesson plan behave exactly as before (Practice/Quiz/Tutor unaffected).
   teachingStepsJson Json?
 
+  // Real-textbook grounding (2026-09-19): records HOW this Topic's cached
+  // content was generated — "LEGACY_TITLE_ONLY" (today's behavior, no real
+  // source material) or "TEXTBOOK_GROUNDED" (generated using the parent
+  // Unit's groundingNotesJson at the time). Nullable — null means never
+  // generated at all (teachingStepsJson is also still null in that case).
+  // Never rewritten automatically once set; only a deliberate, manual
+  // regeneration (apps/backend/src/scripts/regenerate-topic-content.ts)
+  // changes it. Used to identify which already-live Topics could benefit
+  // from a later, selective, admin-triggered regrounding — never to
+  // trigger one on its own.
+  generationSource String?
+  groundingVersionUsed Int?
+  generationPromptVersion String?
+  contentGeneratedAt DateTime?
+
+  // Production lazy-generation single-flight lock (2026-09-19) — same
+  // rationale/pattern as Unit.groundingLockedAt, one level down: two
+  // students opening the same never-generated Topic at once must not both
+  // run a full AI generation + publish. See
+  // LessonDraftGeneratorService.ensureTopicHasLesson.
+  generationLockedAt DateTime?
+  generationLockedBy String?
+
   lessons   Lesson[]
   questions Question[]
   questionDrafts QuestionDraft[]
@@ -243,6 +360,8 @@ model Topic {
   lessonSessions LessonSession[]
   visualAssets   LessonVisualAsset[]
   publishedFromDraft LessonDraft?
+  quizResults    QuizResult[]
+  lessonTrialConsumptions LessonTrialConsumption[]
 
   @@index([unitId])
 }
@@ -328,6 +447,13 @@ model Lesson {
   contentAr     String? @db.Text
   isAiGenerated Boolean @default(false) // distinguishes AI-generated vs. verified curriculum content
   isPlaceholder Boolean @default(false) // marks seed/demo content, never shown as reviewed curriculum
+  // Launch-speed lazy-generation path (2026-09-18): set true for a lesson
+  // published via LessonPublishService.autoPublishIntoTopic(), where the AI
+  // supplied its own Arabic objective translations directly and no human
+  // called reviewObjectives()/approve(). Never set for the original
+  // human-reviewed pipeline. Purely a later-audit marker — nothing in the
+  // app currently gates on it.
+  needsReview   Boolean @default(false)
 
   objectives LearningObjective[]
   progress   StudentProgress[]
@@ -403,6 +529,13 @@ model Question {
   explanationAr     String?      @db.Text
   isAiGenerated     Boolean      @default(false)
   isPlaceholder     Boolean      @default(false)
+  // Launch-speed lazy-generation path (2026-09-19): set true for a
+  // question published via QuestionPublishService.autoPublish(), where
+  // the AI supplied its own Arabic prompt/explanation directly and no
+  // human called reviewDraft()/approve(). Never set for the original
+  // human-reviewed pipeline. Mirrors Lesson.needsReview exactly — purely
+  // a later-audit marker, nothing in the app currently gates on it.
+  needsReview       Boolean      @default(false)
   createdAt         DateTime     @default(now())
 
   attempts QuestionAttempt[]
@@ -490,7 +623,14 @@ model QuizResult {
   id             String         @id @default(cuid())
   studentId      String
   student        StudentProfile @relation(fields: [studentId], references: [id])
-  quizType       String // "quiz" | "topic_assessment" | "mock_exam"
+  quizType       String // "quiz" | "topic_assessment" | "mock_exam" | "lesson_check"
+  // Launch-speed addition (2026-09-19): set for "lesson_check" (the short
+  // post-lesson understanding check) so a Topic's own check results can be
+  // queried directly — never set for the other quiz types, which can span
+  // many topics at once and already record per-question topic names inside
+  // resultJson.breakdown instead.
+  topicId        String?
+  topic          Topic?         @relation(fields: [topicId], references: [id])
   score          Float
   totalQuestions Int
   correctCount   Int
@@ -498,6 +638,7 @@ model QuizResult {
   createdAt      DateTime       @default(now())
 
   @@index([studentId])
+  @@index([topicId])
 }
 
 // ============ SUBSCRIPTIONS & AI CREDITS ============
@@ -514,10 +655,23 @@ model Subscription {
   id                      String         @id @default(cuid())
   studentId               String         @unique // one active subscription per student for MVP simplicity
   student                 StudentProfile @relation(fields: [studentId], references: [id])
-  pricingPlanId           String
-  pricingPlan             PricingPlan    @relation(fields: [pricingPlanId], references: [id])
-  additionalSubjectsCount Int            @default(0) // subjects beyond pricingPlan.includedSubjects
-  monthlyTotalEGP         Decimal // pricingPlan.monthlyPriceEGP + (additionalSubjectsCount * pricingPlan.additionalSubjectPriceEGP), snapshotted at subscribe time
+  // Subject-based pricing (2026-09-20): nullable now — a NEW subscription
+  // is no longer tied to a curriculum-bundle PricingPlan at all; this stays
+  // set (and readable) only on historical rows created under the old
+  // model, preserved as-is for those existing payment records.
+  pricingPlanId           String?
+  pricingPlan             PricingPlan?   @relation(fields: [pricingPlanId], references: [id])
+  additionalSubjectsCount Int            @default(0) // legacy (old bundle model) — always 0 on a subject-priced subscription, kept only so historical rows keep their original value
+  // Subject-based pricing (2026-09-20): the exact Subject ids this
+  // subscription's price/entitlement covers, snapshotted at checkout time
+  // — a plain JSON string array rather than a new junction table, mirroring
+  // this schema's existing "small flexible list" convention (e.g.
+  // optionsJson on Question). Read once, at activation, to grant matching
+  // StudentSubject rows — see BillingService. Null on historical
+  // plan-based rows (nothing to backfill: those subjects were already
+  // granted through the old flow).
+  selectedSubjectIds      Json?
+  monthlyTotalEGP         Decimal // sum of the selected Subjects' own priceEGP (subject-based pricing) — or, on a historical row, pricingPlan.monthlyPriceEGP + (additionalSubjectsCount * pricingPlan.additionalSubjectPriceEGP) as originally snapshotted
   status                  String // "pending" | "active" | "canceled" | "past_due"
   currentPeriodStart      DateTime?
   currentPeriodEnd        DateTime?
@@ -936,4 +1090,99 @@ model PaymentProviderConfig {
   isActive     Boolean  @default(false)
   publicConfig Json? // non-secret config (e.g. Stripe publishable key), safe to read from the admin panel
   updatedAt    DateTime @updatedAt
+}
+
+// ============ FREE TRIAL V1 (2026-09-20) ============
+//
+// A student picks exactly TWO Subjects (once — never replaceable, see
+// TrialService.selectSubjects) and gets one free Interactive Lesson in
+// EACH. Deliberately separate from StudentSubject (paid/onboarding
+// entitlement) and from the older FreeTutorTrial (a single-subject,
+// two-QUESTION free-form Tutor-chat trial, unrelated and unchanged) —
+// this only ever unlocks ONE specific Topic's worth of Interactive
+// Lesson + its associated Practice/Quiz per selected Subject, never
+// free-form Tutor chat.
+
+model LessonTrial {
+  id         String         @id @default(cuid())
+  studentId  String         @unique
+  student    StudentProfile @relation(fields: [studentId], references: [id])
+  // Exactly two Subject ids, validated once at creation (TrialService.
+  // selectSubjects) and never mutated afterward — a plain Json array,
+  // mirroring this schema's existing convention for small fixed lists
+  // (e.g. Subscription.selectedSubjectIds) rather than a new join table.
+  subjectIds Json
+  createdAt  DateTime       @default(now())
+
+  consumptions LessonTrialConsumption[]
+}
+
+// One row = one Subject's free lesson has been used, on exactly one
+// Topic. The @@unique([trialId, subjectId]) constraint IS the
+// concurrency control: two simultaneous reservation attempts for the
+// same Subject race on this Postgres constraint, and only one INSERT can
+// ever win — no read-then-write window to exploit. Since a LessonTrial
+// only ever holds two subjectIds, at most two of these rows can ever
+// exist per trial, which is also what caps the account-wide total at
+// two, with no separate counter to keep in sync.
+model LessonTrialConsumption {
+  id        String      @id @default(cuid())
+  trialId   String
+  trial     LessonTrial @relation(fields: [trialId], references: [id])
+  studentId String
+  student   StudentProfile @relation(fields: [studentId], references: [id])
+  subjectId String
+  subject   Subject     @relation(fields: [subjectId], references: [id])
+  topicId   String
+  topic     Topic       @relation(fields: [topicId], references: [id])
+  createdAt DateTime    @default(now())
+
+  @@unique([trialId, subjectId])
+  @@index([studentId])
+}
+
+// ============ REFERRAL V1 (2026-09-20) ============
+
+model ReferralCode {
+  id        String         @id @default(cuid())
+  studentId String         @unique
+  student   StudentProfile @relation(fields: [studentId], references: [id])
+  code      String         @unique
+  createdAt DateTime       @default(now())
+}
+
+// One row per REFERRED student (@@unique below), created once at/around
+// their signup and never mutated except by the two state transitions
+// below — this is what makes "referral cannot be changed later" and "one
+// referred account rewards only once" simple DB-level guarantees rather
+// than application-level promises:
+//   1. earnedAt: set exactly once, the first time the referred student's
+//      Subscription activates (BillingService's two activation paths,
+//      inside the SAME transaction as activation — see
+//      ReferralService.earnReward). A conditional updateMany guarded by
+//      `earnedAt: null` makes this race-safe under concurrent/duplicate
+//      webhook delivery, on top of the outer WebhookEventLog idempotency
+//      guard those paths already have.
+//   2. appliedAt/appliedSubjectId/appliedExpiresAt: set once the
+//      REFERRER chooses which Subject receives the reward (ReferralService.
+//      applyReward) — a separate conditional updateMany guarded by
+//      `appliedAt: null`, equally race-safe against a double-click.
+// No fake Subscription/payment row is ever created for the reward — the
+// reward IS this row plus a real (time-limited) StudentSubject grant.
+model Referral {
+  id                String         @id @default(cuid())
+  referrerStudentId String
+  referrer          StudentProfile @relation("ReferralsMade", fields: [referrerStudentId], references: [id])
+  referredStudentId String         @unique
+  referredStudent   StudentProfile @relation("ReferredStudent", fields: [referredStudentId], references: [id])
+  code              String // the code actually redeemed, snapshotted for audit even if the referrer later regenerated/changed anything
+  createdAt         DateTime       @default(now())
+
+  earnedAt          DateTime? // set once, at the referred student's first successful paid activation
+  appliedAt         DateTime? // set once, when the referrer applies the earned reward to a Subject
+  appliedSubjectId  String?
+  appliedSubject    Subject?  @relation(fields: [appliedSubjectId], references: [id])
+  appliedExpiresAt  DateTime? // the resulting StudentSubject.expiresAt after applying — kept here too, purely for audit display
+
+  @@index([referrerStudentId])
 }

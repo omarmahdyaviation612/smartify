@@ -7,11 +7,12 @@ import { TutorQuestionPacksModule } from "../tutor-question-packs/tutor-question
 import { TutorAnswerCacheService } from "./tutor-answer-cache.service";
 import { TutorSpeechService } from "./tutor-speech.service";
 import { TtsProviderFactory } from "./tts/tts-provider.factory";
+import { TtsAudioCacheService } from "./tts/tts-audio-cache.service";
 
 @Module({
   imports: [AuthModule, AIModule, TutorQuestionPacksModule],
   controllers: [TutorController],
-  providers: [TutorService, TutorAnswerCacheService, TutorSpeechService, TtsProviderFactory],
+  providers: [TutorService, TutorAnswerCacheService, TutorSpeechService, TtsProviderFactory, TtsAudioCacheService],
   // TutorService is exported so the Interactive Lesson engine can reuse
   // its exact reserveFreeTrial/releaseFreeTrial entitlement path — never a
   // second/parallel Free Trial mechanism.

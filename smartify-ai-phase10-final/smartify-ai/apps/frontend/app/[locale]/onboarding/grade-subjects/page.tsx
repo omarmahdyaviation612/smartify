@@ -95,6 +95,18 @@ export default function OnboardingGradeSubjectsPage() {
         }),
       });
       writeDraft({ gradeId: selectedGrade.id, subjectIds, weeklyStudyHours, goals });
+
+      // Referral V1 (2026-09-20) — the StudentProfile now exists, so this
+      // is the earliest point a referral can actually attach. Best-effort
+      // and never blocking: a missing/invalid/already-used code must
+      // never stop onboarding. Cleared either way so it's only ever
+      // submitted once, matching "cannot be changed later".
+      const referralCode = window.localStorage.getItem("smartify_referral_code");
+      if (referralCode) {
+        await apiFetch("/referral/attach", { method: "POST", body: JSON.stringify({ code: referralCode }) }).catch(() => undefined);
+        window.localStorage.removeItem("smartify_referral_code");
+      }
+
       router.push(`/${locale}/onboarding/diagnostic`);
     } catch (submitError) {
       if (submitError instanceof ApiError && submitError.status === 401) {

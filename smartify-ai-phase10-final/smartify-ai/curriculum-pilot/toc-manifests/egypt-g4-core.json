@@ -1,0 +1,245 @@
+{
+  "entries": [
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 4", "gradeNameAr": "الصف الرابع الابتدائي", "gradeLevel": 4,
+      "subjectNameEn": "Arabic Language", "subjectNameAr": "اللغة العربية", "icon": "language",
+      "sourceFile": "Arabic_language_prim4_t1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "My Dream and I", "nameAr": "أنا وحلمي", "sourcePage": 7,
+          "topics": [
+            { "order": 1, "nameEn": "Each of Us Has a Dream", "nameAr": "كل منا له حُلم" },
+            { "order": 2, "nameEn": "The Dream Box", "nameAr": "صندوق الأحلام" },
+            { "order": 3, "nameEn": "Who Am I?", "nameAr": "مَن أنا؟" },
+            { "order": 4, "nameEn": "O Egypt, Be Safe", "nameAr": "اسلمي يا مصر" }
+          ]
+        },
+        {
+          "order": 2, "nameEn": "My Morals, My Life", "nameAr": "أخلاقي.. حياتي", "sourcePage": 55,
+          "topics": [
+            { "order": 1, "nameEn": "The Power of Morals in Our Lives", "nameAr": "قوة الأخلاق في حياتنا" },
+            { "order": 2, "nameEn": "Precious and Free", "nameAr": "الغالي المجاني" },
+            { "order": 3, "nameEn": "Think a Little, Gain a Lot", "nameAr": "فكِّر قليلًا.. تربح كثيرًا" },
+            { "order": 4, "nameEn": "The Path to Happiness", "nameAr": "طريق السعادة" }
+          ]
+        },
+        {
+          "order": 3, "nameEn": "A Letter from the Children of Egypt", "nameAr": "رسالة من أطفال مصر", "sourcePage": 102,
+          "topics": [
+            { "order": 1, "nameEn": "A Letter to the Friends of Nature", "nameAr": "رسالة إلى أصدقاء الطبيعة" },
+            { "order": 2, "nameEn": "The Old Tree's Letter", "nameAr": "رسالة الشجرة العجوز" },
+            { "order": 3, "nameEn": "Small Actions, Big Results", "nameAr": "أفعال صغيرة ونتائج كبيرة" },
+            { "order": 4, "nameEn": "In the Orchard", "nameAr": "في البستان" }
+          ]
+        }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 4", "gradeNameAr": "الصف الرابع الابتدائي", "gradeLevel": 4,
+      "subjectNameEn": "Mathematics", "subjectNameAr": "الرياضيات", "icon": "calculator",
+      "sourceFile": "Math_Ar_prim4_t1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "Place Value", "nameAr": "القيمة المكانية", "sourcePage": 3,
+          "topics": [
+            { "order": 1, "nameEn": "Large Numbers", "nameAr": "الأعداد الكبيرة" },
+            { "order": 2, "nameEn": "Changing Place Values", "nameAr": "تغيير القيَم المكانية" },
+            { "order": 3, "nameEn": "Different Forms for Writing Numbers", "nameAr": "صيغ متنوعة لكتابة الأعداد" },
+            { "order": 4, "nameEn": "Composing and Decomposing Numbers", "nameAr": "تكوين الأعداد وتحليلها" },
+            { "order": 5, "nameEn": "Comparing Large Numbers", "nameAr": "مقارنة الأعداد الكبيرة" },
+            { "order": 6, "nameEn": "Comparing Numbers in Different Forms", "nameAr": "مقارنة الأعداد في صيغ مختلفة" },
+            { "order": 7, "nameEn": "Ordering Numbers in Ascending and Descending Order", "nameAr": "ترتيب الأعداد تنازليًا وتصاعديًا" },
+            { "order": 8, "nameEn": "Rounding Rules", "nameAr": "قواعد التقريب" }
+          ]
+        },
+        {
+          "order": 2, "nameEn": "Addition and Subtraction Strategies", "nameAr": "إستراتيجيات عمليتي الجمع والطرح", "sourcePage": 24,
+          "topics": [
+            { "order": 1, "nameEn": "Properties of Addition", "nameAr": "خواص عملية الجمع" },
+            { "order": 2, "nameEn": "Addition with Renaming", "nameAr": "الجمع مع إعادة التسمية" },
+            { "order": 3, "nameEn": "Subtraction with Renaming", "nameAr": "الطرح مع إعادة التسمية" },
+            { "order": 4, "nameEn": "Bar Models, Variables, and Word Problems", "nameAr": "النماذج الشريطية والمتغيرات والمسائل الكلامية" },
+            { "order": 5, "nameEn": "Solving Multi-Step Word Problems Using Addition and Subtraction", "nameAr": "حل مسائل كلامية متعددة الخطوات باستخدام الجمع والطرح" }
+          ]
+        },
+        {
+          "order": 3, "nameEn": "Measurement Concepts", "nameAr": "مفاهيم القياس", "sourcePage": 40,
+          "topics": [
+            { "order": 1, "nameEn": "Measuring Length", "nameAr": "قياس الطول" },
+            { "order": 2, "nameEn": "Measuring Mass", "nameAr": "قياس الكتلة" },
+            { "order": 3, "nameEn": "Units of Capacity", "nameAr": "وحدات قياس السعة" },
+            { "order": 4, "nameEn": "Units of Time", "nameAr": "وحدات قياس الوقت" },
+            { "order": 5, "nameEn": "Elapsed Time", "nameAr": "الوقت المنقضي" },
+            { "order": 6, "nameEn": "Measurement Applications 1", "nameAr": "تطبيقات القياس 1" },
+            { "order": 7, "nameEn": "Measurement Applications 2", "nameAr": "تطبيقات القياس 2" }
+          ]
+        },
+        {
+          "order": 4, "nameEn": "Area and Perimeter", "nameAr": "المساحة والمحيط", "sourcePage": 59,
+          "topics": [
+            { "order": 1, "nameEn": "Finding Perimeter", "nameAr": "إيجاد المحيط" },
+            { "order": 2, "nameEn": "Finding Area", "nameAr": "إيجاد المساحة" },
+            { "order": 3, "nameEn": "Unknown Dimensions", "nameAr": "أبعاد مجهولة" },
+            { "order": 4, "nameEn": "Composite Geometric Shapes", "nameAr": "الأشكال الهندسية المركّبة" }
+          ]
+        },
+        {
+          "order": 5, "nameEn": "Multiplication as a Relationship", "nameAr": "عملية الضرب كعلاقة", "sourcePage": 71,
+          "topics": [
+            { "order": 1, "nameEn": "Comparing Numbers Using Multiplication", "nameAr": "مقارنة الأعداد باستخدام عملية الضرب" },
+            { "order": 2, "nameEn": "Writing Comparison Equations Using Multiplication", "nameAr": "تكوين معادلات للمقارنة باستخدام عملية الضرب" },
+            { "order": 3, "nameEn": "Solving Comparison Equations Using Multiplication", "nameAr": "حل معادلات للمقارنة باستخدام عملية الضرب" },
+            { "order": 4, "nameEn": "The Commutative Property of Multiplication", "nameAr": "خاصية الإبدال في عملية الضرب" },
+            { "order": 5, "nameEn": "The Identity Property and Multiplying by Zero", "nameAr": "خاصية العنصر المحايد والضرب في صفر" },
+            { "order": 6, "nameEn": "The Associative Property of Multiplication", "nameAr": "خاصية الدمج في عملية الضرب" },
+            { "order": 7, "nameEn": "Applying Patterns in Multiplication", "nameAr": "تطبيق الأنماط في عملية الضرب" }
+          ]
+        },
+        {
+          "order": 6, "nameEn": "Factors and Multiples", "nameAr": "العوامل والمضاعفات", "sourcePage": 86,
+          "topics": [
+            { "order": 1, "nameEn": "Identifying Factors of Whole Numbers", "nameAr": "تحديد عوامل الأعداد الصحيحة" },
+            { "order": 2, "nameEn": "Prime Numbers and Numbers with Multiple Factors", "nameAr": "الأعداد الأولية والأعداد متعددة العوامل" },
+            { "order": 3, "nameEn": "Greatest Common Factor", "nameAr": "العامل المشترك الأكبر (ع.م.أ)" },
+            { "order": 4, "nameEn": "Identifying Multiples of Whole Numbers", "nameAr": "تحديد مضاعفات الأعداد الصحيحة" },
+            { "order": 5, "nameEn": "Common Multiples", "nameAr": "المضاعفات المشتركة" },
+            { "order": 6, "nameEn": "Relationships Between Factors and Multiples", "nameAr": "العلاقات بين العوامل والمضاعفات" }
+          ]
+        },
+        {
+          "order": 7, "nameEn": "Multiplication and Division: Computation and Relationships", "nameAr": "عمليتا الضرب والقسمة: الحساب والعلاقات", "sourcePage": 100,
+          "topics": [
+            { "order": 1, "nameEn": "The Area Model Strategy", "nameAr": "إستراتيجية نموذج مساحة المستطيل" },
+            { "order": 2, "nameEn": "The Distributive Property", "nameAr": "خاصية التوزيع" },
+            { "order": 3, "nameEn": "The Partial Products Multiplication Algorithm", "nameAr": "خوارزمية عملية الضرب بالتجزئة" },
+            { "order": 4, "nameEn": "Multiplying by a One-Digit Number", "nameAr": "الضرب في عدد مكون من رقم واحد" },
+            { "order": 5, "nameEn": "Multiplying a Two-Digit Number by Multiples of 10", "nameAr": "ضرب عدد مكون من رقمين في مضاعفات العدد 10" },
+            { "order": 6, "nameEn": "Exploring Remainders", "nameAr": "استكشاف باقي القسمة" },
+            { "order": 7, "nameEn": "Patterns in Division", "nameAr": "الأنماط في عملية القسمة" },
+            { "order": 8, "nameEn": "Division Using the Area Model", "nameAr": "القسمة باستخدام نموذج مساحة المستطيل" },
+            { "order": 9, "nameEn": "The Partial Quotients Division Algorithm", "nameAr": "خوارزمية خارج القسمة بالتجزئة" },
+            { "order": 10, "nameEn": "The Standard Division Algorithm", "nameAr": "خوارزمية القسمة المعيارية" },
+            { "order": 11, "nameEn": "Division and Multiplication", "nameAr": "القسمة والضرب" }
+          ]
+        },
+        {
+          "order": 8, "nameEn": "Order of Operations", "nameAr": "ترتيب العمليات", "sourcePage": 124,
+          "topics": [
+            { "order": 1, "nameEn": "Order of Operations", "nameAr": "ترتيب إجراء العمليات الحسابية" },
+            { "order": 2, "nameEn": "Order of Operations and Word Problems", "nameAr": "ترتيب العمليات والمسائل الكلامية" }
+          ]
+        }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 4", "gradeNameAr": "الصف الرابع الابتدائي", "gradeLevel": 4,
+      "subjectNameEn": "English Language", "subjectNameAr": "اللغة الإنجليزية", "icon": "language",
+      "sourceFile": "English_language_prim4_t1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "The Five Senses", "nameAr": "الحواس الخمس", "sourcePage": 6,
+          "topics": [
+            { "order": 1, "nameEn": "What are the Five Senses?", "nameAr": "ما هي الحواس الخمس؟" },
+            { "order": 2, "nameEn": "Healthy Habits", "nameAr": "العادات الصحية" },
+            { "order": 3, "nameEn": "Goha's Great Meal", "nameAr": "وجبة جحا العظيمة" },
+            { "order": 4, "nameEn": "Sequence Words", "nameAr": "كلمات الترتيب" },
+            { "order": 5, "nameEn": "A Presentation", "nameAr": "تقديم عرض" }
+          ]
+        },
+        {
+          "order": 2, "nameEn": "My Community", "nameAr": "مجتمعي", "sourcePage": 23,
+          "topics": [
+            { "order": 1, "nameEn": "Helping the Community", "nameAr": "مساعدة المجتمع" },
+            { "order": 2, "nameEn": "Community Problems and Solutions", "nameAr": "مشكلات المجتمع وحلولها" },
+            { "order": 3, "nameEn": "Egypt, My Culture", "nameAr": "مصر، ثقافتي" },
+            { "order": 4, "nameEn": "A Diary Entry", "nameAr": "مذكرات يومية" },
+            { "order": 5, "nameEn": "A Poster", "nameAr": "ملصق" }
+          ]
+        },
+        {
+          "order": 3, "nameEn": "Animals in Our World", "nameAr": "الحيوانات في عالمنا", "sourcePage": 39,
+          "topics": [
+            { "order": 1, "nameEn": "Let's Meet the Animals!", "nameAr": "لنتعرف على الحيوانات!" },
+            { "order": 2, "nameEn": "Taking Care of Animals", "nameAr": "العناية بالحيوانات" },
+            { "order": 3, "nameEn": "The Old Lion and The Fox", "nameAr": "الأسد العجوز والثعلب" },
+            { "order": 4, "nameEn": "A Research Report", "nameAr": "تقرير بحثي" },
+            { "order": 5, "nameEn": "A Collage", "nameAr": "كولاج" }
+          ]
+        },
+        {
+          "order": 4, "nameEn": "Egypt, My Homeland", "nameAr": "مصر، وطني", "sourcePage": 61,
+          "topics": [
+            { "order": 1, "nameEn": "Places in Egypt", "nameAr": "أماكن في مصر" },
+            { "order": 2, "nameEn": "My City", "nameAr": "مدينتي" },
+            { "order": 3, "nameEn": "The World of Big Numbers", "nameAr": "عالم الأعداد الكبيرة" },
+            { "order": 4, "nameEn": "A Blog", "nameAr": "تدوينة" },
+            { "order": 5, "nameEn": "A Leaflet", "nameAr": "منشور دعائي" }
+          ]
+        },
+        {
+          "order": 5, "nameEn": "A Day at Work", "nameAr": "يوم في العمل", "sourcePage": 79,
+          "topics": [
+            { "order": 1, "nameEn": "Different Jobs", "nameAr": "وظائف مختلفة" },
+            { "order": 2, "nameEn": "Jobs I Love!", "nameAr": "وظائف أحبها!" },
+            { "order": 3, "nameEn": "The Last House", "nameAr": "البيت الأخير" },
+            { "order": 4, "nameEn": "Non-Fiction Writing", "nameAr": "الكتابة غير الروائية" },
+            { "order": 5, "nameEn": "Origami Art", "nameAr": "فن الأوريغامي" }
+          ]
+        },
+        {
+          "order": 6, "nameEn": "The Hundred Dresses", "nameAr": "الفساتين المئة", "sourcePage": 96,
+          "topics": [
+            { "order": 1, "nameEn": "The Hundred Dresses", "nameAr": "الفساتين المئة" }
+          ]
+        }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 4", "gradeNameAr": "الصف الرابع الابتدائي", "gradeLevel": 4,
+      "subjectNameEn": "Islamic Religious Education", "subjectNameAr": "التربية الدينية الإسلامية", "icon": "book",
+      "sourceFile": "Islamic_religion_prim4_t1.pdf",
+      "units": [
+        {
+          "order": 1, "nameEn": "Religion and Generosity", "nameAr": "الدِّينُ والكَرَمُ", "sourcePage": 7,
+          "topics": [
+            { "order": 1, "nameEn": "Belief in the Messengers", "nameAr": "الإيمان بالرسل" },
+            { "order": 2, "nameEn": "Surat Al-Infitar (Memorization, Recitation, and Interpretation)", "nameAr": "سورة الانفطار (حفظ وتلاوة وتفسير)" },
+            { "order": 3, "nameEn": "Reciting the Quran Correctly: Rules of the Lam of \"Al\"", "nameAr": "ورتِّل القرآن ترتيلًا: أحكام لام (أل)" },
+            { "order": 4, "nameEn": "Zakat", "nameAr": "الزَّكاة" },
+            { "order": 5, "nameEn": "The Building of the Prophet's Mosque", "nameAr": "بناء المسجد النبوي" },
+            { "order": 6, "nameEn": "Abu Ayyub Al-Ansari", "nameAr": "أبو أيوب الأنصاري" },
+            { "order": 7, "nameEn": "Honoring the Guest", "nameAr": "إكرام الضيف" }
+          ]
+        },
+        {
+          "order": 2, "nameEn": "Brotherhood in Religion", "nameAr": "الأخوَّة في الدِّين", "sourcePage": 36,
+          "topics": [
+            { "order": 1, "nameEn": "The Mission of the Messengers", "nameAr": "وظيفة الرسل" },
+            { "order": 2, "nameEn": "Surat At-Takwir (Memorization, Recitation, and Interpretation)", "nameAr": "سورة التكوير (حفظ وتلاوة وتفسير)" },
+            { "order": 3, "nameEn": "Reciting the Quran Correctly: Rules of Noon Sakinah and Tanween (Clear Pronunciation)", "nameAr": "ورتِّل القرآن ترتيلًا: أحكام النون الساكنة والتنوين (الإظهار الحلقي)" },
+            { "order": 4, "nameEn": "Conditions of Zakat", "nameAr": "شروط الزَّكاة" },
+            { "order": 5, "nameEn": "The Brotherhood Between the Migrants and the Supporters", "nameAr": "المؤاخاة بين المهاجرين والأنصار" },
+            { "order": 6, "nameEn": "Abd Al-Rahman ibn Awf", "nameAr": "عبد الرحمن بن عوف" },
+            { "order": 7, "nameEn": "Self-Reliance", "nameAr": "الاعتماد على النفس" }
+          ]
+        },
+        {
+          "order": 3, "nameEn": "Religion and Accepting Others", "nameAr": "الدِّين وقَبول الآخَر", "sourcePage": 65,
+          "topics": [
+            { "order": 1, "nameEn": "Between Prophethood and Messengership", "nameAr": "بين النُّبوة والرسالة" },
+            { "order": 2, "nameEn": "Surat 'Abasa (Memorization, Recitation, and Interpretation)", "nameAr": "سورة عبس (حفظ وتلاوة وتفسير)" },
+            { "order": 3, "nameEn": "Review of the Rules of Lam Al and Clear Pronunciation", "nameAr": "مراجعة على أحكام (لام (أل) - الإظهار الحلقي)" },
+            { "order": 4, "nameEn": "Types of Zakat", "nameAr": "أنواع الزَّكاة" },
+            { "order": 5, "nameEn": "The Charter of Medina and the Foundations of the Islamic State", "nameAr": "وثيقة المدينة وأسس الدولة الإسلامية" },
+            { "order": 6, "nameEn": "Uthman ibn Affan", "nameAr": "عثمان بن عفان" },
+            { "order": 7, "nameEn": "Generosity", "nameAr": "السخاء" }
+          ]
+        }
+      ]
+    }
+  ]
+}

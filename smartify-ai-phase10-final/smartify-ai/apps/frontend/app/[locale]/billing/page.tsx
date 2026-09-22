@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getBillingCopy } from "@/content/billing";
@@ -10,73 +10,43 @@ import { Navbar } from "@/components/Navbar";
 import { ApiError, useApiClient } from "@/lib/api-client";
 import type { Locale } from "@/content/marketing";
 
-interface PricingPlan {
+interface BillingSubject {
   id: string;
-  levelCodeEn: string;
-  levelCodeAr: string;
-  monthlyPriceEGP: string;
-  includedSubjects: number;
-  additionalSubjectPriceEGP: string;
-  gradeLevel: number | null;
-  subjects: Array<{ id: string; nameEn: string; nameAr: string }>;
-  basicSubjectIds: string[];
+  nameEn: string;
+  nameAr: string;
+  priceEGP: number | null;
 }
 interface Subscription {
   id: string;
   status: string;
   monthlyTotalEGP: string;
-  additionalSubjectsCount: number;
-  pricingPlan: PricingPlan;
+  subjects: Array<{ id: string; nameEn: string; nameAr: string }>;
 }
 
 export default function BillingPage() {
   const { locale } = useParams<{ locale: Locale }>();
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const requestedPlanId = searchParams.get("planId");
   const isAr = locale === "ar";
   const copy = getBillingCopy(locale);
   const instapayCopy = getInstapayCopy(locale);
   const navCopy = getMarketingCopy(locale);
   const { apiFetch } = useApiClient();
 
-  const [plans, setPlans] = useState<PricingPlan[] | null>(null);
+  const [subjects, setSubjects] = useState<BillingSubject[] | null>(null);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
-  const [selectedPlanId, setSelectedPlanId] = useState("");
-  const [extraSubjectIds, setExtraSubjectIds] = useState<string[]>([]);
+  const [selectedSubjectIds, setSelectedSubjectIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notOnboarded, setNotOnboarded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [loadingPlans, setLoadingPlans] = useState(true);
+  const [loadingSubjects, setLoadingSubjects] = useState(true);
 
   async function loadBillingData() {
-    setLoadingPlans(true);
+    setLoadingSubjects(true);
     setError(null);
-    Promise.all([apiFetch<PricingPlan[]>("/billing/plans"), apiFetch<Subscription | null>("/billing/subscription")])
-      .then(([planData, subData]) => {
-        setPlans(planData);
+    Promise.all([apiFetch<BillingSubject[]>("/billing/subjects"), apiFetch<Subscription | null>("/billing/subscription")])
+      .then(([subjectData, subData]) => {
+        setSubjects(subjectData);
         setSubscription(subData);
-        if (planData[0]) {
-          // A plan carried forward from the public pricing page (?planId=)
-          // wins only if it's genuinely one of THIS student's own curriculum
-          // plans — never trusted blindly, just a convenience default so
-          // they don't have to re-pick what they already chose.
-          const requested = requestedPlanId ? planData.find((plan) => plan.id === requestedPlanId) : undefined;
-          if (requested) {
-            setSelectedPlanId(requested.id);
-            return;
-          }
-          const level = planData[0].gradeLevel ?? 7;
-          const selected = planData.find((plan) => {
-            const code = plan.levelCodeEn.toLowerCase();
-            if (code.includes("primary") || code.includes("1-5")) return level <= 5;
-            if (code.includes("preparatory") || code.includes("6-8")) return level >= 6 && level <= 8;
-            if (code.includes("grade 9")) return level === 9;
-            if (code.includes("secondary") || code.includes("10-12")) return level >= 10;
-            return false;
-          });
-          setSelectedPlanId((selected ?? planData[0]).id);
-        }
       })
       .catch((err) => {
         if (err instanceof ApiError && err.status === 404) {
@@ -86,7 +56,7 @@ export default function BillingPage() {
         setError(isAr ? "تعذر تحميل بيانات الاشتراك. حاول مرة أخرى." : "Could not load subscription data. Please try again.");
       })
       .finally(() => {
-        setLoadingPlans(false);
+        setLoadingSubjects(false);
       });
   }
 
@@ -101,11 +71,7 @@ export default function BillingPage() {
     try {
       const res = await apiFetch<{ checkoutUrl: string }>("/billing/checkout", {
         method: "POST",
-        body: JSON.stringify({
-          pricingPlanId: selectedPlanId,
-          additionalSubjectsCount: extraSubjectIds.length,
-          subjectIds: extraSubjectIds,
-        }),
+        body: JSON.stringify({ subjectIds: selectedSubjectIds }),
       });
       window.location.href = res.checkoutUrl;
     } catch (err: any) {
@@ -115,13 +81,8 @@ export default function BillingPage() {
     }
   }
 
-  const selectedPlan = plans?.find((plan) => plan.id === selectedPlanId);
-  const basicSubjectIds = new Set(selectedPlan?.basicSubjectIds ?? []);
-  const optionalSubjects = (selectedPlan?.subjects ?? []).filter((subject) => !basicSubjectIds.has(subject.id));
-  const additionalTotal = optionalSubjects
-    .filter((subject) => extraSubjectIds.includes(subject.id))
-    .reduce((total) => total + Number(selectedPlan?.additionalSubjectPriceEGP ?? 0), 0);
-  const monthlyTotal = Number(selectedPlan?.monthlyPriceEGP ?? 0) + additionalTotal;
+  const priceById = new Map((subjects ?? []).map((subject) => [subject.id, subject.priceEGP]));
+  const monthlyTotal = selectedSubjectIds.reduce((total, id) => total + Number(priceById.get(id) ?? 0), 0);
 
   async function handleCancel() {
     if (!confirm(copy.cancelConfirm)) return;
@@ -161,7 +122,7 @@ export default function BillingPage() {
             {subscription ? (
               <div className="space-y-2 text-sm">
                 <p className="text-neutral-700">
-                  {isAr ? subscription.pricingPlan.levelCodeAr : subscription.pricingPlan.levelCodeEn} —{" "}
+                  {subscription.subjects.map((subject) => (isAr ? subject.nameAr : subject.nameEn)).join(isAr ? "، " : ", ")} —{" "}
                   {subscription.monthlyTotalEGP} {copy.monthSuffix}
                 </p>
                 <p className="text-neutral-500">
@@ -178,7 +139,7 @@ export default function BillingPage() {
             )}
           </div>
 
-          {loadingPlans && <p className="mt-8 text-sm text-neutral-500">{isAr ? "جاري تحميل الباقات..." : "Loading plans..."}</p>}
+          {loadingSubjects && <p className="mt-8 text-sm text-neutral-500">{isAr ? "جاري تحميل المواد..." : "Loading subjects..."}</p>}
 
           {error && (
             <div role="alert" className="mt-4 text-sm text-error-500">
@@ -189,59 +150,58 @@ export default function BillingPage() {
             </div>
           )}
 
-          {!loadingPlans && plans?.length === 0 && (
+          {!loadingSubjects && subjects?.length === 0 && (
             <div className="mt-8 rounded-sf-lg border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
-              <p>{isAr ? "لا توجد باقات نشطة لهذا المنهج حاليًا." : "No active plans are available for this curriculum."}</p>
+              <p>{copy.noSubjectsAvailable}</p>
               <SmartifyButton variant="secondary" className="mt-4" onClick={loadBillingData}>
                 {isAr ? "إعادة المحاولة" : "Try again"}
               </SmartifyButton>
             </div>
           )}
 
-          {!loadingPlans && plans && plans.length > 0 && selectedPlan && (
+          {!loadingSubjects && subjects && subjects.length > 0 && (
             <div className="mt-8">
-              <h2 className="mb-4 font-semibold text-navy-900">{copy.choosePlanTitle}</h2>
-              <div className="rounded-sf-lg border border-sf-blue-500 bg-[--sf-bg-subtle] p-5">
-                <p className="font-semibold text-navy-900">{isAr ? selectedPlan.levelCodeAr : selectedPlan.levelCodeEn}</p>
-                <p className="mt-1 text-2xl font-bold text-navy-900">
-                  {selectedPlan.monthlyPriceEGP} <span className="text-sm font-normal text-neutral-500">{copy.monthSuffix}</span>
-                </p>
-                <p className="mt-3 text-sm font-medium text-navy-900">{isAr ? "المواد الأساسية المشمولة" : "Included core subjects"}</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {selectedPlan.subjects.filter((subject) => basicSubjectIds.has(subject.id)).map((subject) => (
-                    <span key={subject.id} className="rounded-full bg-white px-3 py-1 text-sm text-neutral-700">
-                      {isAr ? subject.nameAr : subject.nameEn}
-                    </span>
-                  ))}
-                </div>
-              </div>
+              <h2 className="mb-1 font-semibold text-navy-900">{copy.chooseSubjectsTitle}</h2>
+              <p className="mb-4 text-sm text-neutral-500">{copy.chooseSubjectsBody}</p>
 
-              {optionalSubjects.length > 0 && (
-                <div className="mt-6 rounded-sf-lg border border-neutral-200 bg-white p-5">
-                  <h3 className="font-semibold text-navy-900">{isAr ? "أضف مواد إلى السلة" : "Add subjects to cart"}</h3>
-                  <p className="mt-1 text-sm text-neutral-500">{copy.extraSubjectPrice(selectedPlan.additionalSubjectPriceEGP)}</p>
-                  <div className="mt-3 space-y-2">
-                    {optionalSubjects.map((subject) => (
-                      <label key={subject.id} className="flex items-center justify-between rounded-sf border border-neutral-200 px-3 py-2">
-                        <span>{isAr ? subject.nameAr : subject.nameEn}</span>
+              <div className="space-y-2">
+                {subjects.map((subject) => {
+                  const unpriced = subject.priceEGP == null;
+                  const checked = selectedSubjectIds.includes(subject.id);
+                  return (
+                    <label
+                      key={subject.id}
+                      className={`flex items-center justify-between rounded-sf border px-3 py-2 ${
+                        unpriced ? "border-neutral-100 bg-neutral-50 text-neutral-400" : "border-neutral-200"
+                      }`}
+                    >
+                      <span>{isAr ? subject.nameAr : subject.nameEn}</span>
+                      <span className="flex items-center gap-3">
+                        <span className="text-sm text-neutral-500">
+                          {unpriced ? copy.unpriced : `${subject.priceEGP} ${copy.monthSuffix}`}
+                        </span>
                         <input
                           type="checkbox"
-                          checked={extraSubjectIds.includes(subject.id)}
-                          onChange={() => setExtraSubjectIds((ids) => ids.includes(subject.id) ? ids.filter((id) => id !== subject.id) : [...ids, subject.id])}
+                          disabled={unpriced}
+                          checked={checked}
+                          onChange={() =>
+                            setSelectedSubjectIds((ids) =>
+                              ids.includes(subject.id) ? ids.filter((id) => id !== subject.id) : [...ids, subject.id]
+                            )
+                          }
                         />
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
 
               <div className="mt-6 rounded-sf-lg bg-neutral-50 p-5">
                 <div className="flex justify-between font-semibold text-navy-900">
-                  <span>{isAr ? "الإجمالي الشهري" : "Monthly total"}</span>
+                  <span>{copy.totalLabel}</span>
                   <span>{monthlyTotal} {copy.monthSuffix}</span>
                 </div>
               </div>
-
 
               <SmartifyButton variant="ai" className="mt-6 w-full" disabled>
                 {isAr ? "الدفع عبر فوري قريبًا" : "Fawry payment coming soon"}
@@ -249,9 +209,9 @@ export default function BillingPage() {
               <SmartifyButton
                 variant="secondary"
                 className="mt-3 w-full"
+                disabled={selectedSubjectIds.length === 0}
                 onClick={() => {
-                  const params = new URLSearchParams({ kind: "subscription", pricingPlanId: selectedPlanId });
-                  if (extraSubjectIds.length > 0) params.set("subjectIds", extraSubjectIds.join(","));
+                  const params = new URLSearchParams({ kind: "subscription", subjectIds: selectedSubjectIds.join(",") });
                   router.push(`/${locale}/billing/instapay?${params.toString()}`);
                 }}
               >

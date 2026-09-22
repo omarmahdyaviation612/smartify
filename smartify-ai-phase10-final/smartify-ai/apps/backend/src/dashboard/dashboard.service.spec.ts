@@ -84,10 +84,12 @@ describe("DashboardService.getSummary — Phase 10C content scoping", () => {
     return { service: new DashboardService(prisma, topicAccuracy), prisma };
   }
 
-  it("CASE 1 — a Grade 1 EG_NATIONAL Mathematics student receives the Grade 1 Mathematics interactive topic(s)", async () => {
+  it("CASE 1 — a Grade 1 EG_NATIONAL Mathematics student receives every Grade 1 Mathematics topic, generated or not", async () => {
     const { service } = makeService({ selectedSubjectIds: ["subject-math-g1-eg"] });
     const summary = await service.getSummary("user-1");
-    expect(summary.pilotLessons.map((l: any) => l.topicId)).toEqual(["topic-addition-g1-eg"]);
+    // Includes topic-fractions-g1-eg-draft (teachingStepsJson: null) — see
+    // CASE 6 below for why title-only topics must be listed too.
+    expect(summary.pilotLessons.map((l: any) => l.topicId)).toEqual(["topic-addition-g1-eg", "topic-fractions-g1-eg-draft"]);
   });
 
   it("CASE 2 — same curriculum/grade but Mathematics NOT selected: zero Mathematics interactive topics", async () => {
@@ -141,10 +143,12 @@ describe("DashboardService.getSummary — Phase 10C content scoping", () => {
     await expect(service.getSummary("user-none")).rejects.toThrow(NotFoundException);
   });
 
-  it("CASE 6 — a topic with teachingStepsJson = null never appears as an interactive lesson, even when its subject IS selected", async () => {
+  it("CASE 6 — a topic with teachingStepsJson = null (never opened yet) STILL appears, with status NOT_STARTED — launch-speed lazy-generation path (2026-09-19): the old behavior hid it here, and nothing else could ever make it visible, so a student had no way to discover or start it at all", async () => {
     const { service } = makeService({ selectedSubjectIds: ["subject-math-g1-eg"] });
     const summary = await service.getSummary("user-1");
-    expect(summary.pilotLessons.map((l: any) => l.topicId)).not.toContain("topic-fractions-g1-eg-draft");
+    const draft = summary.pilotLessons.find((l: any) => l.topicId === "topic-fractions-g1-eg-draft");
+    expect(draft).toBeDefined();
+    expect(draft?.status).toBe("NOT_STARTED");
   });
 
   it("scopes the topic query itself by relational IDs (subjectId + gradeId), never by name", async () => {

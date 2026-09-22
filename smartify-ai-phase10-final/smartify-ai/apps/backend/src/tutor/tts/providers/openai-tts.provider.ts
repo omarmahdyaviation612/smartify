@@ -58,13 +58,14 @@ export class OpenAiTtsProvider implements TtsProvider {
     this.costPerUnitUsd = OPENAI_TTS_COST_PER_CHARACTER_USD[config.model] ?? OPENAI_TTS_COST_PER_CHARACTER_USD["tts-1-hd"];
   }
 
-  async synthesize({ text }: TtsSynthesizeRequest): Promise<TtsSynthesizeResult> {
+  async synthesize({ text, instructionsOverride }: TtsSynthesizeRequest): Promise<TtsSynthesizeResult> {
+    const instructions = instructionsOverride ?? this.instructions;
     const response = await this.client.audio.speech.create({
       model: this.model,
       voice: this.voice as OpenAI.Audio.Speech.SpeechCreateParams["voice"],
       input: text,
       ...(MODELS_SUPPORTING_SPEED.has(this.model) ? { speed: this.speed } : {}),
-      ...(MODELS_SUPPORTING_INSTRUCTIONS.has(this.model) && this.instructions ? { instructions: this.instructions } : {}),
+      ...(MODELS_SUPPORTING_INSTRUCTIONS.has(this.model) && instructions ? { instructions } : {}),
     });
     const audio = Buffer.from(await response.arrayBuffer());
     return { audio, billedUnits: text.length };

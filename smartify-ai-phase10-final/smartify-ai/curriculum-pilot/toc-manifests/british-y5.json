@@ -1,0 +1,48 @@
+{
+  "entries": [
+    {
+      "curriculumCode": "BRITISH_INTL",
+      "gradeNameEn": "Year 5", "gradeNameAr": "السنة الخامسة", "gradeLevel": 5,
+      "subjectNameEn": "Mathematics", "subjectNameAr": "الرياضيات", "icon": "calculator",
+      "sourceFile": "Cambridge Primary Mathematics LB5 2nd edition-Hodder.pdf",
+      "units": [
+        { "order": 1, "nameEn": "Number", "nameAr": "الأعداد", "sourcePage": 6,
+          "topics": [ { "order": 1, "nameEn": "Number", "nameAr": "الأعداد" } ] },
+        { "order": 2, "nameEn": "Angles and shapes", "nameAr": "الزوايا والأشكال", "sourcePage": 21,
+          "topics": [ { "order": 1, "nameEn": "Angles and shapes", "nameAr": "الزوايا والأشكال" } ] },
+        { "order": 3, "nameEn": "Calculation", "nameAr": "الحساب", "sourcePage": 30,
+          "topics": [ { "order": 1, "nameEn": "Calculation", "nameAr": "الحساب" } ] },
+        { "order": 4, "nameEn": "Time", "nameAr": "الوقت", "sourcePage": 44,
+          "topics": [ { "order": 1, "nameEn": "Time", "nameAr": "الوقت" } ] },
+        { "order": 5, "nameEn": "Statistical methods", "nameAr": "الأساليب الإحصائية", "sourcePage": 50,
+          "topics": [ { "order": 1, "nameEn": "Statistical methods", "nameAr": "الأساليب الإحصائية" } ] },
+        { "order": 6, "nameEn": "Fractions, decimals, percentages and proportion", "nameAr": "الكسور والأعداد العشرية والنسب المئوية والتناسب", "sourcePage": 57,
+          "topics": [ { "order": 1, "nameEn": "Fractions, decimals, percentages and proportion", "nameAr": "الكسور والأعداد العشرية والنسب المئوية والتناسب" } ] },
+        { "order": 7, "nameEn": "Number", "nameAr": "الأعداد", "sourcePage": 75,
+          "topics": [ { "order": 1, "nameEn": "Number", "nameAr": "الأعداد" } ] },
+        { "order": 8, "nameEn": "Probability", "nameAr": "الاحتمال", "sourcePage": 88,
+          "topics": [ { "order": 1, "nameEn": "Probability", "nameAr": "الاحتمال" } ] },
+        { "order": 9, "nameEn": "Calculation", "nameAr": "الحساب", "sourcePage": 95,
+          "topics": [ { "order": 1, "nameEn": "Calculation", "nameAr": "الحساب" } ] },
+        { "order": 10, "nameEn": "Location and movement", "nameAr": "الموقع والحركة", "sourcePage": 108,
+          "topics": [ { "order": 1, "nameEn": "Location and movement", "nameAr": "الموقع والحركة" } ] },
+        { "order": 11, "nameEn": "Fractions, decimals, percentages and proportion", "nameAr": "الكسور والأعداد العشرية والنسب المئوية والتناسب", "sourcePage": 114,
+          "topics": [ { "order": 1, "nameEn": "Fractions, decimals, percentages and proportion", "nameAr": "الكسور والأعداد العشرية والنسب المئوية والتناسب" } ] },
+        { "order": 12, "nameEn": "Angles and shapes", "nameAr": "الزوايا والأشكال", "sourcePage": 130,
+          "topics": [ { "order": 1, "nameEn": "Angles and shapes", "nameAr": "الزوايا والأشكال" } ] },
+        { "order": 13, "nameEn": "Number", "nameAr": "الأعداد", "sourcePage": 140,
+          "topics": [ { "order": 1, "nameEn": "Number", "nameAr": "الأعداد" } ] },
+        { "order": 14, "nameEn": "Location and movement", "nameAr": "الموقع والحركة", "sourcePage": 151,
+          "topics": [ { "order": 1, "nameEn": "Location and movement", "nameAr": "الموقع والحركة" } ] },
+        { "order": 15, "nameEn": "Calculation", "nameAr": "الحساب", "sourcePage": 155,
+          "topics": [ { "order": 1, "nameEn": "Calculation", "nameAr": "الحساب" } ] },
+        { "order": 16, "nameEn": "Statistical methods", "nameAr": "الأساليب الإحصائية", "sourcePage": 169,
+          "topics": [ { "order": 1, "nameEn": "Statistical methods", "nameAr": "الأساليب الإحصائية" } ] },
+        { "order": 17, "nameEn": "Fractions, decimals, percentages and proportion", "nameAr": "الكسور والأعداد العشرية والنسب المئوية والتناسب", "sourcePage": 174,
+          "topics": [ { "order": 1, "nameEn": "Fractions, decimals, percentages and proportion", "nameAr": "الكسور والأعداد العشرية والنسب المئوية والتناسب" } ] },
+        { "order": 18, "nameEn": "Time", "nameAr": "الوقت", "sourcePage": 186,
+          "topics": [ { "order": 1, "nameEn": "Time", "nameAr": "الوقت" } ] }
+      ]
+    }
+  ]
+}

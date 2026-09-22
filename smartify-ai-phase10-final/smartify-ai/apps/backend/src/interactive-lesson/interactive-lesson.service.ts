@@ -4,7 +4,10 @@ import { AIProviderFactory } from "../ai/ai-provider.factory";
 import { AIContextBuilderService, LessonTeachingContext } from "../ai/context/ai-context-builder.service";
 import { AIUsageService } from "../ai/usage/ai-usage.service";
 import { TutorQuestionPacksService } from "../tutor-question-packs/tutor-question-packs.service";
-import { TutorService } from "../tutor/tutor.service";
+import { TrialService } from "../trial/trial.service";
+import { isStudentSubjectRowActive } from "../common/subject-entitlement.util";
+import { LessonDraftGeneratorService } from "./lesson-draft-generator/lesson-draft-generator.service";
+import { QuestionDraftGeneratorService } from "../question-bank/question-draft-generator/question-draft-generator.service";
 import { describeExpectedAnswer, describeOperands, tryDeterministicValidate } from "./answer-validators/deterministic-validator";
 import type { CheckExpression, StepResult, TeachingStep } from "./interactive-lesson.types";
 import { decideStrategySwitch, getCurrentStrategy, strategyGuidance } from "./teaching-strategy.util";
@@ -47,7 +50,9 @@ export class InteractiveLessonService {
     private readonly contextBuilder: AIContextBuilderService,
     private readonly usageService: AIUsageService,
     private readonly questionPacks: TutorQuestionPacksService,
-    private readonly tutorService: TutorService,
+    private readonly trialService: TrialService,
+    private readonly draftGenerator: LessonDraftGeneratorService,
+    private readonly questionGenerator: QuestionDraftGeneratorService,
   ) {}
 
   private async getProfileOrThrow(userId: string) {
@@ -71,6 +76,50 @@ export class InteractiveLessonService {
     return topic.teachingStepsJson as unknown as TeachingStep[];
   }
 
+  /**
+   * Launch-speed lazy-generation path (2026-09-18): only called from
+   * advance() (the actual "start/continue this lesson" action) — never
+   * from getState() (read-only by design, per its own doc comment) or
+   * respond() (a session already exists by then, so content already
+   * exists too). A Topic seeded with only a title (teachingStepsJson:
+   * null, no Lesson row yet) gets generated here, on this student's
+   * first request for it, then cached permanently on the Topic row so
+   * every later student/request is instant. No human-review gate for
+   * this path — see LessonPublishService.autoPublishIntoTopic's doc
+   * comment for the tradeoff this accepts.
+   */
+  private async ensureTopicHasSteps(topicId: string, profile: { userId: string; preferredLang?: string; age?: number }) {
+    const existing = await this.prisma.client.topic.findUnique({
+      where: { id: topicId },
+      include: { unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
+    });
+    if (!existing) throw new NotFoundException("This lesson is not available as an interactive lesson yet.");
+    if (existing.teachingStepsJson) return existing;
+
+    await this.draftGenerator.ensureTopicHasLesson(
+      topicId,
+      { preferredLang: profile.preferredLang === "ar" ? "ar" : "en", studentAgeRange: String(profile.age ?? 7) },
+      profile.userId,
+    );
+
+    // Same lazy trigger, same non-blocking philosophy: the topic now has a
+    // real (non-placeholder) Lesson, so a question pool CAN be generated
+    // for it. Deliberately NOT awaited — the student is waiting to start
+    // THIS lesson, not for a practice pool they won't touch for several
+    // more minutes; a second sequential AI round-trip here would roughly
+    // double their time-to-first-step for no benefit they'd notice yet.
+    // ensurePoolForTopic never throws (catches its own errors), so an
+    // unhandled rejection here is not a concern.
+    void this.questionGenerator.ensurePoolForTopic(topicId, profile.userId);
+
+    const generated = await this.prisma.client.topic.findUnique({
+      where: { id: topicId },
+      include: { unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
+    });
+    if (!generated?.teachingStepsJson) throw new NotFoundException("This lesson is not available as an interactive lesson yet.");
+    return generated;
+  }
+
   /** Ownership check: a session belongs to exactly one StudentProfile — never trusts a client-supplied studentId. */
   private async getOwnSession(profile: { id: string }, topicId: string) {
     return this.prisma.client.lessonSession.findUnique({
@@ -83,6 +132,7 @@ export class InteractiveLessonService {
   }
 
   private toPublicState(
+    topic: { id: string; unit: { subjectId: string } },
     session: { id: string; status: string; currentStepIndex: number; conversationId: string },
     steps: TeachingStep[],
     content: string | null,
@@ -95,6 +145,11 @@ export class InteractiveLessonService {
     return {
       sessionId: session.id,
       conversationId: session.conversationId,
+      // Launch-speed addition (2026-09-19): lets the frontend call
+      // POST /quizzes/questions?type=lesson_check without a second
+      // round-trip to look up which subject this topic belongs to.
+      topicId: topic.id,
+      subjectId: topic.unit.subjectId,
       status: session.status,
       currentStepIndex: session.currentStepIndex,
       totalSteps: steps.length,
@@ -114,26 +169,37 @@ export class InteractiveLessonService {
 
   /**
    * Reserves entitlement ONCE per lesson session (never per teaching
-   * turn) using the exact same Free-Trial/subscription/question-pack
-   * paths TutorService.sendMessage already uses — no parallel quota
-   * mechanism. Resuming an existing session never charges again.
+   * turn). Subject entitlement fix (2026-09-20): gated by StudentSubject
+   * for THIS Subject — never account-wide Subscription.status — via the
+   * same central expiresAt rule Practice/Quiz use (see
+   * subject-entitlement.util.ts). A permanently-owned (expiresAt: null)
+   * or currently-active time-limited (expiresAt > now, e.g. a referral
+   * reward) grant reuses the exact same daily/extra question-pack paths
+   * TutorService.sendMessage already uses. Otherwise this is the Free
+   * Trial V1 (2026-09-20) path: exactly one lesson per one of the
+   * student's own TWO chosen trial Subjects, on the exact Topic they're
+   * opening (see TrialService.reserveLessonTrial) — never the older,
+   * single-subject FreeTutorTrial mechanism, which stays exclusive to
+   * free-form Tutor chat. Resuming an existing session never charges again.
    */
-  private async reserveEntitlement(profile: { id: string }, subjectId: string) {
-    const subscription = await this.prisma.client.subscription.findUnique({ where: { studentId: profile.id } });
-    const hasActiveSubscription = subscription?.status === "active";
-    const reservation = hasActiveSubscription
+  private async reserveEntitlement(profile: { id: string }, subjectId: string, topicId: string) {
+    const studentSubject = await this.prisma.client.studentSubject.findUnique({
+      where: { studentId_subjectId: { studentId: profile.id, subjectId } },
+    });
+    const hasSubjectEntitlement = isStudentSubjectRowActive(studentSubject);
+    const reservation = hasSubjectEntitlement
       ? await this.questionPacks.consumeForTutor(profile.id, subjectId)
-      : await this.tutorService.reserveFreeTrial(profile.id, subjectId);
-    return { hasActiveSubscription, reservation };
+      : await this.trialService.reserveLessonTrial(profile.id, subjectId, topicId);
+    return { hasSubjectEntitlement, reservation };
   }
 
-  private async releaseEntitlement(profile: { id: string }, subjectId: string, reservation: { source: "daily" | "extra" | "free-trial"; usageDate?: Date }) {
+  private async releaseEntitlement(profile: { id: string }, subjectId: string, reservation: { source: "daily" | "extra" | "lesson-trial"; usageDate?: Date; consumptionId?: string }) {
     if (reservation.source === "daily") {
       await this.usageService.releaseDailySlot(profile.id, subjectId, reservation.usageDate).catch(() => undefined);
     } else if (reservation.source === "extra") {
       await this.questionPacks.refundExtraCredit(profile.id, subjectId, reservation.usageDate).catch(() => undefined);
     } else {
-      await this.tutorService.releaseFreeTrial(profile.id, subjectId).catch(() => undefined);
+      await this.trialService.releaseLessonTrialReservation(reservation.consumptionId!).catch(() => undefined);
     }
   }
 
@@ -210,7 +276,13 @@ export class InteractiveLessonService {
     // either way (same philosophy as TutorService.sendMessage).
     await this.usageService.reconcileBudget(budgetReservationId, usageRow.costUsd).catch(() => undefined);
 
-    const contentToPersist = params.persistedContent ? params.persistedContent(result.content) : result.content;
+    // Trimmed once, here, before anything else touches it — a plain-text
+    // (non-CHECK) turn has no JSON envelope to extract a "say" field from,
+    // so this is its only chance to strip the trailing whitespace the
+    // model routinely emits; see parseDeliverCheckJson's comment for why
+    // an untrimmed value breaks /tutor/speech's exact-match voice lookup.
+    const rawContent = result.content.trim();
+    const contentToPersist = params.persistedContent ? params.persistedContent(rawContent) : rawContent;
 
     try {
       await this.prisma.client.$transaction([
@@ -223,7 +295,7 @@ export class InteractiveLessonService {
       this.logger.warn(`Lesson turn for conversation ${params.conversationId} generated but DB write failed; content still returned.`);
     }
 
-    return result.content;
+    return rawContent;
   }
 
   /**
@@ -237,12 +309,12 @@ export class InteractiveLessonService {
    */
   async advance(userId: string, topicId: string) {
     const profile = await this.getProfileOrThrow(userId);
-    const topic = await this.getTopicOrThrow(topicId);
+    const topic = await this.ensureTopicHasSteps(topicId, { userId, preferredLang: (profile as any).preferredLang, age: (profile as any).age });
     const steps = this.getSteps(topic);
     let session = await this.getOwnSession(profile, topicId);
 
     if (!session) {
-      const { reservation } = await this.reserveEntitlement(profile, topic.unit.subjectId);
+      const { reservation } = await this.reserveEntitlement(profile, topic.unit.subjectId, topicId);
       try {
         const conversation = await this.prisma.client.aIConversation.create({
           data: { studentId: profile.id, subjectId: topic.unit.subjectId, topicId, title: topic.nameEn },
@@ -257,7 +329,7 @@ export class InteractiveLessonService {
     }
 
     if (session.status === "COMPLETED") {
-      return this.toPublicState(session, steps, null, true);
+      return this.toPublicState(topic, session, steps, null, true);
     }
 
     const stepResults = this.stepResultsOf(session);
@@ -275,7 +347,7 @@ export class InteractiveLessonService {
         where: { conversationId: session.conversationId, role: "assistant" },
         orderBy: { createdAt: "desc" },
       });
-      return this.toPublicState(session, steps, lastMessage?.content ?? null, false, stepResults);
+      return this.toPublicState(topic, session, steps, lastMessage?.content ?? null, false, stepResults);
     }
 
     if (currentResult?.delivered) {
@@ -295,7 +367,7 @@ export class InteractiveLessonService {
         data: { status: "COMPLETED", completedAt: new Date() },
       });
       await this.syncStudentProgress(profile.id, topic, "completed");
-      return this.toPublicState(completedSession, steps, null, true);
+      return this.toPublicState(topic, completedSession, steps, null, true);
     }
     const updatedSession = await this.prisma.client.lessonSession.update({
       where: { id: session.id },
@@ -324,6 +396,17 @@ export class InteractiveLessonService {
       teachingStrategyGuidance: currentStrategy ? strategyGuidance(currentStrategy) : undefined,
     };
     const systemPrompt = this.contextBuilder.buildLessonTeachingPrompt(ctx);
+    // Deterministic backstop, not just a prompt instruction: real traffic
+    // showed the model inventing an arithmetic "expression" (e.g. "if you
+    // have 3 apples and add 2 more") for a Science CHECK step about life
+    // processes/plant needs, despite the prompt already telling it to set
+    // expression:null for non-computable questions — the instruction alone
+    // isn't reliably followed. Restricting deterministic grading to actual
+    // Mathematics topics means a non-math subject's CHECK always falls back
+    // to full AI-based conceptual grading (already fully supported), never
+    // a bogus numeric answer key. Found 2026-09-19, user-confirmed ("بيدخل
+    // ال math في ال science").
+    const allowExpression = /math/i.test(topic.unit.subject.nameEn);
     const raw = await this.runLessonAI({
       userId: (profile as any).userId,
       profileId: profile.id,
@@ -332,10 +415,10 @@ export class InteractiveLessonService {
       systemPrompt,
       userTurnLabel: `Teach the "${step.type}" step now.`,
       responseFormat: isCheckStep ? "json_object" : undefined,
-      persistedContent: isCheckStep ? (rawJson) => this.parseDeliverCheckJson(rawJson).say : undefined,
+      persistedContent: isCheckStep ? (rawJson) => this.parseDeliverCheckJson(rawJson, allowExpression).say : undefined,
     });
 
-    const { say: content, expression } = isCheckStep ? this.parseDeliverCheckJson(raw) : { say: raw, expression: undefined as CheckExpression | undefined };
+    const { say: content, expression } = isCheckStep ? this.parseDeliverCheckJson(raw, allowExpression) : { say: raw, expression: undefined as CheckExpression | undefined };
 
     const updatedResults = this.upsertStepResult(stepResults, {
       stepId: step.id,
@@ -354,11 +437,11 @@ export class InteractiveLessonService {
         data: { status: "COMPLETED", completedAt: new Date() },
       });
       await this.syncStudentProgress(profile.id, topic, "completed");
-      return this.toPublicState(completedSession, steps, content, true, updatedResults);
+      return this.toPublicState(topic, completedSession, steps, content, true, updatedResults);
     }
 
     await this.syncStudentProgress(profile.id, topic, "in_progress");
-    return this.toPublicState(session, steps, content, false, updatedResults);
+    return this.toPublicState(topic, session, steps, content, false, updatedResults);
   }
 
   private upsertStepResult(existing: StepResult[], next: StepResult): StepResult[] {
@@ -374,13 +457,35 @@ export class InteractiveLessonService {
    * trusted — an absent/invalid expression simply means this check falls
    * back to full AI-based grading later, never a crash or a guess.
    */
-  private parseDeliverCheckJson(raw: string): { say: string; expression: CheckExpression | undefined } {
+  private parseDeliverCheckJson(raw: string, allowExpression: boolean): { say: string; expression: CheckExpression | undefined } {
     try {
       const parsed = JSON.parse(raw);
-      const say = typeof parsed?.say === "string" && parsed.say.trim() ? parsed.say : raw;
-      return { say, expression: this.normalizeExpression(parsed?.expression) };
+      // Trimmed here, not just checked for truthiness — /tutor/speech's
+      // anti-injection check (TutorSpeechService.synthesize) trims its own
+      // input before matching against the persisted AIMessage.content, so
+      // an untrimmed "say" value (the model routinely emits a trailing
+      // space before its closing quote) would persist one string but be
+      // compared against a different (trimmed) one, breaking voice
+      // playback for that turn — found 2026-09-19 via a real "Voice
+      // playback unavailable" report. This is the single source both the
+      // persisted DB row (via the persistedContent callback above, which
+      // calls this same function) and the value returned to the frontend
+      // read from, so trimming once here keeps them identical.
+      const say = typeof parsed?.say === "string" && parsed.say.trim() ? parsed.say.trim() : raw;
+      return { say, expression: allowExpression ? this.normalizeExpression(parsed?.expression) : undefined };
     } catch {
       return { say: raw, expression: undefined };
+    }
+  }
+
+  /** Same trimming rationale as parseDeliverCheckJson — see its comment. */
+  private parseEvaluateCheckJson(raw: string): { intent: "answer" | "question"; isCorrect: boolean | null; say: string } {
+    try {
+      const parsed = JSON.parse(raw);
+      const say = typeof parsed?.say === "string" && parsed.say.trim() ? parsed.say.trim() : raw;
+      return { intent: parsed?.intent === "answer" ? "answer" : "question", isCorrect: parsed?.isCorrect === true ? true : parsed?.isCorrect === false ? false : null, say };
+    } catch {
+      return { intent: "question", isCorrect: null, say: raw };
     }
   }
 
@@ -496,7 +601,7 @@ export class InteractiveLessonService {
     const steps = this.getSteps(topic);
     const session = await this.getOwnSession(profile, topicId);
     if (!session) throw new NotFoundException("Start the lesson before responding.");
-    if (session.status === "COMPLETED") return this.toPublicState(session, steps, null, true);
+    if (session.status === "COMPLETED") return this.toPublicState(topic, session, steps, null, true);
 
     const stepResults = this.stepResultsOf(session);
     const currentStep = steps[session.currentStepIndex];
@@ -504,10 +609,10 @@ export class InteractiveLessonService {
 
     if (currentStep.type !== "CHECK") {
       if (!(await this.consumeNonProgressBudget(session))) {
-        return this.toPublicState(session, steps, this.nonProgressLimitMessage(profile), false, stepResults);
+        return this.toPublicState(topic, session, steps, this.nonProgressLimitMessage(profile), false, stepResults);
       }
       const content = await this.runInterruption(profile, topic, session, currentStep, trimmed);
-      return this.toPublicState(session, steps, content, false, stepResults);
+      return this.toPublicState(topic, session, steps, content, false, stepResults);
     }
 
     return this.evaluateCheck(profile, topic, session, steps, currentStep, stepResults, trimmed);
@@ -609,7 +714,7 @@ export class InteractiveLessonService {
         strategyHistory: prior?.strategyHistory,
       });
       await this.prisma.client.lessonSession.update({ where: { id: session.id }, data: { stepResultsJson: updatedResults as any } });
-      return this.toPublicState(session, steps, say, false, updatedResults);
+      return this.toPublicState(topic, session, steps, say, false, updatedResults);
     }
 
     // Reaches here only when the message did NOT parse as a clean
@@ -619,7 +724,7 @@ export class InteractiveLessonService {
     // session-scoped budget applies here too (never to the deterministic
     // branch above, which is exempt — normal CHECK retries are unaffected).
     if (!(await this.consumeNonProgressBudget(session))) {
-      return this.toPublicState(session, steps, this.nonProgressLimitMessage(profile as any), false, stepResults);
+      return this.toPublicState(topic, session, steps, this.nonProgressLimitMessage(profile as any), false, stepResults);
     }
 
     const ctx: LessonTeachingContext = {
@@ -644,24 +749,13 @@ export class InteractiveLessonService {
       systemPrompt,
       userTurnLabel: message,
       responseFormat: "json_object",
-      persistedContent: (rawJson) => {
-        try {
-          const say = JSON.parse(rawJson)?.say;
-          return typeof say === "string" && say.trim() ? say : rawJson;
-        } catch {
-          return rawJson;
-        }
-      },
+      persistedContent: (rawJson) => this.parseEvaluateCheckJson(rawJson).say,
     });
 
-    let parsed: { intent: "answer" | "question"; isCorrect: boolean | null; say: string };
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      // Fail safe: never crash the lesson over a malformed model response —
-      // treat it as an unresolved question so nothing incorrectly advances.
-      parsed = { intent: "question", isCorrect: null, say: raw };
-    }
+    // Fail safe built into parseEvaluateCheckJson itself: a malformed model
+    // response never crashes the lesson — it's treated as an unresolved
+    // question so nothing incorrectly advances.
+    const parsed = this.parseEvaluateCheckJson(raw);
 
     const isAnswerAttempt = parsed.intent === "answer";
     const isCorrectNow = parsed.isCorrect === true;
@@ -699,7 +793,7 @@ export class InteractiveLessonService {
     });
     await this.prisma.client.lessonSession.update({ where: { id: session.id }, data: { stepResultsJson: updatedResults as any } });
 
-    return this.toPublicState(session, steps, parsed.say, false, updatedResults);
+    return this.toPublicState(topic, session, steps, parsed.say, false, updatedResults);
   }
 
   /** Best-effort — StudentProgress remains an optional aggregate signal; failures here never break the lesson itself. */
@@ -724,10 +818,29 @@ export class InteractiveLessonService {
     return asset;
   }
 
-  /** Read-only state for resuming — e.g. on page reload, without generating any new AI content. */
+  /**
+   * Read-only state for resuming — e.g. on page reload, without generating
+   * any new AI content. This is the FIRST call the Lesson page makes on
+   * every visit, including a title-only topic's very first one — launch-
+   * speed lazy-generation bug found 2026-09-19: this used to reuse
+   * getTopicOrThrow (throws for teachingStepsJson === null), which meant
+   * a never-opened topic 404'd here before the "Start Lesson" button
+   * (the thing that actually triggers generation, via advance()) ever had
+   * a chance to render — the page showed a hard "not available" error
+   * instead of a start button. A Topic that exists but hasn't been
+   * generated yet is reported as simply "not started" (a session could
+   * never exist for it anyway, since advance() is what both creates the
+   * first session AND generates the content), not a 404 — only a
+   * genuinely nonexistent Topic id still throws.
+   */
   async getState(userId: string, topicId: string) {
     const profile = await this.getProfileOrThrow(userId);
-    const topic = await this.getTopicOrThrow(topicId);
+    const topic = await this.prisma.client.topic.findUnique({
+      where: { id: topicId },
+      include: { unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
+    });
+    if (!topic) throw new NotFoundException("This lesson is not available as an interactive lesson yet.");
+    if (!topic.teachingStepsJson) return { started: false };
     const steps = this.getSteps(topic);
     const session = await this.getOwnSession(profile, topicId);
     if (!session) return { started: false };
@@ -736,6 +849,6 @@ export class InteractiveLessonService {
       where: { conversationId: session.conversationId, role: "assistant" },
       orderBy: { createdAt: "desc" },
     });
-    return { started: true, ...this.toPublicState(session, steps, lastMessage?.content ?? null, session.status === "COMPLETED", stepResults), stepResults };
+    return { started: true, ...this.toPublicState(topic, session, steps, lastMessage?.content ?? null, session.status === "COMPLETED", stepResults), stepResults };
   }
 }

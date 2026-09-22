@@ -31,7 +31,14 @@ export class OpenAIProvider implements AIProvider {
       ...(request.responseFormat === "json_object" ? { response_format: { type: "json_object" as const } } : {}),
       messages: [
         { role: "system", content: request.systemPrompt },
-        ...request.messages.map((m) => ({ role: m.role, content: m.content })),
+        // Cast: AIGenerateRequest.messages[].content is a union (plain
+        // string, or image content-parts for the grounding-extraction
+        // pipeline only) that the SDK's own discriminated
+        // ChatCompletionMessageParam type can't correlate against a bare
+        // "user"|"assistant" role through a .map() — the shape itself is
+        // exactly OpenAI's own multimodal format, so this is a type-system
+        // limitation, not a runtime risk.
+        ...(request.messages.map((m) => ({ role: m.role, content: m.content })) as OpenAI.Chat.ChatCompletionMessageParam[]),
       ],
     });
 

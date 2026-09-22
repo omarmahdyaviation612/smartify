@@ -31,6 +31,7 @@ function setup() {
         },
       },
       subscription: {
+        findUnique: async ({ where }: any) => get().subscriptions[where.id] ?? null,
         findFirst: async ({ where }: any) => {
           const row = Object.values(get().subscriptions).find(
             (s: any) => s.paymentProvider === where.paymentProvider && s.externalSubscriptionId === where.externalSubscriptionId,
@@ -84,7 +85,10 @@ function setup() {
   };
 
   const prisma = { client: db } as any;
-  const billingService = new BillingService(prisma, {} as any, {} as any);
+  // Referral V1 (2026-09-20) — mocked no-op collaborator; this file is
+  // about InstaPay confirm/idempotency, not referral behavior.
+  const referralServiceMock = { earnRewardWithinTransaction: async () => undefined } as any;
+  const billingService = new BillingService(prisma, {} as any, {} as any, referralServiceMock);
   const questionPacks = new TutorQuestionPacksService(prisma, {} as any, {} as any);
   const service = new AdminInstapayService(prisma, billingService, questionPacks);
 
@@ -127,6 +131,18 @@ describe("AdminInstapayService.confirm — subscription", () => {
     f.state().submissions["sub-1"].status = "REJECTED";
     await expect(f.service.confirm("sub-1", "admin-1")).rejects.toThrow("already been processed");
     expect(f.state().subscriptions["sub1"].status).toBe("pending");
+  });
+
+  it("2026-09-19 real-world bug: still activates when the submission's referenceId no longer matches the Subscription's externalSubscriptionId (student reopened checkout after submitting a receipt, minting a newer reference on the same row) — activation goes through subscriptionId, not the drifted reference", async () => {
+    const f = setup();
+    f.state().subscriptions["sub1"] = { id: "sub1", status: "pending", paymentProvider: "instapay", externalSubscriptionId: "SMAI-S-NEWER0000" };
+    f.state().submissions["sub-1"] = {
+      id: "sub-1", kind: "SUBSCRIPTION", subscriptionId: "sub1", packPurchaseId: null,
+      referenceId: "SMAI-S-ORIGINAL1", status: "PENDING_VERIFICATION",
+    };
+    await f.service.confirm("sub-1", "admin-1");
+    expect(f.state().subscriptions["sub1"].status).toBe("active");
+    expect(f.state().submissions["sub-1"].status).toBe("VERIFIED");
   });
 });
 

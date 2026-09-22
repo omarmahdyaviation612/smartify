@@ -141,3 +141,59 @@ export function validateLessonDraft(raw: unknown, expected: { topicNameEn: strin
 
   return { valid: errors.length === 0, steps: errors.length === 0 ? steps : undefined, errors };
 }
+
+const MIN_AUTO_OBJECTIVES = 2;
+const MAX_AUTO_OBJECTIVES = 4;
+
+export interface AutoLessonValidationResult {
+  valid: boolean;
+  steps?: TeachingStep[];
+  objectives?: Array<{ objectiveEn: string; objectiveAr: string }>;
+  errors: string[];
+}
+
+/**
+ * Launch-speed lazy-generation path (2026-09-18): same step validation as
+ * validateLessonDraft above, plus validation of the AI-proposed bilingual
+ * `learningObjectives` array (a field the human-reviewed pipeline never
+ * lets the AI supply — see BilingualObjective's doc comment). Kept as a
+ * separate function rather than a flag on validateLessonDraft so the
+ * original, heavily-relied-on validator's behavior can never be
+ * accidentally changed by this addition.
+ */
+export function validateAutoLessonDraft(raw: unknown, expected: { topicNameEn: string }): AutoLessonValidationResult {
+  const stepResult = validateLessonDraft(raw, expected);
+  const errors = [...stepResult.errors];
+
+  const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const rawObjectives = obj.learningObjectives;
+
+  let objectives: Array<{ objectiveEn: string; objectiveAr: string }> | undefined;
+  if (!Array.isArray(rawObjectives)) {
+    errors.push("Missing learningObjectives array.");
+  } else if (rawObjectives.length < MIN_AUTO_OBJECTIVES || rawObjectives.length > MAX_AUTO_OBJECTIVES) {
+    errors.push(`learningObjectives count ${rawObjectives.length} outside allowed range [${MIN_AUTO_OBJECTIVES}, ${MAX_AUTO_OBJECTIVES}].`);
+  } else {
+    const parsed: Array<{ objectiveEn: string; objectiveAr: string }> = [];
+    rawObjectives.forEach((entry, index) => {
+      if (!entry || typeof entry !== "object") {
+        errors.push(`learningObjectives[${index}] is not an object.`);
+        return;
+      }
+      const e = entry as Record<string, unknown>;
+      const objectiveEn = typeof e.objectiveEn === "string" ? e.objectiveEn.trim() : "";
+      const objectiveAr = typeof e.objectiveAr === "string" ? e.objectiveAr.trim() : "";
+      if (!objectiveEn) errors.push(`learningObjectives[${index}] is missing a non-empty objectiveEn.`);
+      if (!objectiveAr) errors.push(`learningObjectives[${index}] is missing a non-empty objectiveAr.`);
+      if (objectiveEn && objectiveAr) parsed.push({ objectiveEn, objectiveAr });
+    });
+    if (errors.length === 0) objectives = parsed;
+  }
+
+  return {
+    valid: errors.length === 0,
+    steps: errors.length === 0 ? stepResult.steps : undefined,
+    objectives: errors.length === 0 ? objectives : undefined,
+    errors,
+  };
+}

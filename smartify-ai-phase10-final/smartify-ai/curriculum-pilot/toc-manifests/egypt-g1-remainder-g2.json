@@ -1,0 +1,191 @@
+{
+  "entries": [
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 1", "gradeNameAr": "الصف الأول الابتدائي", "gradeLevel": 1,
+      "subjectNameEn": "English Language", "subjectNameAr": "اللغة الإنجليزية", "icon": "language",
+      "sourceFile": "English_language_prim1_t1.pdf",
+      "units": [
+        { "order": 1, "nameEn": "Welcome to My School", "nameAr": "مرحباً بك في مدرستي", "sourcePage": 7,
+          "topics": [ { "order": 1, "nameEn": "Welcome to My School", "nameAr": "مرحباً بك في مدرستي" } ] },
+        { "order": 2, "nameEn": "The Garden of Colors and Shapes", "nameAr": "حديقة الألوان والأشكال", "sourcePage": 26,
+          "topics": [ { "order": 1, "nameEn": "The Garden of Colors and Shapes", "nameAr": "حديقة الألوان والأشكال" } ] },
+        { "order": 3, "nameEn": "I Love My Family", "nameAr": "أنا أحب أسرتي", "sourcePage": 43,
+          "topics": [ { "order": 1, "nameEn": "I Love My Family", "nameAr": "أنا أحب أسرتي" } ] },
+        { "order": 4, "nameEn": "My Body and My Senses", "nameAr": "جسمي وحواسي", "sourcePage": 65,
+          "topics": [ { "order": 1, "nameEn": "My Body and My Senses", "nameAr": "جسمي وحواسي" } ] },
+        { "order": 5, "nameEn": "On the Farm", "nameAr": "في المزرعة", "sourcePage": 85,
+          "topics": [ { "order": 1, "nameEn": "On the Farm", "nameAr": "في المزرعة" } ] },
+        { "order": 6, "nameEn": "Animals Around Me", "nameAr": "الحيوانات من حولي", "sourcePage": 103,
+          "topics": [ { "order": 1, "nameEn": "Animals Around Me", "nameAr": "الحيوانات من حولي" } ] }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 1", "gradeNameAr": "الصف الأول الابتدائي", "gradeLevel": 1,
+      "subjectNameEn": "Islamic Religious Education", "subjectNameAr": "التربية الدينية الإسلامية", "icon": "book",
+      "sourceFile": "Islamic_religion_prim1_t1.pdf",
+      "units": [
+        { "order": 1, "nameEn": "Allah is My Lord", "nameAr": "الله ربي", "sourcePage": 8,
+          "topics": [
+            { "order": 1, "nameEn": "Allah the Almighty (The Creator)", "nameAr": "الله تعالى (الخالق)" },
+            { "order": 2, "nameEn": "Surah Al-Fatiha (Recitation, Memorization and Interpretation)", "nameAr": "سورة الفاتحة (تلاوة وحفظ وتفسير)" },
+            { "order": 3, "nameEn": "Recitation and Memorization Surahs: Al-Ikhlas, Al-Falaq, An-Nas", "nameAr": "من سور التلاوة والحفظ: الإخلاص - الفلق - الناس" },
+            { "order": 4, "nameEn": "The Pillars of Islam", "nameAr": "أركان الإسلام" },
+            { "order": 5, "nameEn": "The Birth of the Prophet (PBUH)", "nameAr": "مولد النبي صلى الله عليه وسلم" },
+            { "order": 6, "nameEn": "Adam, the Father of Mankind (PBUH)", "nameAr": "أبو البشر آدم عليه السلام" },
+            { "order": 7, "nameEn": "Greeting with Salam", "nameAr": "إلقاء السلام" },
+            { "order": 8, "nameEn": "Review of Unit One", "nameAr": "مراجعة على الوحدة الأولى" }
+          ] },
+        { "order": 2, "nameEn": "Why Did Allah Create Us?", "nameAr": "لماذا خلقنا الله؟", "sourcePage": 36,
+          "topics": [
+            { "order": 1, "nameEn": "Why Did Allah Almighty Create Us?", "nameAr": "لماذا خلقنا الله تعالى؟" },
+            { "order": 2, "nameEn": "Surah Al-Masad (Recitation, Memorization and Interpretation)", "nameAr": "سورة المسد (تلاوة وحفظ وتفسير)" },
+            { "order": 3, "nameEn": "Recitation and Memorization Surahs: An-Nasr, Al-Kafirun", "nameAr": "من سور التلاوة والحفظ: النصر - الكافرون" },
+            { "order": 4, "nameEn": "Purification and Ablution (Wudu)", "nameAr": "الطهارة والوضوء" },
+            { "order": 5, "nameEn": "The Childhood of the Prophet (PBUH)", "nameAr": "طفولة النبي صلى الله عليه وسلم" },
+            { "order": 6, "nameEn": "Prophet Idris (PBUH)", "nameAr": "نبي الله إدريس عليه السلام" },
+            { "order": 7, "nameEn": "Story: Excellence in Work", "nameAr": "قصة (إتقان العمل)" },
+            { "order": 8, "nameEn": "Review of Unit Two", "nameAr": "مراجعة على الوحدة الثانية" }
+          ] },
+        { "order": 3, "nameEn": "Allah is With Us", "nameAr": "الله معنا", "sourcePage": 62,
+          "topics": [
+            { "order": 1, "nameEn": "Allah the Almighty (The One)", "nameAr": "الله تعالى (الواحد)" },
+            { "order": 2, "nameEn": "Surah Quraish (Recitation, Memorization and Interpretation)", "nameAr": "سورة قريش (تلاوة وحفظ وتفسير)" },
+            { "order": 3, "nameEn": "Recitation and Memorization Surahs: Al-Ma'un, Al-Kawthar", "nameAr": "من سور التلاوة والحفظ: الماعون - الكوثر" },
+            { "order": 4, "nameEn": "Prayer (Salah)", "nameAr": "الصلاة" },
+            { "order": 5, "nameEn": "The Childhood of the Prophet (PBUH) - Continued", "nameAr": "(تابع) طفولة النبي صلى الله عليه وسلم" },
+            { "order": 6, "nameEn": "Prophet Noah (PBUH)", "nameAr": "نبي الله نوح عليه السلام" },
+            { "order": 7, "nameEn": "Story: Honesty and Trustworthiness", "nameAr": "قصة (الصدق والأمانة)" },
+            { "order": 8, "nameEn": "Review of Unit Three", "nameAr": "مراجعة على الوحدة الثالثة" },
+            { "order": 9, "nameEn": "Final Assessment of the First Term", "nameAr": "تقييم نهائي على الفصل الدراسي الأول" }
+          ] }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 2", "gradeNameAr": "الصف الثاني الابتدائي", "gradeLevel": 2,
+      "subjectNameEn": "Arabic Language", "subjectNameAr": "اللغة العربية", "icon": "language",
+      "sourceFile": "Arabic_language_prim2_t1.pdf",
+      "units": [
+        { "order": 1, "nameEn": "Review of Previous Learning", "nameAr": "مراجعة على ما سبق", "sourcePage": 6,
+          "topics": [ { "order": 1, "nameEn": "Review of Previous Learning", "nameAr": "مراجعة على ما سبق" } ] },
+        { "order": 2, "nameEn": "Kind Treatment", "nameAr": "المعاملة الطيبة", "sourcePage": 9,
+          "topics": [
+            { "order": 1, "nameEn": "A Beautiful Day (Listening)", "nameAr": "يوم جميل (الاستماع)" },
+            { "order": 2, "nameEn": "My Beautiful Words (Reading)", "nameAr": "كلماتي الجميلة (القراءة)" },
+            { "order": 3, "nameEn": "I Love My Friends (Reading)", "nameAr": "أحب أصدقائي (القراءة)" },
+            { "order": 4, "nameEn": "The Polite Child (Song)", "nameAr": "الطفل المهذب (نشيد)" },
+            { "order": 5, "nameEn": "Unit One Assessment", "nameAr": "تقييم الوحدة الأولى" },
+            { "order": 6, "nameEn": "Read with the Family: The Cat and the Dog", "nameAr": "اقرأ مع الأسرة: القطة والكلب" }
+          ] },
+        { "order": 3, "nameEn": "Healthy Habits", "nameAr": "عادات صحية", "sourcePage": 45,
+          "topics": [
+            { "order": 1, "nameEn": "I Organize My Life (Listening)", "nameAr": "أرتب حياتي (الاستماع)" },
+            { "order": 2, "nameEn": "My Teeth Are Strong (Reading)", "nameAr": "أسناني قوية (القراءة)" },
+            { "order": 3, "nameEn": "My Healthy Food (Reading)", "nameAr": "طعامي الصحي (القراءة)" },
+            { "order": 4, "nameEn": "The Little Hero (Song)", "nameAr": "البطل الصغير (نشيد)" },
+            { "order": 5, "nameEn": "Unit Two Assessment", "nameAr": "تقييم الوحدة الثانية" },
+            { "order": 6, "nameEn": "Read with the Family: A Gazelle in Trouble", "nameAr": "اقرأ مع الأسرة: غزال في ورطة" }
+          ] },
+        { "order": 4, "nameEn": "Sports and Technology", "nameAr": "الرياضة والتكنولوجيا", "sourcePage": 82,
+          "topics": [
+            { "order": 1, "nameEn": "Sports Are for All of Us (Listening)", "nameAr": "الرياضة لنا جميعًا (الاستماع)" },
+            { "order": 2, "nameEn": "Hussam and the Computer (Reading)", "nameAr": "حسام والكمبيوتر (القراءة)" },
+            { "order": 3, "nameEn": "At the Club (Reading)", "nameAr": "في النادي (القراءة)" },
+            { "order": 4, "nameEn": "My Sport (Song)", "nameAr": "رياضتي (نشيد)" },
+            { "order": 5, "nameEn": "Unit Three Assessment", "nameAr": "تقييم الوحدة الثالثة" },
+            { "order": 6, "nameEn": "Read with the Family: Let's Play", "nameAr": "اقرأ مع الأسرة: هيا نلعب" }
+          ] }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 2", "gradeNameAr": "الصف الثاني الابتدائي", "gradeLevel": 2,
+      "subjectNameEn": "Mathematics", "subjectNameAr": "الرياضيات", "icon": "calculator",
+      "sourceFile": "Math_Ar_prim2_t1.pdf",
+      "units": [
+        { "order": 1, "nameEn": "Graphs and Tables", "nameAr": "الرسوم البيانية والجداول", "sourcePage": 6,
+          "topics": [ { "order": 1, "nameEn": "Graphs and Tables", "nameAr": "الرسوم البيانية والجداول" } ] },
+        { "order": 2, "nameEn": "Vertical Addition", "nameAr": "الجمع الرأسي", "sourcePage": 18,
+          "topics": [ { "order": 1, "nameEn": "Vertical Addition", "nameAr": "الجمع الرأسي" } ] },
+        { "order": 3, "nameEn": "Vertical Subtraction", "nameAr": "الطرح الرأسي", "sourcePage": 32,
+          "topics": [ { "order": 1, "nameEn": "Vertical Subtraction", "nameAr": "الطرح الرأسي" } ] },
+        { "order": 4, "nameEn": "Time and Duration", "nameAr": "الوقت والمدة الزمنية", "sourcePage": 50,
+          "topics": [ { "order": 1, "nameEn": "Time and Duration", "nameAr": "الوقت والمدة الزمنية" } ] },
+        { "order": 5, "nameEn": "Units of Length", "nameAr": "وحدات الطول", "sourcePage": 58,
+          "topics": [ { "order": 1, "nameEn": "Units of Length", "nameAr": "وحدات الطول" } ] },
+        { "order": 6, "nameEn": "Numbers Greater Than 100", "nameAr": "أعداد أكبر من 100", "sourcePage": 70,
+          "topics": [ { "order": 1, "nameEn": "Numbers Greater Than 100", "nameAr": "أعداد أكبر من 100" } ] },
+        { "order": 7, "nameEn": "Units of Capacity", "nameAr": "وحدات السعة", "sourcePage": 100,
+          "topics": [ { "order": 1, "nameEn": "Units of Capacity", "nameAr": "وحدات السعة" } ] },
+        { "order": 8, "nameEn": "Vertical Addition and Subtraction", "nameAr": "الجمع والطرح الرأسي", "sourcePage": 106,
+          "topics": [ { "order": 1, "nameEn": "Vertical Addition and Subtraction", "nameAr": "الجمع والطرح الرأسي" } ] },
+        { "order": 9, "nameEn": "Mental Calculation Methods", "nameAr": "طرق الحساب الذهني", "sourcePage": 120,
+          "topics": [ { "order": 1, "nameEn": "Mental Calculation Methods", "nameAr": "طرق الحساب الذهني" } ] }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 2", "gradeNameAr": "الصف الثاني الابتدائي", "gradeLevel": 2,
+      "subjectNameEn": "English Language", "subjectNameAr": "اللغة الإنجليزية", "icon": "language",
+      "sourceFile": "English_language_prim2_t1.pdf",
+      "units": [
+        { "order": 1, "nameEn": "Let's Get Started", "nameAr": "لنبدأ", "sourcePage": 5,
+          "topics": [ { "order": 1, "nameEn": "Let's Get Started", "nameAr": "لنبدأ" } ] },
+        { "order": 2, "nameEn": "Colors, Shapes, and Numbers", "nameAr": "الألوان والأشكال والأرقام", "sourcePage": 17,
+          "topics": [ { "order": 1, "nameEn": "Colors, Shapes, and Numbers", "nameAr": "الألوان والأشكال والأرقام" } ] },
+        { "order": 3, "nameEn": "Classroom Actions & Routines", "nameAr": "أنشطة الفصل والعادات اليومية", "sourcePage": 31,
+          "topics": [ { "order": 1, "nameEn": "Classroom Actions & Routines", "nameAr": "أنشطة الفصل والعادات اليومية" } ] },
+        { "order": 4, "nameEn": "Everyday Life", "nameAr": "الحياة اليومية", "sourcePage": 49,
+          "topics": [ { "order": 1, "nameEn": "Everyday Life", "nameAr": "الحياة اليومية" } ] },
+        { "order": 5, "nameEn": "My Home", "nameAr": "منزلي", "sourcePage": 64,
+          "topics": [ { "order": 1, "nameEn": "My Home", "nameAr": "منزلي" } ] },
+        { "order": 6, "nameEn": "Rooms at Home", "nameAr": "غرف المنزل", "sourcePage": 82,
+          "topics": [ { "order": 1, "nameEn": "Rooms at Home", "nameAr": "غرف المنزل" } ] }
+      ]
+    },
+    {
+      "curriculumCode": "EG_NATIONAL",
+      "gradeNameEn": "Grade 2", "gradeNameAr": "الصف الثاني الابتدائي", "gradeLevel": 2,
+      "subjectNameEn": "Islamic Religious Education", "subjectNameAr": "التربية الدينية الإسلامية", "icon": "book",
+      "sourceFile": "Islamic_religion_prim2_t1.pdf",
+      "units": [
+        { "order": 1, "nameEn": "Reliance on Allah the Almighty", "nameAr": "التوكل على الله (تعالى)", "sourcePage": 8,
+          "topics": [
+            { "order": 1, "nameEn": "Allah the Almighty (The All-Hearing)", "nameAr": "الله تعالى (السميع)" },
+            { "order": 2, "nameEn": "Surah Al-Qadr (Recitation, Memorization and Interpretation)", "nameAr": "سورة القدر (تلاوة وحفظ وتفسير)" },
+            { "order": 3, "nameEn": "Recitation and Memorization Surah: Al-Bayyinah", "nameAr": "من سور التلاوة والحفظ (سورة البينة)" },
+            { "order": 4, "nameEn": "The Call to Prayer (Adhan)", "nameAr": "الأذان" },
+            { "order": 5, "nameEn": "The Revelation to the Prophet (PBUH)", "nameAr": "نزول الوحي على النبي صلى الله عليه وسلم" },
+            { "order": 6, "nameEn": "Prophet Shu'ayb (PBUH)", "nameAr": "نبي الله شعيب عليه السلام" },
+            { "order": 7, "nameEn": "Reliance on Allah the Almighty", "nameAr": "التوكل على الله (تعالى)" },
+            { "order": 8, "nameEn": "Review of Unit One", "nameAr": "مراجعة على الوحدة الأولى" }
+          ] },
+        { "order": 2, "nameEn": "Some of Allah's Blessings", "nameAr": "من نعم الله (تعالى)", "sourcePage": 36,
+          "topics": [
+            { "order": 1, "nameEn": "Allah the Almighty (The All-Seeing)", "nameAr": "الله تعالى (البصير)" },
+            { "order": 2, "nameEn": "Surah At-Tin (Recitation, Memorization and Interpretation)", "nameAr": "سورة التين (تلاوة وحفظ وتفسير)" },
+            { "order": 3, "nameEn": "Recitation and Memorization Surah: Al-Alaq", "nameAr": "من سور التلاوة والحفظ (سورة العلق)" },
+            { "order": 4, "nameEn": "The Second Call to Prayer (Iqamah)", "nameAr": "الإقامة" },
+            { "order": 5, "nameEn": "The Beginning of the Call (The Secret Call)", "nameAr": "بداية الدعوة (الدعوة السرية)" },
+            { "order": 6, "nameEn": "Prophet Moses (PBUH)", "nameAr": "نبي الله موسى عليه السلام" },
+            { "order": 7, "nameEn": "Story: Trustworthiness in Preserving the Body and Mind", "nameAr": "قصة (الأمانة في الحفاظ على الجسم والعقل)" },
+            { "order": 8, "nameEn": "Review of Unit Two", "nameAr": "مراجعة على الوحدة الثانية" }
+          ] },
+        { "order": 3, "nameEn": "Gratitude to Allah the Almighty", "nameAr": "الشكر لله (تعالى)", "sourcePage": 63,
+          "topics": [
+            { "order": 1, "nameEn": "Allah the Almighty (The Most Appreciative)", "nameAr": "الله تعالى (الشكور)" },
+            { "order": 2, "nameEn": "Surah Ash-Sharh (Recitation, Memorization and Interpretation)", "nameAr": "سورة الشرح (تلاوة وحفظ وتفسير)" },
+            { "order": 3, "nameEn": "Recitation and Memorization Surah: Ad-Duha", "nameAr": "من سور التلاوة والحفظ (سورة الضحى)" },
+            { "order": 4, "nameEn": "Congregational Prayer", "nameAr": "صلاة الجماعة" },
+            { "order": 5, "nameEn": "The Public Call (to Islam)", "nameAr": "الدعوة الجهرية" },
+            { "order": 6, "nameEn": "Prophet David (PBUH)", "nameAr": "نبي الله داود عليه السلام" },
+            { "order": 7, "nameEn": "Story: In Ease and Hardship", "nameAr": "قصة (في السراء والضراء)" },
+            { "order": 8, "nameEn": "Review of Unit Three", "nameAr": "مراجعة على الوحدة الثالثة" },
+            { "order": 9, "nameEn": "First Term Assessments", "nameAr": "تقييمات الفصل الدراسي الأول" }
+          ] }
+      ]
+    }
+  ]
+}

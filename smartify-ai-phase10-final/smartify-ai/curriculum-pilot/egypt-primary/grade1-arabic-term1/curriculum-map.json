@@ -1,0 +1,304 @@
+{
+  "curriculum": "Egyptian Ministry of Education — Primary Arabic Language",
+  "grade": "Grade 1",
+  "term": "Term 1",
+  "subject": "Arabic Language",
+  "units": [
+    {
+      "order": 1,
+      "titleAr": "أسرتي",
+      "titleEn": "My Family",
+      "sourcePage": 14,
+      "detailExtracted": true,
+      "supportingActivities": [
+        { "type": "listening-story-training", "titleAr": "أميرة وأسرتها السعيدة", "sourcePage": 15 },
+        { "type": "nasheed", "titleAr": "أسرتي", "sourcePage": 16, "note": "Song lyrics — intentionally not recorded here, copyrighted creative content." },
+        { "type": "little-reader-story", "titleAr": "أحب أسرتي", "sourcePage": 42 },
+        { "type": "unit-assessment", "sourcePage": 43 }
+      ],
+      "lessons": [
+        {
+          "order": 1,
+          "code": "1-1",
+          "titleAr": "حرف الألف",
+          "titleEn": "Letter Alef (أ)",
+          "sourcePage": 17,
+          "detailExtracted": true,
+          "conceptsCovered": [
+            "Recognizing the shape of the letter Alef across the forms shown in the lesson (أ / إ), via matching and odd-one-out activities",
+            "Pronouncing the letter's sound combined with the three short vowel marks (fatha, damma, kasra) and with sukoon",
+            "Identifying words that contain the letter Alef from a set of pictured words",
+            "Tracing and independently writing the letter Alef, following correct stroke direction"
+          ],
+          "learningObjectives": [
+            "Recognize the shape of the letter Alef through a variety of activities.",
+            "Pronounce the sound of the letter Alef with each short vowel mark and with sukoon.",
+            "Write the letter Alef correctly, following the correct writing-stroke direction."
+          ]
+        },
+        {
+          "order": 2,
+          "code": "1-2",
+          "titleAr": "حرف الباء",
+          "titleEn": "Letter Baa (ب)",
+          "sourcePage": 20,
+          "detailExtracted": true,
+          "conceptsCovered": [
+            "Recognizing the shape of the letter Baa in its isolated and connected written forms (ب / بـ / ـبـ / ـب)",
+            "Pronouncing the letter's sound combined with the three short vowel marks and with sukoon",
+            "Identifying words that contain the letter Baa from a set of pictured words",
+            "Tracing and independently writing the letter Baa, following correct stroke direction"
+          ],
+          "learningObjectives": [
+            "Recognize the isolated and connected written forms of the letter Baa.",
+            "Pronounce the sound of the letter Baa with each short vowel mark and with sukoon.",
+            "Write the letter Baa correctly, following the correct writing-stroke direction."
+          ]
+        },
+        {
+          "order": 3,
+          "code": "1-3",
+          "titleAr": "حرف الميم",
+          "titleEn": "Letter Meem (م)",
+          "sourcePage": 23,
+          "detailExtracted": true,
+          "conceptsCovered": [
+            "Recognizing the shape of the letter Meem in its isolated and connected written forms (م / مـ / ـمـ / ـم)",
+            "Pronouncing the letter's sound combined with the three short vowel marks and with sukoon",
+            "Identifying words that contain the letter Meem from a set of pictured words",
+            "Tracing and independently writing the letter Meem, following correct stroke direction"
+          ],
+          "learningObjectives": [
+            "Recognize the isolated and connected written forms of the letter Meem.",
+            "Pronounce the sound of the letter Meem with each short vowel mark and with sukoon.",
+            "Write the letter Meem correctly, following the correct writing-stroke direction."
+          ]
+        },
+        {
+          "order": 4,
+          "code": "1-4",
+          "titleAr": "حرف الحاء",
+          "titleEn": "Letter Haa (ح)",
+          "sourcePage": 26,
+          "detailExtracted": true,
+          "conceptsCovered": [
+            "Recognizing the shape of the letter Haa in its isolated and connected written forms (ح / حـ / ـحـ / ـح)",
+            "Pronouncing the letter's sound combined with the three short vowel marks and with sukoon",
+            "Identifying words that contain the letter Haa from a set of pictured words",
+            "Tracing and independently writing the letter Haa, following correct stroke direction"
+          ],
+          "learningObjectives": [
+            "Recognize the isolated and connected written forms of the letter Haa.",
+            "Pronounce the sound of the letter Haa with each short vowel mark and with sukoon.",
+            "Write the letter Haa correctly, following the correct writing-stroke direction."
+          ]
+        },
+        {
+          "order": 5,
+          "code": "1-5",
+          "titleAr": "حرف الجيم",
+          "titleEn": "Letter Jeem (ج)",
+          "sourcePage": 29,
+          "detailExtracted": true,
+          "conceptsCovered": [
+            "Recognizing the shape of the letter Jeem in its isolated and connected written forms (ج / جـ / ـجـ / ـج)",
+            "Pronouncing the letter's sound combined with the three short vowel marks and with sukoon",
+            "Identifying words that contain the letter Jeem from a set of pictured words",
+            "Tracing and independently writing the letter Jeem, following correct stroke direction"
+          ],
+          "learningObjectives": [
+            "Recognize the isolated and connected written forms of the letter Jeem.",
+            "Pronounce the sound of the letter Jeem with each short vowel mark and with sukoon.",
+            "Write the letter Jeem correctly, following the correct writing-stroke direction."
+          ]
+        },
+        {
+          "order": 6,
+          "code": "1-6",
+          "titleAr": "حرف الدال",
+          "titleEn": "Letter Dal (د)",
+          "sourcePage": 32,
+          "detailExtracted": true,
+          "conceptsCovered": [
+            "Recognizing the shape of the letter Dal in its two written forms (د isolated/word-final, ـد connected-from-the-right) — Dal does not connect forward to a following letter",
+            "Pronouncing the letter's sound combined with the three short vowel marks and with sukoon",
+            "Identifying words that contain the letter Dal from a set of pictured words",
+            "Tracing and independently writing the letter Dal, following correct stroke direction"
+          ],
+          "learningObjectives": [
+            "Recognize the two written forms of the letter Dal (it never connects forward to the next letter).",
+            "Pronounce the sound of the letter Dal with each short vowel mark and with sukoon.",
+            "Write the letter Dal correctly, following the correct writing-stroke direction."
+          ]
+        },
+        {
+          "order": 7,
+          "code": "1-7",
+          "titleAr": "حرف الخاء",
+          "titleEn": "Letter Khaa (خ)",
+          "sourcePage": 35,
+          "detailExtracted": true,
+          "conceptsCovered": [
+            "Recognizing the shape of the letter Khaa in its isolated and connected written forms (خ / خـ / ـخـ / ـخ)",
+            "Pronouncing the letter's sound combined with the three short vowel marks and with sukoon",
+            "Identifying words that contain the letter Khaa from a set of pictured words",
+            "Tracing and independently writing the letter Khaa, following correct stroke direction"
+          ],
+          "learningObjectives": [
+            "Recognize the isolated and connected written forms of the letter Khaa.",
+            "Pronounce the sound of the letter Khaa with each short vowel mark and with sukoon.",
+            "Write the letter Khaa correctly, following the correct writing-stroke direction."
+          ]
+        },
+        {
+          "order": 8,
+          "code": "1-8",
+          "titleAr": "حرف التاء",
+          "titleEn": "Letter Taa (ت)",
+          "sourcePage": 38,
+          "detailExtracted": true,
+          "conceptsCovered": [
+            "Recognizing the shape of the letter Taa in its isolated and connected written forms (ت / تـ / ـتـ / ـت)",
+            "Pronouncing the letter's sound combined with the three short vowel marks and with sukoon",
+            "Identifying words that contain the letter Taa from a set of pictured words",
+            "Tracing and independently writing the letter Taa, following correct stroke direction"
+          ],
+          "learningObjectives": [
+            "Recognize the isolated and connected written forms of the letter Taa.",
+            "Pronounce the sound of the letter Taa with each short vowel mark and with sukoon.",
+            "Write the letter Taa correctly, following the correct writing-stroke direction."
+          ]
+        }
+      ],
+      "note": "All eight letter lessons in Unit 1 were opened (Alef and Baa in full three-page detail; Meem/Haa/Jeem/Khaa/Taa/Dal confirmed page-by-page across their full 3-page span) and follow an identical six-activity template (shape recognition, matching, word-circling, vowel-mark pronunciation, sound-to-picture matching, guided tracing), with one expected variation: Alef's forms reflect the hamza-seat rendering rather than true connection, and Dal (a non-connecting letter) shows only two written forms instead of four but still has the full pronunciation/tracing activities."
+    },
+    {
+      "order": 2,
+      "titleAr": "حيواناتي",
+      "titleEn": "My Animals",
+      "sourcePage": 45,
+      "detailExtracted": true,
+      "supportingActivities": [
+        { "type": "listening-story-training", "titleAr": "عالم الحيوان", "sourcePage": 46 },
+        { "type": "nasheed", "titleAr": "لوحتي الجديدة", "sourcePage": 47, "note": "Song lyrics — intentionally not recorded here, copyrighted creative content." },
+        { "type": "little-reader-story", "titleAr": "ماذا تأكل؟", "sourcePage": 77 },
+        { "type": "unit-assessment", "sourcePage": 78 },
+        { "type": "family-reading-story", "titleAr": "التعاون سر النجاح", "sourcePage": 80 }
+      ],
+      "lessons": [
+        {
+          "order": 1, "code": "2-1", "titleAr": "حرف اللام", "titleEn": "Letter Lam (ل)", "sourcePage": 48, "detailExtracted": true,
+          "conceptsCovered": [
+            "Recognizing the shape of the letter Lam in its isolated and connected written forms (ل / لـ / ـلـ / ـل)",
+            "Pronouncing the letter's sound with each short vowel mark and with sukoon",
+            "Building/completing a simple word using the letter Lam",
+            "Recognizing the letter Lam's sound when it occurs in a spoken story or sentence"
+          ],
+          "learningObjectives": [
+            "Recognize the isolated and connected written forms of the letter Lam.",
+            "Pronounce the sound of the letter Lam with each short vowel mark and with sukoon.",
+            "Use the letter Lam to complete or build a simple word.",
+            "Recognize the sound of the letter Lam within a spoken sentence or story."
+          ]
+        },
+        {
+          "order": 2, "code": "2-2", "titleAr": "حرف السين", "titleEn": "Letter Seen (س)", "sourcePage": 52, "detailExtracted": true,
+          "conceptsCovered": [
+            "Recognizing the shape of the letter Seen in its isolated and connected written forms (س / سـ / ـسـ / ـس)",
+            "Pronouncing the letter's sound with each short vowel mark and with sukoon",
+            "Building/completing a simple word using the letter Seen",
+            "Recognizing the letter Seen's sound when it occurs in a spoken story or sentence"
+          ],
+          "learningObjectives": [
+            "Recognize the isolated and connected written forms of the letter Seen.",
+            "Pronounce the sound of the letter Seen with each short vowel mark and with sukoon.",
+            "Use the letter Seen to complete or build a simple word.",
+            "Recognize the sound of the letter Seen within a spoken sentence or story."
+          ]
+        },
+        {
+          "order": 3, "code": "2-3", "titleAr": "حرف النون", "titleEn": "Letter Noon (ن)", "sourcePage": 56, "detailExtracted": true,
+          "conceptsCovered": [
+            "Recognizing the shape of the letter Noon in its isolated and connected written forms (ن / نـ / ـنـ / ـن)",
+            "Pronouncing the letter's sound with each short vowel mark and with sukoon",
+            "Building/completing a simple word using the letter Noon",
+            "Recognizing the letter Noon's sound when it occurs in a spoken story or sentence"
+          ],
+          "learningObjectives": [
+            "Recognize the isolated and connected written forms of the letter Noon.",
+            "Pronounce the sound of the letter Noon with each short vowel mark and with sukoon.",
+            "Use the letter Noon to complete or build a simple word.",
+            "Recognize the sound of the letter Noon within a spoken sentence or story."
+          ]
+        },
+        {
+          "order": 4, "code": "2-4", "titleAr": "حرف الراء", "titleEn": "Letter Raa (ر)", "sourcePage": 60, "detailExtracted": true,
+          "conceptsCovered": [
+            "Recognizing the shape of the letter Raa in its two written forms (ر isolated/word-final, ـر connected-from-the-right) — Raa does not connect forward to a following letter",
+            "Pronouncing the letter's sound with each short vowel mark and with sukoon",
+            "Building/completing a simple word using the letter Raa",
+            "Recognizing the letter Raa's sound when it occurs in a spoken story or sentence"
+          ],
+          "learningObjectives": [
+            "Recognize the two written forms of the letter Raa (it never connects forward to the next letter).",
+            "Pronounce the sound of the letter Raa with each short vowel mark and with sukoon.",
+            "Use the letter Raa to complete or build a simple word.",
+            "Recognize the sound of the letter Raa within a spoken sentence or story."
+          ]
+        },
+        {
+          "order": 5, "code": "2-5", "titleAr": "حرف الفاء", "titleEn": "Letter Faa (ف)", "sourcePage": 64, "detailExtracted": false,
+          "conceptsCovered": [
+            "Recognizing the shape of the letter Faa in its isolated and connected written forms (ف / فـ / ـفـ / ـف)",
+            "Pronouncing the letter's sound with each short vowel mark and with sukoon",
+            "Building/completing a simple word using the letter Faa",
+            "Recognizing the letter Faa's sound when it occurs in a spoken story or sentence"
+          ],
+          "learningObjectives": [
+            "Recognize the isolated and connected written forms of the letter Faa.",
+            "Pronounce the sound of the letter Faa with each short vowel mark and with sukoon.",
+            "Use the letter Faa to complete or build a simple word.",
+            "Recognize the sound of the letter Faa within a spoken sentence or story."
+          ]
+        },
+        {
+          "order": 6, "code": "2-6", "titleAr": "حرف الكاف", "titleEn": "Letter Kaf (ك)", "sourcePage": 68, "detailExtracted": false,
+          "conceptsCovered": [
+            "Recognizing the shape of the letter Kaf in its isolated and connected written forms (ك / كـ / ـكـ / ـك)",
+            "Pronouncing the letter's sound with each short vowel mark and with sukoon",
+            "Building/completing a simple word using the letter Kaf",
+            "Recognizing the letter Kaf's sound when it occurs in a spoken story or sentence"
+          ],
+          "learningObjectives": [
+            "Recognize the isolated and connected written forms of the letter Kaf.",
+            "Pronounce the sound of the letter Kaf with each short vowel mark and with sukoon.",
+            "Use the letter Kaf to complete or build a simple word.",
+            "Recognize the sound of the letter Kaf within a spoken sentence or story."
+          ]
+        },
+        {
+          "order": 7, "code": "2-7", "titleAr": "حرف القاف", "titleEn": "Letter Qaf (ق)", "sourcePage": 72, "detailExtracted": false,
+          "conceptsCovered": [
+            "Recognizing the shape of the letter Qaf in its isolated and connected written forms (ق / قـ / ـقـ / ـق)",
+            "Pronouncing the letter's sound with each short vowel mark and with sukoon",
+            "Building/completing a simple word using the letter Qaf",
+            "Recognizing the letter Qaf's sound when it occurs in a spoken story or sentence"
+          ],
+          "learningObjectives": [
+            "Recognize the isolated and connected written forms of the letter Qaf.",
+            "Pronounce the sound of the letter Qaf with each short vowel mark and with sukoon.",
+            "Use the letter Qaf to complete or build a simple word.",
+            "Recognize the sound of the letter Qaf within a spoken sentence or story."
+          ]
+        }
+      ],
+      "note": "Unit 2 raises the activity complexity versus Unit 1: beyond shape/sound recognition, each letter lesson also has word-building and a listening-comprehension activity (spot the letter's sound in a read-aloud story/sentence), matching this unit's own printed footer objective style ('يوظّف التلميذ الحرف في أنشطة لغوية مختلفة'). Lam was opened and confirmed across its full 3-page span; Seen, Noon, and Raa openers were opened (confirming Raa is a 2-form non-connector like Dal, and Seen/Noon are normal 4-form letters); Faa/Kaf/Qaf are template extrapolations from the other four, not individually opened — flagged 'detailExtracted': false for those three even though objectives are recorded, to keep confidence levels honest."
+    },
+    { "order": 3, "titleAr": "أجزاء جسمي", "titleEn": "Parts of My Body", "sourcePage": 82, "detailExtracted": false,
+      "lettersTaught": ["الياء", "العين", "الشين", "الواو", "الهاء", "الذال", "الظاء"] },
+    { "order": 4, "titleAr": "مدرستي", "titleEn": "My School", "sourcePage": 117, "detailExtracted": false,
+      "lettersTaught": ["الزاي", "الطاء", "الصاد", "الضاد", "الثاء", "الغين"] }
+  ],
+  "provenanceNote": "Unit titles and starting page numbers are taken directly from the book's own printed table of contents (page 5, 'الفهرس'). Unit 1's eight letter-lesson titles and page numbers are likewise taken directly from the table of contents. The 'conceptsCovered' and 'learningObjectives' for Letter Alef and Letter Baa are ORIGINAL Smartify summaries, independently written from the book's own printed per-activity instructions and per-lesson objective footer — no rhyme, story, or exercise wording was copied from the source book. Units 2-4 are recorded at title + 'which letters are taught in this unit' depth only (also read from the table of contents); no internal lesson pages for those units were opened this pass.",
+  "copyrightSafetyNote": "This file intentionally contains no textbook prose, no copied mnemonic rhymes or nasheed lyrics, no copied story text, and no copied exercise wording. It exists solely as a structural index of what to teach and in what order."
+}

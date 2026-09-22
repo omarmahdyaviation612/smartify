@@ -30,8 +30,6 @@ export default function InstapayCheckoutPage() {
   const { apiFetch } = useApiClient();
 
   const kind = searchParams.get("kind") === "pack" ? "pack" : "subscription";
-  const pricingPlanId = searchParams.get("pricingPlanId") ?? "";
-  const additionalSubjectsCount = searchParams.get("additionalSubjectsCount");
   const subjectIdsParam = searchParams.get("subjectIds");
   const subjectId = searchParams.get("subjectId") ?? "";
 
@@ -52,11 +50,7 @@ export default function InstapayCheckoutPage() {
         const body =
           kind === "pack"
             ? { subjectId }
-            : {
-                pricingPlanId,
-                additionalSubjectsCount: additionalSubjectsCount ? Number(additionalSubjectsCount) : undefined,
-                subjectIds: subjectIdsParam ? subjectIdsParam.split(",").filter(Boolean) : undefined,
-              };
+            : { subjectIds: subjectIdsParam ? subjectIdsParam.split(",").filter(Boolean) : [] };
         const path = kind === "pack" ? "/instapay/question-pack/initiate" : "/instapay/subscription/initiate";
         const result = await apiFetch<InitiateResult>(path, { method: "POST", body: JSON.stringify(body) });
         setInitiated(result);

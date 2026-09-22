@@ -9,9 +9,9 @@ import { BillingService } from "./billing.service";
 export class BillingController {
   constructor(private readonly billingService: BillingService) {}
 
-  @Get("plans")
-  getPlans(@CurrentUser() user: any) {
-    return this.billingService.getAvailablePlans(user.id);
+  @Get("subjects")
+  getSubjects(@CurrentUser() user: any) {
+    return this.billingService.getAvailableSubjects(user.id);
   }
 
   @Get("subscription")
@@ -27,10 +27,7 @@ export class BillingController {
   }
 
   @Post("checkout")
-  startCheckout(
-    @CurrentUser() user: any,
-    @Body() body: { pricingPlanId: string; additionalSubjectsCount?: number; subjectIds?: string[] },
-  ) {
+  startCheckout(@CurrentUser() user: any, @Body() body: { subjectIds: string[] }) {
     return this.billingService.startCheckout(user.id, body);
   }
 

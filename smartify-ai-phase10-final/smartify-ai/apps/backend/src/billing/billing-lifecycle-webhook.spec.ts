@@ -1,5 +1,11 @@
 import { BillingService } from "./billing.service";
 
+// Referral V1 (2026-09-20) — BillingService calls this unconditionally at
+// activation now; mocked as a no-op collaborator (this file is about
+// subscription lifecycle/idempotency, not referral behavior — see
+// referral.service.spec.ts for that).
+const referralServiceMock = { earnRewardWithinTransaction: jest.fn().mockResolvedValue(undefined) } as any;
+
 /**
  * Regression coverage for the Stripe subscription-lifecycle mapping fix:
  * customer.subscription.deleted and invoice.payment_failed are keyed by
@@ -81,7 +87,7 @@ describe("applyWebhookEvent — Stripe subscription lifecycle (cancellation / pa
     };
 
     return {
-      service: new BillingService({ client: db } as any, {} as any, { applyPaidPurchase: jest.fn() } as any),
+      service: new BillingService({ client: db } as any, {} as any, { applyPaidPurchase: jest.fn() } as any, referralServiceMock),
       getRow: (id: string) => state.rows.get(id),
       setFailWrite: (v: boolean) => { failWrite = v; },
       updateManyCalls: () => updateManyCallCount,
