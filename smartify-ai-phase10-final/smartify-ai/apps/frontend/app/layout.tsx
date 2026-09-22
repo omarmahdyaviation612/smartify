@@ -10,5 +10,9 @@ export const metadata: Metadata = {
 // Top-level layout only wraps ClerkProvider — <html>/<body> and lang/dir
 // live in app/[locale]/layout.tsx, since dir="rtl"/"ltr" depends on locale.
 export default function RootLayout({ children }: { children: ReactNode }) {
-  return <ClerkProvider>{children}</ClerkProvider>;
+  // Clerk Frontend API reverse-proxy (see middleware.ts's /__clerk
+  // handling) — undefined in any environment where the env var isn't
+  // set (e.g. local dev), which is the same as not passing this prop at
+  // all, so unproxied environments are unaffected.
+  return <ClerkProvider proxyUrl={process.env.NEXT_PUBLIC_CLERK_PROXY_URL}>{children}</ClerkProvider>;
 }
