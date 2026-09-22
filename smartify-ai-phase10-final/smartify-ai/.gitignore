@@ -22,3 +22,5 @@ prisma/*.db
 # local-only, never committed.
 /backups/
 *.pgdump
+
+google-oauth-production.txt
