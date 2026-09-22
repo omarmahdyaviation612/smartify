@@ -40,7 +40,8 @@ async function upsertSubject(gradeId, nameEn, nameAr, icon, sourceFile) {
 // Same backfill-onto-existing-rows rationale as upsertSubject above, for
 // the page-range fields the grounding-extraction pipeline reads.
 async function upsertUnit(subjectId, nameEn, nameAr, order, sourcePageStart, sourcePageEnd) {
-  let unit = await prisma.unit.findFirst({ where: { subjectId, nameEn } });
+  // Textbooks can repeat a unit title at different positions (and page ranges).
+  let unit = await prisma.unit.findFirst({ where: { subjectId, nameEn, order } });
   if (!unit) {
     unit = await prisma.unit.create({
       data: { subjectId, nameEn, nameAr, order, term: "TERM_1", sourcePageStart: sourcePageStart ?? null, sourcePageEnd: sourcePageEnd ?? null },
@@ -61,6 +62,28 @@ async function upsertTopic(unitId, nameEn, nameAr, order) {
 }
 
 async function main() {
+  for (const curriculum of [
+    {
+      code: "EG_NATIONAL",
+      nameEn: "Egyptian National Curriculum",
+      nameAr: "المنهج المصري الوطني",
+      country: "EG",
+    },
+    {
+      code: "BRITISH_INTL",
+      nameEn: "British International Curriculum",
+      nameAr: "المنهج البريطاني الدولي",
+      country: "GB",
+    },
+  ]) {
+    const { code, ...data } = curriculum;
+    await prisma.curriculum.upsert({
+      where: { code },
+      update: data,
+      create: curriculum,
+    });
+  }
+
   const files = fs.readdirSync(MANIFEST_DIR).filter((f) => f.endsWith(".json"));
   const summary = [];
 
