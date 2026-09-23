@@ -6,9 +6,11 @@ import helmet from "helmet";
 import { AppModule } from "./app.module";
 import { loadBackendEnv } from "@smartify/config";
 import { GlobalExceptionFilter } from "./common/filters/global-exception.filter";
+import { verifyPdfRenderer } from "./interactive-lesson/unit-grounding/pdf-renderer-runtime";
 
 async function bootstrap() {
   const env = loadBackendEnv(); // fails fast if required env vars are missing
+  await verifyPdfRenderer();
 
   // bodyParser disabled globally so the Clerk/billing webhook routes can
   // register their own raw-body parsers — signature verification needs

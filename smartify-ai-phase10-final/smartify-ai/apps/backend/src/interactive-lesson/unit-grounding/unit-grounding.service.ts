@@ -1,5 +1,4 @@
-import { execFile } from "child_process";
-import { promisify } from "util";
+import { invokePdfRenderer } from "./pdf-renderer-runtime";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -14,14 +13,13 @@ import type { GroundingNotes } from "./unit-grounding.types";
 import { CurriculumSourceStorageFactory } from "./storage/curriculum-source-storage.factory";
 import { resolveEffectiveSourceFile } from "./unit-effective-source.util";
 
-const execFileAsync = promisify(execFile);
 
 const MAX_ATTEMPTS = 2; // one initial attempt + one corrective retry — same bound as every other AI-generation loop in this codebase
 const MAX_PAGES_PER_CALL = 10; // caps vision-token cost per call; a larger Unit range runs multiple sequential calls, merged into one GroundingNotes
 const MAX_UNIT_PAGE_COUNT = 40; // a sane ceiling on a single Unit's total page range — protects against an accidentally huge manifest range being silently rendered/processed in full
 const IMAGE_TOKEN_ESTIMATE = 1500; // conservative per-page-image token estimate for the pre-call budget check (estimateMaxChatCostUsd is text-length-based and has no native image-cost model)
 const CHARS_PER_TOKEN_CONSERVATIVE = 3; // mirrors AIUsageService's own constant, so the image padding is expressed in the same unit
-const PYTHON_RENDER_SCRIPT = path.join(__dirname, "..", "..", "..", "..", "..", "packages", "database", "prisma", "tools", "render_pdf_pages.py");
+
 const CURRENT_GROUNDING_VERSION = 1; // bump only when the extraction schema/methodology changes in a way that makes old groundingNotesJson stale
 const GROUNDING_PROMPT_VERSION = "grounding-extraction-v1";
 
@@ -291,7 +289,7 @@ export class UnitGroundingService {
     const chunkDir = fs.mkdtempSync(path.join(tmpDir, `chunk-${pageStart}-${pageEnd}-`));
     let imagePaths: string[];
     try {
-      const { stdout } = await execFileAsync("python", [PYTHON_RENDER_SCRIPT, pdfPath, String(pageStart), String(pageEnd), chunkDir]);
+      const { stdout } = await invokePdfRenderer([pdfPath, String(pageStart), String(pageEnd), chunkDir]);
       imagePaths = stdout
         .split("\n")
         .map((line) => line.trim())

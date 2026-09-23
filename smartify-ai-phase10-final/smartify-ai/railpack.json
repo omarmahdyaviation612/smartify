@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "buildAptPackages": ["...", "python3", "python3-venv"],
+  "steps": {
+    "build": {
+      "commands": [
+        "...",
+        "/usr/bin/python3 -m venv /app/.pdf-renderer",
+        "/app/.pdf-renderer/bin/python -m pip install --no-cache-dir --only-binary=:all: -r packages/database/prisma/tools/renderer-requirements.txt",
+        "NODE_ENV=production node -e \"require('./apps/backend/dist/interactive-lesson/unit-grounding/pdf-renderer-runtime').verifyPdfRenderer().catch(e=>{console.error(e.message);process.exitCode=1})\""
+      ]
+    }
+  },
+  "deploy": {
+    "aptPackages": ["...", "python3"],
+    "inputs": [
+      "...",
+      { "step": "build", "include": ["/app/.pdf-renderer", "/app/packages/database/prisma/tools/render_pdf_pages.py"] }
+    ]
+  }
+}

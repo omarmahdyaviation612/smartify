@@ -20,6 +20,7 @@ written output is silently treated as success by the caller.
 
 import sys
 import os
+import tempfile
 
 import pymupdf
 
@@ -51,6 +52,19 @@ def render_pdf_pages(pdf_path: str, start_page: int, end_page: int, out_dir: str
 
 
 def main() -> int:
+    if sys.argv[1:] == ["--check"]:
+        # Exercise the real PDF -> PNG path without textbooks, network or AI.
+        with tempfile.TemporaryDirectory(prefix="pdf-renderer-check-") as temp:
+            pdf_path = os.path.join(temp, "check.pdf")
+            with pymupdf.open() as doc:
+                doc.new_page().insert_text((72, 72), "Renderer readiness check")
+                doc.save(pdf_path)
+            paths = render_pdf_pages(pdf_path, 1, 1, temp)
+            with open(paths[0], "rb") as image:
+                if image.read(8) != b"\x89PNG\r\n\x1a\n":
+                    raise RuntimeError("Renderer did not produce a PNG")
+        print("PDF_RENDERER_READY")
+        return 0
     if len(sys.argv) != 5:
         print("Usage: python render_pdf_pages.py <pdf_path> <start_page> <end_page> <out_dir>", file=sys.stderr)
         return 2

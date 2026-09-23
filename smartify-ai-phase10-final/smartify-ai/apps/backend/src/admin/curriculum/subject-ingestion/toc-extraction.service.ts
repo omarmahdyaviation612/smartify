@@ -1,5 +1,4 @@
-import { execFile } from "child_process";
-import { promisify } from "util";
+import { invokePdfRenderer } from "../../../interactive-lesson/unit-grounding/pdf-renderer-runtime";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -15,7 +14,6 @@ import { validateFullBookScanChunk, type HeadingDetection } from "./full-book-sc
 import { mergeHeadingsIntoUnits } from "./full-book-scan-merge";
 import type { TocExtractionResult } from "./toc-extraction.types";
 
-const execFileAsync = promisify(execFile);
 
 const MAX_ATTEMPTS = 2; // one initial attempt + one corrective retry — same bound as UnitGroundingService's own extraction loop
 // Conservative, documented V1 bound (spec section 8): a textbook's table of
@@ -31,7 +29,7 @@ const TOC_WINDOW_PAGES = 10;
 const MAX_TOC_WINDOWS = 2;
 const IMAGE_TOKEN_ESTIMATE = 1500; // mirrors UnitGroundingService's own per-page-image token estimate
 const CHARS_PER_TOKEN_CONSERVATIVE = 3;
-const PYTHON_RENDER_SCRIPT = path.join(__dirname, "..", "..", "..", "..", "..", "..", "packages", "database", "prisma", "tools", "render_pdf_pages.py");
+
 
 // Extra Book full-book structure-scan fallback (2026-09-20) — only used
 // when the fast TOC-listing search above finds nothing (spec: "story books
@@ -249,7 +247,7 @@ export class TocExtractionService {
     const chunkDir = fs.mkdtempSync(path.join(tmpDir, `${tag}-${start}-${end}-`));
     let imagePaths: string[];
     try {
-      const { stdout } = await execFileAsync("python", [PYTHON_RENDER_SCRIPT, pdfPath, String(start), String(end), chunkDir]);
+      const { stdout } = await invokePdfRenderer([pdfPath, String(start), String(end), chunkDir]);
       imagePaths = stdout.split("\n").map((line) => line.trim()).filter(Boolean);
       if (imagePaths.length === 0) throw new Error("Page renderer produced no images.");
     } catch (err) {

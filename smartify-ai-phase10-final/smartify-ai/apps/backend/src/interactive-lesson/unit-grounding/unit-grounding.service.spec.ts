@@ -374,3 +374,19 @@ describe("UnitGroundingService.ensureUnitGrounded (production lazy-trigger + sin
     expect([r1, r2, r3].every((r) => r.used === true)).toBe(true);
   }, 15000);
 });
+
+// Exercise real service -> shared runtime -> subprocess wiring as production.
+const rendererTestOriginalEnv = process.env.NODE_ENV;
+beforeEach(() => { process.env.NODE_ENV = "production"; });
+afterEach(() => {
+  try {
+    const calls = (require("child_process").execFile as jest.Mock).mock.calls;
+    for (const [executable, args] of calls) {
+      expect(executable).toBe("/app/.pdf-renderer/bin/python");
+      expect(args[0]).toBe("/app/packages/database/prisma/tools/render_pdf_pages.py");
+    }
+  } finally {
+    if (rendererTestOriginalEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = rendererTestOriginalEnv;
+  }
+});
