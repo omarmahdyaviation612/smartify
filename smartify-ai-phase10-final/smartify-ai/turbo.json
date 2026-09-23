@@ -1,6 +1,13 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "tasks": {
+    "@smartify/database#generate": {
+      "cache": false
+    },
+    "@smartify/database#build": {
+      "dependsOn": ["^build", "generate"],
+      "outputs": ["dist/**"]
+    },
     "build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**", ".next/**"]
