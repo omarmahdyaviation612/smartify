@@ -129,6 +129,30 @@ describe("LessonDraftGeneratorService.ensureTopicHasLesson — budget attributio
     );
   });
 
+  it.each(["no-page-range", "extraction-failed", "wait-timeout"])("blocks mapped textbook generation when grounding reports %s", async (reason) => {
+    const h = makeHarness();
+    const unit = await h.prisma.client.unit.findUnique();
+    h.prisma.client.unit.findUnique.mockResolvedValue({ ...unit, subject: { ...unit.subject, sourceFile: "Y1 English learner's book.pdf" } } as any);
+    h.unitGrounding.ensureUnitGrounded.mockResolvedValue({ used: false, reason } as any);
+
+    await expect(h.service.ensureTopicHasLesson(TOPIC_ID, { preferredLang: "en", studentAgeRange: "6-7" }, REAL_STUDENT_ID))
+      .rejects.toThrow("Textbook grounding is unavailable for this topic");
+    expect(h.generateSpy).not.toHaveBeenCalled();
+    expect(h.prisma.client.lessonDraft.create).not.toHaveBeenCalled();
+    expect(h.publisher.autoPublishIntoTopic).not.toHaveBeenCalled();
+    expect(h.prisma.client.topic.updateMany).toHaveBeenLastCalledWith({ where: { id: TOPIC_ID }, data: { generationLockedAt: null, generationLockedBy: null } });
+  });
+
+  it("blocks direct auto-generation for an extra-book source without relevant grounding", async () => {
+    const h = makeHarness();
+    const unit = await h.prisma.client.unit.findUnique();
+    h.prisma.client.unit.findUnique.mockResolvedValue({ ...unit, sourceFileOverride: "extras/story.pdf" } as any);
+    await expect(h.service.generateAutoDraft({ id: TOPIC_ID, unitId: UNIT_ID, nameEn: "Test Topic", nameAr: "Test" }, { preferredLang: "en", studentAgeRange: "6-7" }, CONTENT_AUTHORING_ACTOR_ID))
+      .rejects.toThrow("Textbook grounding is unavailable for this topic");
+    expect(h.generateSpy).not.toHaveBeenCalled();
+    expect(h.prisma.client.lessonDraft.create).not.toHaveBeenCalled();
+  });
+
   it("G — a warm (already-generated) Topic never touches grounding or the AI provider at all — pure cache hit, nothing to bill", async () => {
     const { service, unitGrounding, providerFactory, prisma } = makeHarness({ teachingStepsJson: [{ id: "s1", type: "INTRO" }] });
 
@@ -138,5 +162,30 @@ describe("LessonDraftGeneratorService.ensureTopicHasLesson — budget attributio
     expect(providerFactory.getActiveProvider).not.toHaveBeenCalled();
     expect(prisma.client.lessonDraft.create).not.toHaveBeenCalled();
     expect(result.teachingStepsJson).toEqual([{ id: "s1", type: "INTRO" }]);
+  });
+
+  it.each([false, true])("blocks mapped grounding with no usable topic slice (empty hint: %s)", async (emptyHint) => {
+    const h = makeHarness();
+    const unit = await h.prisma.client.unit.findUnique();
+    h.prisma.client.unit.findUnique.mockResolvedValue({ ...unit,
+      subject: { ...unit.subject, sourceFile: "textbook.pdf" },
+      groundingNotesJson: { concepts: [], facts: [], vocabulary: [], learningObjectives: [], topicHints: emptyHint ? [{ topicTitle: "Test Topic", relevantConcepts: [], sourcePages: [] }] : [] },
+    } as any);
+    await expect(h.service.ensureTopicHasLesson(TOPIC_ID, { preferredLang: "en", studentAgeRange: "6-7" }, REAL_STUDENT_ID)).rejects.toThrow("Textbook grounding is unavailable");
+    expect(h.generateSpy).not.toHaveBeenCalled();
+    expect(h.publisher.autoPublishIntoTopic).not.toHaveBeenCalled();
+  });
+
+  it("publishes mapped textbook content when relevant grounding is available", async () => {
+    const h = makeHarness();
+    const unit = await h.prisma.client.unit.findUnique();
+    h.prisma.client.unit.findUnique.mockResolvedValue({ ...unit,
+      subject: { ...unit.subject, sourceFile: "textbook.pdf" }, groundingVersion: 1,
+      groundingNotesJson: { concepts: [{ name: "Introduce Test Topic", description: "Textbook scope", sourcePages: [1], importance: "core" }], facts: [], vocabulary: [], learningObjectives: [], topicHints: [] },
+    } as any);
+    h.unitGrounding.ensureUnitGrounded.mockResolvedValue({ used: true });
+    await h.service.ensureTopicHasLesson(TOPIC_ID, { preferredLang: "en", studentAgeRange: "6-7" }, REAL_STUDENT_ID);
+    expect(h.generateSpy).toHaveBeenCalledTimes(1);
+    expect(h.publisher.autoPublishIntoTopic).toHaveBeenCalledWith("draft-1", TOPIC_ID, expect.objectContaining({ generationSource: "TEXTBOOK_GROUNDED", groundingVersionUsed: 1 }));
   });
 });

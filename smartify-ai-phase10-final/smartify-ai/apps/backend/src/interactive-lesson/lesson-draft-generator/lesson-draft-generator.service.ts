@@ -9,6 +9,7 @@ import type { LessonGenerationInput, ResolvedUnitContext } from "./lesson-draft.
 import { toUnreviewedBilingualObjectives } from "./lesson-objectives.util";
 import type { GroundingNotes } from "../unit-grounding/unit-grounding.types";
 import { UnitGroundingService } from "../unit-grounding/unit-grounding.service";
+import { resolveEffectiveSourceFile } from "../unit-grounding/unit-effective-source.util";
 import { selectRelevantGrounding } from "../../ai/context/grounding-selector.util";
 import { checkGroundingConsistency } from "../../ai/context/grounding-consistency-validator";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
@@ -88,7 +89,7 @@ export class LessonDraftGeneratorService {
    * Phase 6 fix. Mirrors the exact include chain interactive-lesson.service
    * already uses for `getTopicOrThrow`.
    */
-  async resolveUnitContext(unitId: string): Promise<ResolvedUnitContext & { unitId: string }> {
+  async resolveUnitContext(unitId: string): Promise<ResolvedUnitContext & { unitId: string; sourceFile: string | null }> {
     const unit = await this.prisma.client.unit.findUnique({
       where: { id: unitId },
       include: { subject: { include: { grade: { include: { curriculum: true } } } } },
@@ -98,6 +99,7 @@ export class LessonDraftGeneratorService {
     }
     return {
       unitId: unit.id,
+      sourceFile: resolveEffectiveSourceFile(unit, unit.subject),
       curriculumNameEn: unit.subject.grade.curriculum.nameEn,
       gradeNameEn: unit.subject.grade.nameEn,
       subjectNameEn: unit.subject.nameEn,
@@ -232,9 +234,15 @@ export class LessonDraftGeneratorService {
     // 2026-09-19: computed once, outside the retry loop — selection is a
     // pure function of already-fetched data, not something that changes
     // between attempts. null whenever the Unit isn't grounded (or has no
-    // concept recognizably related to this Topic's title) — generation
-    // then proceeds exactly as it did before grounding existed.
+    // concept recognizably related to this Topic's title). A mapped textbook
+    // must supply relevant content; it must never fall back to title-only.
     const groundingSlice = selectRelevantGrounding(unitContext.groundingNotesJson, topic.nameEn);
+    if (unitContext.sourceFile && (!groundingSlice || (
+      groundingSlice.concepts.length === 0 && groundingSlice.facts.length === 0 && groundingSlice.vocabulary.length === 0
+    ))) {
+      this.logger.warn(`TEXTBOOK_TOPIC_GENERATION_BLOCKED topicId=${topic.id} unitId=${topic.unitId} reason=no-relevant-grounding`);
+      throw new ServiceUnavailableException("Textbook grounding is unavailable for this topic. Lesson generation is blocked until the textbook can be grounded. Please try again later or contact support.");
+    }
     if (groundingSlice) {
       this.logger.log(`GROUNDED_TOPIC_GENERATION_STARTED topicId=${topic.id} unitId=${topic.unitId}`);
     } else {
@@ -364,10 +372,9 @@ export class LessonDraftGeneratorService {
    * Topic-cache hit above (§15's ordering: TOPIC CACHE -> UNIT GROUNDING ->
    * SOURCE PDF), so an already-generated Topic never touches grounding at
    * all, and every subsequent Topic under the same Unit reuses the same
-   * groundingNotesJson at zero added cost. Failure of grounding is never
-   * fatal here: ensureUnitGrounded() itself never throws, and
-   * generateAutoDraft() below transparently falls back to
-   * LEGACY_TITLE_ONLY generation when no grounding is available.
+   * groundingNotesJson at zero added cost. generateAutoDraft() blocks
+   * mapped textbooks without relevant grounding, including extraction
+   * failures and timeouts. Only unmapped Units retain title-only fallback.
    *
    * Budget attribution (2026-09-20 fix): this entire method only ever
    * produces SHARED, permanently-cached curriculum content — never a

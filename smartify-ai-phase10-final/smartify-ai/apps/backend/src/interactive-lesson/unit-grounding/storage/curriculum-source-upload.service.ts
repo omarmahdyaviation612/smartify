@@ -4,6 +4,8 @@ import * as path from "path";
 import { BadRequestException, Injectable, InternalServerErrorException, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { PrismaService } from "../../../prisma/prisma.service";
 import { CurriculumSourceStorageFactory } from "./curriculum-source-storage.factory";
+import { defaultObjectKey, slugify } from "./curriculum-source-key";
+export { defaultObjectKey } from "./curriculum-source-key";
 
 // Mirrors S3CurriculumSourceStorage's own limit — checked here too so a
 // clearly-oversized file is rejected before any network call.
@@ -15,19 +17,6 @@ export function assertSafeObjectKey(key: string): void {
   if (path.isAbsolute(key) || key.includes("..") || key.startsWith("/") || key.includes("\\")) {
     throw new Error(`Unsafe --key value "${key}" — must be a relative, forward-slash path with no ".." segments.`);
   }
-}
-
-function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-}
-
-/** `filename` only needs to be the meaningful name to derive the key from — a full local path (CLI) or just an uploaded file's original name (HTTP) both work identically, since only its basename (extension stripped) is used. */
-export function defaultObjectKey(curriculumCode: string, gradeLevel: number, subjectNameEn: string, filename: string): string {
-  const base = slugify(path.basename(filename, path.extname(filename))) + ".pdf";
-  return [slugify(curriculumCode), `grade-${gradeLevel}`, slugify(subjectNameEn), base].join("/");
 }
 
 /**

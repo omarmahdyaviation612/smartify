@@ -25,13 +25,13 @@ async function upsertGrade(curriculumId, nameEn, nameAr, level) {
 // 2026-09-19: sourceFile is backfilled onto ALREADY-seeded Subject rows too
 // (not just newly-created ones) — the grounding-extraction pipeline needs
 // it, and most subjects were already seeded before sourceFile existed on
-// the schema. Only writes when a real value is given and it actually
-// differs, so re-running this script is still a safe no-op otherwise.
+// the schema. Only backfill null/empty mappings; preserve every non-empty
+// sourceFile exactly, including canonical R2 keys recorded after upload.
 async function upsertSubject(gradeId, nameEn, nameAr, icon, sourceFile) {
   let subject = await prisma.subject.findFirst({ where: { gradeId, nameEn } });
   if (!subject) {
     subject = await prisma.subject.create({ data: { gradeId, nameEn, nameAr, icon, sourceFile: sourceFile ?? null } });
-  } else if (sourceFile && subject.sourceFile !== sourceFile) {
+  } else if (sourceFile && (subject.sourceFile === null || subject.sourceFile === "")) {
     subject = await prisma.subject.update({ where: { id: subject.id }, data: { sourceFile } });
   }
   return subject;
