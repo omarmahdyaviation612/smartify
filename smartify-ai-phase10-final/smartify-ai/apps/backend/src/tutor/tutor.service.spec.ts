@@ -27,6 +27,7 @@ describe("TutorService", () => {
     providerGenerate?: jest.Mock;
     providerFactoryError?: Error;
     conversation?: any;
+    topic?: any;
     assertWithinBudget?: jest.Mock;
     reserveBudgetResult?: { ok: true; reservationId: string } | { ok: false; reason: "misconfigured" | "global_exceeded" | "user_exceeded" };
   } = {}) {
@@ -49,9 +50,10 @@ describe("TutorService", () => {
         aIConversation: {
           findUnique: jest.fn().mockResolvedValue(overrides.conversation ?? null),
           create: jest.fn().mockResolvedValue({ id: "conv-1", studentId: "student-1" }),
+          update: jest.fn().mockResolvedValue(undefined),
         },
         aIMessage: { findMany: jest.fn().mockResolvedValue([]), createMany: jest.fn() },
-        topic: { findUnique: jest.fn().mockResolvedValue(null) },
+        topic: { findUnique: jest.fn().mockResolvedValue(overrides.topic ?? null) },
         $transaction: jest.fn().mockResolvedValue([]),
       },
     } as any;
@@ -92,7 +94,7 @@ describe("TutorService", () => {
       find: jest.fn().mockResolvedValue(null),
       save: jest.fn().mockResolvedValue(undefined),
     } as any;
-    return { service: new TutorService(prisma, providerFactory, contextBuilder, usageService, questionPacks, answerCache), prisma, usageService, releaseDailySlot, releaseBudget, questionPacks };
+    return { service: new TutorService(prisma, providerFactory, contextBuilder, usageService, questionPacks, answerCache), prisma, contextBuilder, usageService, answerCache, releaseDailySlot, releaseBudget, questionPacks };
   }
 
   it("rejects an empty message before reserving a slot or calling the provider", async () => {
@@ -289,6 +291,84 @@ describe("TutorService", () => {
 
       const call = generate.mock.calls[0][0];
       expect(call.messages).toEqual([{ role: "user", content: "What are the planets in the solar system?" }]);
+    });
+
+    it("passes the deterministic alternative-math plan after repeated incorrect attempts", async () => {
+      const { service, prisma, contextBuilder } = makeService({ conversation: { id: "conv-1", studentId: "student-1" } });
+      prisma.client.aIMessage.findMany.mockResolvedValue([
+        { role: "assistant", content: "Use a number line." },
+        { role: "user", content: "3" },
+        { role: "assistant", content: "Not quite. Try again." },
+        { role: "user", content: "2" },
+        { role: "assistant", content: "That is not correct." },
+      ]);
+
+      await service.sendMessage("user-1", { subjectId: "subject-1", conversationId: "conv-1", message: "1" });
+
+      expect(contextBuilder.buildTutorSystemPrompt).toHaveBeenCalledWith(expect.objectContaining({
+        adaptiveMathPlan: expect.objectContaining({ stage: "ALTERNATIVE_REPRESENTATION", difficultySignals: 2 }),
+      }));
+    });
+
+    it("does not return a context-free cached answer for an active mathematics conversation", async () => {
+      const providerGenerate = jest.fn().mockResolvedValue({ content: "Let's use a number line this time.", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" });
+      const { service, answerCache } = makeService({ conversation: { id: "conv-1", studentId: "student-1" }, providerGenerate });
+      answerCache.find.mockResolvedValue({ answer: "A cached generic explanation." });
+
+      const result = await service.sendMessage("user-1", { subjectId: "subject-1", conversationId: "conv-1", message: "I don't understand." });
+
+      expect(result.reply).toBe("Let's use a number line this time.");
+      expect(answerCache.find).not.toHaveBeenCalled();
+      expect(providerGenerate).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not return a cached answer when a new mathematics turn itself signals misunderstanding", async () => {
+      const providerGenerate = jest.fn().mockResolvedValue({ content: "Let's make this simpler.", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" });
+      const { service, answerCache } = makeService({ providerGenerate });
+      answerCache.find.mockResolvedValue({ answer: "A cached generic explanation." });
+
+      const result = await service.sendMessage("user-1", { subjectId: "subject-1", message: "I don't understand." });
+
+      expect(result.reply).toBe("Let's make this simpler.");
+      expect(answerCache.find).not.toHaveBeenCalled();
+    });
+
+    it("passes only the selected Topic's grounded curriculum slice to the Tutor prompt", async () => {
+      const topic = {
+        nameEn: "Subtraction within 10",
+        unit: {
+          subjectId: "subject-1",
+          groundingNotesJson: {
+            learningObjectives: ["Subtract within 10."],
+            concepts: [{ name: "Subtraction within 10", description: "Take away.", sourcePages: [5], importance: "core" }],
+            facts: [], vocabulary: [], skills: [], scopeNotes: [],
+            topicHints: [{ topicTitle: "Subtraction within 10", relevantConcepts: ["Subtraction within 10"], sourcePages: [5] }],
+          },
+        },
+      };
+      const { service, contextBuilder } = makeService({ topic });
+
+      await service.sendMessage("user-1", { subjectId: "subject-1", topicId: "topic-1", message: "Help me subtract." });
+
+      expect(contextBuilder.buildTutorSystemPrompt).toHaveBeenCalledWith(expect.objectContaining({
+        topicNameEn: "Subtraction within 10",
+        groundingSlice: expect.objectContaining({ matchedViaHint: true, learningObjectives: ["Subtract within 10."] }),
+      }));
+    });
+
+    it("does not pass a Topic or its grounding when it belongs to another Subject", async () => {
+      const topic = {
+        nameEn: "Other subject topic",
+        unit: { subjectId: "other-subject", groundingNotesJson: { learningObjectives: ["Must not reach this Tutor prompt."], concepts: [], facts: [], vocabulary: [], skills: [], scopeNotes: [] } },
+      };
+      const { service, contextBuilder } = makeService({ topic });
+
+      await service.sendMessage("user-1", { subjectId: "subject-1", topicId: "topic-1", message: "Help me." });
+
+      expect(contextBuilder.buildTutorSystemPrompt).toHaveBeenCalledWith(expect.objectContaining({
+        topicNameEn: undefined,
+        groundingSlice: null,
+      }));
     });
   });
 
