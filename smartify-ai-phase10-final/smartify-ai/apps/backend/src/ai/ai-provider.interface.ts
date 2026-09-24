@@ -22,6 +22,8 @@ export interface AIGenerateRequest {
   messages: Array<{ role: "user" | "assistant"; content: AIMessageContent }>;
   maxOutputTokens?: number;
   diagnostics?: { operation: string; unitId?: string; pageStart?: number; pageEnd?: number; estimatedInputTokens?: number };
+  /** UnitGrounding owns TPM pacing and therefore disables SDK short retries. */
+  transportRetryMode?: "sdk" | "none";
   /**
    * "json_object" forces the provider to return a single valid JSON
    * object as the entire response — used by the Interactive Lesson
@@ -32,11 +34,19 @@ export interface AIGenerateRequest {
   responseFormat?: "text" | "json_object";
 }
 
+export interface AIRateLimitMetadata {
+  limitTokens: number | null;
+  remainingTokens: number | null;
+  resetTokensMs: number | null;
+  retryAfterMs: number | null;
+}
+
 export interface AIGenerateResult {
   content: string;
   inputTokens: number;
   outputTokens: number;
   model: string;
+  rateLimit?: AIRateLimitMetadata;
 }
 
 export interface AIProvider {

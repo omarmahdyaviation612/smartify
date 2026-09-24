@@ -1,6 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
 import { createInstrumentedOpenAI } from "../../ai/providers/openai-request-diagnostics";
 import { OpenAIProvider } from "../../ai/providers/openai.provider";
+import { UnitGroundingTpmPacer } from "./tpm-pacing.util";
 
 jest.mock("@smartify/config", () => ({ loadBackendEnv: () => ({ CURRICULUM_SOURCES_DIR: "D:\\fake-curriculum-sources" }) }));
 
@@ -175,7 +176,7 @@ describe("UnitGroundingService.extractUnitGrounding", () => {
     const h = makeHarness({ generateImpl: (request) => provider.generate(request) });
     if (exhausted) {
       await expect(h.service.extractUnitGrounding("unit-1", {}, "actor-1")).rejects.toMatchObject({ status: 429 });
-      expect(fetch).toHaveBeenCalledTimes(3);
+      expect(fetch).toHaveBeenCalledTimes(2);
       expect(h.releaseBudget).toHaveBeenCalledTimes(1);
       expect(h.reconcileBudget).not.toHaveBeenCalled();
       expect(h.updateCalls).toHaveLength(0);
@@ -189,6 +190,28 @@ describe("UnitGroundingService.extractUnitGrounding", () => {
       expect(h.usageCreateCalls).toHaveLength(1);
     }
     expect(h.reserveBudget).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for the 79-second TPM token reset before its one caller-controlled retry, without duplicate budget or persistence", async () => {
+    const waits: number[] = [];
+    let calls = 0;
+    const h = makeHarness({ generateImpl: async () => {
+      if (++calls === 1) throw Object.assign(new Error("TPM exhausted"), {
+        status: 429,
+        headers: { "retry-after-ms": "695", "x-ratelimit-limit-tokens": "200000", "x-ratelimit-remaining-tokens": "0", "x-ratelimit-reset-tokens": "79s" },
+      });
+      return { content: VALID_EXTRACTION_JSON, inputTokens: 74389, outputTokens: 500, model: "gpt-4o-mini" };
+    } });
+    (h.service as any).createTpmPacer = () => new UnitGroundingTpmPacer({ sleep: async (ms: number) => { waits.push(ms); }, jitterMs: () => 0 });
+
+    await h.service.extractUnitGrounding("unit-1", {}, "actor-1");
+
+    expect(calls).toBe(2);
+    expect(waits).toEqual([79000]);
+    expect(h.reserveBudget).toHaveBeenCalledTimes(1);
+    expect(h.reconcileBudget).toHaveBeenCalledTimes(1);
+    expect(h.releaseBudget).not.toHaveBeenCalled();
+    expect(h.updateCalls).toHaveLength(1);
   });
   it("success path: validates, persists groundingNotesJson + version/model/fingerprint metadata, and reserves/reconciles budget", async () => {
     const h = makeHarness();

@@ -13,10 +13,13 @@ import { validateGroundingNotes } from "./unit-grounding-validator";
 import type { GroundingNotes } from "./unit-grounding.types";
 import { CurriculumSourceStorageFactory } from "./storage/curriculum-source-storage.factory";
 import { resolveEffectiveSourceFile } from "./unit-effective-source.util";
+import { UnitGroundingTpmPacer, type TokenRateLimitMetadata } from "./tpm-pacing.util";
+import { isQuotaError, tokenRateLimitMetadata } from "../../ai/providers/openai-request-diagnostics";
 
 
 const MAX_ATTEMPTS = 2; // one initial attempt + one corrective retry — same bound as every other AI-generation loop in this codebase
 const MAX_PAGES_PER_RENDER = 10; // caps vision-token cost per call; a larger Unit range runs multiple sequential calls, merged into one GroundingNotes
+const MAX_TPM_TRANSPORT_ATTEMPTS = 2;
 const MAX_UNIT_PAGE_COUNT = 40; // a sane ceiling on a single Unit's total page range — protects against an accidentally huge manifest range being silently rendered/processed in full
 
 const CURRENT_GROUNDING_VERSION = 1; // bump only when the extraction schema/methodology changes in a way that makes old groundingNotesJson stale
@@ -110,6 +113,10 @@ export class UnitGroundingService {
     private readonly storageFactory: CurriculumSourceStorageFactory,
   ) {}
 
+  private createTpmPacer() {
+    return new UnitGroundingTpmPacer({ log: entry => this.logger.log(JSON.stringify(entry)) });
+  }
+
   async extractUnitGrounding(
     unitId: string,
     opts: { pdfOverride?: string; pageRangeOverride?: [number, number] },
@@ -176,8 +183,12 @@ export class UnitGroundingService {
       const textTokens = (start: number, end: number) => estimateTextTokens(this.contextBuilder.buildUnitGroundingExtractionPrompt({ ...ctx, pageRangeStart: start, pageRangeEnd: end }) + "Extract the curriculum grounding now.");
       const chunks = planGroundingChunks(pages, target, 4000, textTokens);
       const chunkNotes: GroundingNotes[] = [];
+      const pacer = this.createTpmPacer();
       for (const chunk of chunks) {
-        const notes = await this.extractChunk(chunk, ctx, requestingUserId, unitId, detail, active, textTokens(chunk[0].page, chunk[chunk.length - 1].page));
+        const chunkStart = chunk[0].page, chunkEnd = chunk[chunk.length - 1].page;
+        const chunkEstimatedTokens = textTokens(chunkStart, chunkEnd) + chunk.reduce((sum, page) => sum + page.imageTokens, 0);
+        await pacer.waitBeforeNextChunk({ model: active.model, unitId, pageStart: chunkStart, pageEnd: chunkEnd, estimatedTokens: chunkEstimatedTokens });
+        const notes = await this.extractChunk(chunk, ctx, requestingUserId, unitId, detail, active, textTokens(chunkStart, chunkEnd), pacer);
         chunkNotes.push(notes);
       }
 
@@ -298,6 +309,7 @@ export class UnitGroundingService {
     detail: ImageDetail,
     active: Awaited<ReturnType<AIProviderFactory["getActiveProvider"]>>,
     textTokens: number,
+    pacer: UnitGroundingTpmPacer,
   ): Promise<GroundingNotes> {
     const pageStart = pages[0].page, pageEnd = pages[pages.length - 1].page;
     const imagePaths = pages.map(p => p.imagePath);
@@ -326,19 +338,33 @@ export class UnitGroundingService {
       }
       const budgetReservationId = reserveResult.reservationId;
 
-      let result: Awaited<ReturnType<typeof provider.generate>>;
+      let result: Awaited<ReturnType<typeof provider.generate>> | undefined;
       try {
-        result = await provider.generate({
-          systemPrompt,
-          messages: [{ role: "user", content: [{ type: "text", text: "Extract the curriculum grounding now." }, ...imageParts] }],
-          diagnostics: { operation: "unit_grounding", unitId, pageStart, pageEnd, estimatedInputTokens },
-          responseFormat: "json_object",
-          maxOutputTokens: 4000,
-        });
+        for (let transportAttempt = 1; transportAttempt <= MAX_TPM_TRANSPORT_ATTEMPTS; transportAttempt++) {
+          try {
+            result = await provider.generate({
+              systemPrompt,
+              messages: [{ role: "user", content: [{ type: "text", text: "Extract the curriculum grounding now." }, ...imageParts] }],
+              diagnostics: { operation: "unit_grounding", unitId, pageStart, pageEnd, estimatedInputTokens },
+              responseFormat: "json_object",
+              maxOutputTokens: 4000,
+              transportRetryMode: "none",
+            });
+            break;
+          } catch (err) {
+            if (isQuotaError(err) || (err as { status?: number }).status !== 429 || transportAttempt === MAX_TPM_TRANSPORT_ATTEMPTS) throw err;
+            const rawHeaders = (err as { headers?: Headers | Record<string, string> }).headers;
+            const headers = rawHeaders && typeof (rawHeaders as Headers).get === "function" ? rawHeaders as Headers : new Headers(rawHeaders);
+            const metadata = tokenRateLimitMetadata(headers) as TokenRateLimitMetadata;
+            await pacer.waitAfterTpm429({ model, unitId, pageStart, pageEnd, estimatedTokens: estimatedInputTokens }, metadata, transportAttempt);
+          }
+        }
+        if (!result) throw new Error("Grounding provider returned no result.");
       } catch (err) {
         await this.usageService.releaseBudget(budgetReservationId).catch(() => undefined);
         throw err;
       }
+      pacer.recordSuccessfulResponse(result.rateLimit);
 
       const rates = await this.providerFactory.getCostRates(providerKey);
       const actualCostUsd = result.inputTokens * rates.costPerInputToken + result.outputTokens * rates.costPerOutputToken;

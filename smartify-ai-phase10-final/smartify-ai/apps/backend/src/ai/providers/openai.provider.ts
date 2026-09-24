@@ -1,5 +1,5 @@
 import { Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
-import { createInstrumentedOpenAI, withRequestDiagnostics } from "./openai-request-diagnostics";
+import { createInstrumentedOpenAI, tokenRateLimitMetadata, withRequestDiagnostics } from "./openai-request-diagnostics";
 import OpenAI from "openai";
 import { loadBackendEnv } from "@smartify/config";
 import type { AIGenerateRequest, AIGenerateResult, AIProvider } from "../ai-provider.interface";
@@ -28,7 +28,7 @@ export class OpenAIProvider implements AIProvider {
     }
 
     const client = this.client;
-    const completion = await withRequestDiagnostics(this.model, request, () => client.chat.completions.create({
+    const { data: completion, response } = await withRequestDiagnostics(this.model, request, () => client.chat.completions.create({
       model: this.model,
       max_tokens: request.maxOutputTokens ?? 600,
       ...(request.responseFormat === "json_object" ? { response_format: { type: "json_object" as const } } : {}),
@@ -43,7 +43,7 @@ export class OpenAIProvider implements AIProvider {
         // limitation, not a runtime risk.
         ...(request.messages.map((m) => ({ role: m.role, content: m.content })) as OpenAI.Chat.ChatCompletionMessageParam[]),
       ],
-    }));
+    }, { maxRetries: request.transportRetryMode === "none" ? 0 : undefined }).withResponse());
 
     const choice = completion.choices[0];
     this.logger.log(JSON.stringify({ event: "AI_REQUEST_COMPLETED", model: this.model, inputTokens: completion.usage?.prompt_tokens ?? null, outputTokens: completion.usage?.completion_tokens ?? null }));
@@ -52,6 +52,7 @@ export class OpenAIProvider implements AIProvider {
       inputTokens: completion.usage?.prompt_tokens ?? 0,
       outputTokens: completion.usage?.completion_tokens ?? 0,
       model: completion.model,
+      rateLimit: tokenRateLimitMetadata(response.headers),
     };
   }
 }
