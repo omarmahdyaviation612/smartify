@@ -196,6 +196,12 @@ describe("AIUsageService — Phase 9.4C atomic USD budget reservation", () => {
   });
 
   describe("estimateMaxChatCostUsd", () => {
+    it("reserves from the image-aware token estimate rather than text length", async () => {
+      const { service } = makeSequencedService({});
+      const cost = await service.estimateMaxChatCostUsd({ providerKey: "openai", inputText: "short prompt", estimatedInputTokens: 74000, maxOutputTokens: 4000 });
+      expect(cost).toBeCloseTo(74000 * 0.00000015 + 4000 * 0.0000006, 10);
+      await expect(service.estimateMaxChatCostUsd({ providerKey: "openai", inputText: "", estimatedInputTokens: -1 })).rejects.toThrow("Invalid input token estimate");
+    });
     it("computes a worst-case cost from real input length (conservative chars/token) and the default max-output-token ceiling", async () => {
       const { service } = makeSequencedService({});
       const cost = await service.estimateMaxChatCostUsd({ providerKey: "openai", inputText: "x".repeat(300) });

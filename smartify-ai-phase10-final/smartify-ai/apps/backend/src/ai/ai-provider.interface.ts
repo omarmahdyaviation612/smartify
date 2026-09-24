@@ -15,12 +15,13 @@
  */
 export type AIMessageContent =
   | string
-  | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+  | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string; detail?: "high" | "low" | "auto" } }>;
 
 export interface AIGenerateRequest {
   systemPrompt: string;
   messages: Array<{ role: "user" | "assistant"; content: AIMessageContent }>;
   maxOutputTokens?: number;
+  diagnostics?: { operation: string; unitId?: string; pageStart?: number; pageEnd?: number; estimatedInputTokens?: number };
   /**
    * "json_object" forces the provider to return a single valid JSON
    * object as the entire response — used by the Interactive Lesson

@@ -200,6 +200,17 @@ describe("TocExtractionService.extract — fullScanFallback (Extra Book full-boo
     };
   }
 
+  it("stops the full scan on billing quota failure without trying another chunk", async () => {
+    let calls = 0;
+    const h = makeHarness({ generateImpl: async () => {
+      if (++calls <= 2) return { content: JSON.stringify({ units: [] }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" };
+      throw Object.assign(new Error("quota exhausted"), { status: 429, code: "insufficient_quota" });
+    } });
+    await expect(h.service.extract("subject-1", "actor-1", { fullScanFallback: true })).rejects.toThrow("quota exhausted");
+    expect(h.generateSpy).toHaveBeenCalledTimes(3);
+    expect(h.releaseBudget).toHaveBeenCalledTimes(1);
+  });
+
   it("TOC success → fallback never runs, even when fullScanFallback is true", async () => {
     const h = makeHarness(); // default generateImpl returns a valid TOC on the very first call
     const result = await h.service.extract("subject-1", "actor-1", { fullScanFallback: true });

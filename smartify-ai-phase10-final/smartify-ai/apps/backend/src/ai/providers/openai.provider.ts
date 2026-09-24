@@ -1,4 +1,5 @@
-import { Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
+import { createInstrumentedOpenAI, withRequestDiagnostics } from "./openai-request-diagnostics";
 import OpenAI from "openai";
 import { loadBackendEnv } from "@smartify/config";
 import type { AIGenerateRequest, AIGenerateResult, AIProvider } from "../ai-provider.interface";
@@ -7,12 +8,13 @@ import type { AIGenerateRequest, AIGenerateResult, AIProvider } from "../ai-prov
 export class OpenAIProvider implements AIProvider {
   private client: OpenAI | null = null;
   private readonly model: string;
+  private readonly logger = new Logger(OpenAIProvider.name);
 
   constructor(model: string) {
     this.model = model;
     const env = loadBackendEnv();
     if (env.OPENAI_API_KEY) {
-      this.client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+      this.client = createInstrumentedOpenAI(env.OPENAI_API_KEY, entry => this.logger.log(JSON.stringify(entry)));
     }
     // No key configured yet — client stays null, generate() fails fast
     // with a clear, catchable error rather than a confusing SDK crash.
@@ -25,7 +27,8 @@ export class OpenAIProvider implements AIProvider {
       );
     }
 
-    const completion = await this.client.chat.completions.create({
+    const client = this.client;
+    const completion = await withRequestDiagnostics(this.model, request, () => client.chat.completions.create({
       model: this.model,
       max_tokens: request.maxOutputTokens ?? 600,
       ...(request.responseFormat === "json_object" ? { response_format: { type: "json_object" as const } } : {}),
@@ -40,9 +43,10 @@ export class OpenAIProvider implements AIProvider {
         // limitation, not a runtime risk.
         ...(request.messages.map((m) => ({ role: m.role, content: m.content })) as OpenAI.Chat.ChatCompletionMessageParam[]),
       ],
-    });
+    }));
 
     const choice = completion.choices[0];
+    this.logger.log(JSON.stringify({ event: "AI_REQUEST_COMPLETED", model: this.model, inputTokens: completion.usage?.prompt_tokens ?? null, outputTokens: completion.usage?.completion_tokens ?? null }));
     return {
       content: choice?.message?.content ?? "",
       inputTokens: completion.usage?.prompt_tokens ?? 0,

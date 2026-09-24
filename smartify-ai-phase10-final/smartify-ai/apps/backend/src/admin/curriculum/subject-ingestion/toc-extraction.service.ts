@@ -1,4 +1,5 @@
 import { invokePdfRenderer } from "../../../interactive-lesson/unit-grounding/pdf-renderer-runtime";
+import { isQuotaError } from "../../../ai/providers/openai-request-diagnostics";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -351,11 +352,13 @@ export class TocExtractionService {
         result = await provider.generate({
           systemPrompt,
           messages: [{ role: "user", content: [{ type: "text", text: "Detect chapter/section starts now." }, ...imageParts] }],
+          diagnostics: { operation: "toc_full_book_scan", pageStart: start, pageEnd: end },
           responseFormat: "json_object",
           maxOutputTokens: 2000,
         });
       } catch (err) {
         await this.usageService.releaseBudget(budgetReservationId).catch(() => undefined);
+        if (isQuotaError(err)) throw err;
         // BUG FIX (2026-09-20): a transient provider-call failure (rate
         // limit, timeout, network blip) on ANY one chunk used to be
         // rethrown here, which aborted the ENTIRE multi-chunk full-book

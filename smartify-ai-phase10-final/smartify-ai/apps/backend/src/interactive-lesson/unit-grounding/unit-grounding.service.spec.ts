@@ -1,11 +1,13 @@
 import { BadRequestException } from "@nestjs/common";
+import { createInstrumentedOpenAI } from "../../ai/providers/openai-request-diagnostics";
+import { OpenAIProvider } from "../../ai/providers/openai.provider";
 
 jest.mock("@smartify/config", () => ({ loadBackendEnv: () => ({ CURRICULUM_SOURCES_DIR: "D:\\fake-curriculum-sources" }) }));
 
 jest.mock("child_process", () => ({
   ...jest.requireActual("child_process"),
   execFile: jest.fn((_cmd: string, _args: string[], cb: (err: Error | null, result: { stdout: string; stderr: string }) => void) => {
-    cb(null, { stdout: "C:\\tmp\\page-8.png\nC:\\tmp\\page-9.png\n", stderr: "" });
+    cb(null, { stdout: Array.from({ length: Number(_args[3]) - Number(_args[2]) + 1 }, (_, i) => `C:/tmp/page-${Number(_args[2]) + i}.png`).join("\n"), stderr: "" });
   }),
 }));
 
@@ -21,7 +23,7 @@ jest.mock("fs", () => ({
   existsSync: jest.fn(() => true),
   mkdtempSync: jest.fn((prefix: string) => `${prefix}abc123`),
   realpathSync: jest.fn((p: string) => p),
-  readFileSync: jest.fn(() => Buffer.from("fake-png-bytes")),
+  readFileSync: jest.fn(() => Buffer.from("89504e470d0a1a0a0000000d49484452000004bb00000659", "hex")),
   rmSync: jest.fn(),
 }));
 
@@ -124,6 +126,70 @@ function makeHarness(
 }
 
 describe("UnitGroundingService.extractUnitGrounding", () => {
+  it("dynamically sends pages 5-28 in order, awaits each request, and persists only once", async () => {
+    const ranges: number[][] = [];
+    let inFlight = 0;
+    const h = makeHarness({ unitOverrides: { sourcePageStart: 5, sourcePageEnd: 28 }, generateImpl: async (request) => {
+      expect(inFlight++).toBe(0);
+      const { pageStart, pageEnd, estimatedInputTokens } = request.diagnostics;
+      expect(estimatedInputTokens + request.maxOutputTokens).toBeLessThanOrEqual(90000);
+      expect(request.messages[0].content.filter((p: any) => p.type === "image_url").every((p: any) => p.image_url.detail === "high")).toBe(true);
+      ranges.push([pageStart, pageEnd]);
+      expect(h.updateCalls).toHaveLength(0);
+      await Promise.resolve();
+      inFlight--;
+      const notes = JSON.parse(VALID_EXTRACTION_JSON);
+      notes.concepts[0].sourcePages = [pageStart];
+      return { content: JSON.stringify(notes), inputTokens: estimatedInputTokens, outputTokens: 100, model: "gpt-4o-mini" };
+    } });
+    await h.service.extractUnitGrounding("unit-1", {}, "actor-1");
+    expect(ranges).toEqual(Array.from({ length: 12 }, (_, i) => [5 + i * 2, 6 + i * 2]));
+    expect(h.updateCalls).toHaveLength(1);
+    expect(h.reserveBudget).toHaveBeenCalledTimes(12);
+    expect(h.reconcileBudget).toHaveBeenCalledTimes(12);
+  });
+
+  it("fails an oversized page before reserving budget or sending AI requests", async () => {
+    const original = process.env.GROUNDING_REQUEST_TOKEN_TARGET;
+    process.env.GROUNDING_REQUEST_TOKEN_TARGET = "5000";
+    try {
+      const h = makeHarness();
+      await expect(h.service.extractUnitGrounding("unit-1", {}, "actor-1")).rejects.toThrow("exceeds");
+      expect(h.reserveBudget).not.toHaveBeenCalled();
+      expect(h.generateSpy).not.toHaveBeenCalled();
+      expect(h.updateCalls).toHaveLength(0);
+    } finally {
+      if (original === undefined) delete process.env.GROUNDING_REQUEST_TOKEN_TARGET;
+      else process.env.GROUNDING_REQUEST_TOKEN_TARGET = original;
+    }
+  });
+  it.each([false, true])("keeps one budget reservation across SDK 429 retries (exhausted=%s)", async (exhausted) => {
+    let attempts = 0;
+    const fetch = jest.fn(async () => {
+      attempts++;
+      if (exhausted || attempts === 1) return new Response(JSON.stringify({ error: { message: "rate limited", code: "rate_limit_exceeded" } }), { status: 429, headers: { "content-type": "application/json", "retry-after-ms": "1" } });
+      return new Response(JSON.stringify({ choices: [{ message: { content: VALID_EXTRACTION_JSON } }], usage: { prompt_tokens: 100, completion_tokens: 200 }, model: "gpt-4o-mini" }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    const provider = new OpenAIProvider("gpt-4o-mini");
+    (provider as any).client = createInstrumentedOpenAI("test-not-a-real-key", () => undefined, fetch as any);
+    const h = makeHarness({ generateImpl: (request) => provider.generate(request) });
+    if (exhausted) {
+      await expect(h.service.extractUnitGrounding("unit-1", {}, "actor-1")).rejects.toMatchObject({ status: 429 });
+      expect(fetch).toHaveBeenCalledTimes(3);
+      expect(h.releaseBudget).toHaveBeenCalledTimes(1);
+      expect(h.reconcileBudget).not.toHaveBeenCalled();
+      expect(h.updateCalls).toHaveLength(0);
+      expect(h.usageCreateCalls).toHaveLength(0);
+    } else {
+      await h.service.extractUnitGrounding("unit-1", {}, "actor-1");
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(h.releaseBudget).not.toHaveBeenCalled();
+      expect(h.reconcileBudget).toHaveBeenCalledTimes(1);
+      expect(h.updateCalls).toHaveLength(1);
+      expect(h.usageCreateCalls).toHaveLength(1);
+    }
+    expect(h.reserveBudget).toHaveBeenCalledTimes(1);
+  });
   it("success path: validates, persists groundingNotesJson + version/model/fingerprint metadata, and reserves/reconciles budget", async () => {
     const h = makeHarness();
     const result = await h.service.extractUnitGrounding("unit-1", {}, "actor-1");
@@ -185,7 +251,7 @@ describe("UnitGroundingService.extractUnitGrounding", () => {
     const overrideJson = JSON.stringify({ ...JSON.parse(VALID_EXTRACTION_JSON), concepts: [{ name: "Roots", description: "Roots absorb water.", sourcePages: [20], importance: "core" }] });
     const h = makeHarness({ generateImpl: async () => ({ content: overrideJson, inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }) });
     await h.service.extractUnitGrounding("unit-1", { pageRangeOverride: [20, 21] }, "actor-1");
-    const promptCall = h.contextBuilder.buildUnitGroundingExtractionPrompt.mock.calls[0][0];
+    const promptCall = h.contextBuilder.buildUnitGroundingExtractionPrompt.mock.calls.map((call: any[]) => call[0]).find((arg: any) => arg.pageRangeStart === 20 && arg.pageRangeEnd === 21);
     expect(promptCall.pageRangeStart).toBe(20);
     expect(promptCall.pageRangeEnd).toBe(21);
   });
@@ -208,7 +274,7 @@ describe("UnitGroundingService.extractUnitGrounding", () => {
       const normal = makeHarness();
       normal.storage.fetchToTempFile.mockResolvedValue({ localPath: "D:\\fake-curriculum-sources\\normal-textbook.pdf", isTemporary: false });
       const jest_fs = require("fs");
-      jest_fs.readFileSync.mockImplementation((p: string) => Buffer.from(p.includes("normal-textbook") ? "NORMAL PDF BYTES" : "STORY PDF BYTES"));
+      jest_fs.readFileSync.mockImplementation((p: string) => p.endsWith(".png") ? Buffer.from("89504e470d0a1a0a0000000d49484452000004bb00000659", "hex") : Buffer.from(p.includes("normal-textbook") ? "NORMAL PDF BYTES" : "STORY PDF BYTES"));
       await normal.service.extractUnitGrounding("unit-1", {}, "actor-1");
       const normalFingerprint = normal.updateCalls[0].groundingSourceFingerprint;
 

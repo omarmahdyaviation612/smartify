@@ -1,3 +1,4 @@
+import { estimateImageTokens, estimateTextTokens, groundingSizingConfig, planGroundingChunks, pngDimensions, type ImageDetail, type SizedPage } from "../../ai/vision-request-sizing";
 import { invokePdfRenderer } from "./pdf-renderer-runtime";
 import * as fs from "fs";
 import * as os from "os";
@@ -15,10 +16,8 @@ import { resolveEffectiveSourceFile } from "./unit-effective-source.util";
 
 
 const MAX_ATTEMPTS = 2; // one initial attempt + one corrective retry — same bound as every other AI-generation loop in this codebase
-const MAX_PAGES_PER_CALL = 10; // caps vision-token cost per call; a larger Unit range runs multiple sequential calls, merged into one GroundingNotes
+const MAX_PAGES_PER_RENDER = 10; // caps vision-token cost per call; a larger Unit range runs multiple sequential calls, merged into one GroundingNotes
 const MAX_UNIT_PAGE_COUNT = 40; // a sane ceiling on a single Unit's total page range — protects against an accidentally huge manifest range being silently rendered/processed in full
-const IMAGE_TOKEN_ESTIMATE = 1500; // conservative per-page-image token estimate for the pre-call budget check (estimateMaxChatCostUsd is text-length-based and has no native image-cost model)
-const CHARS_PER_TOKEN_CONSERVATIVE = 3; // mirrors AIUsageService's own constant, so the image padding is expressed in the same unit
 
 const CURRENT_GROUNDING_VERSION = 1; // bump only when the extraction schema/methodology changes in a way that makes old groundingNotesJson stale
 const GROUNDING_PROMPT_VERSION = "grounding-extraction-v1";
@@ -160,17 +159,31 @@ export class UnitGroundingService {
 
     const tmpDir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "smartify-grounding-"));
     try {
-      const chunkRanges = chunkPageRange(pageStart, pageEnd, MAX_PAGES_PER_CALL);
+      const active = await this.providerFactory.getActiveProvider();
+      if (active.providerKey !== "openai") throw new Error("Grounding vision sizing currently requires a supported OpenAI model");
+      const { detail, target } = groundingSizingConfig();
+      const pages: SizedPage[] = [];
+      // Render in bounded batches, but plan ALL AI requests before sending any.
+      for (const [start, end] of chunkPageRange(pageStart, pageEnd, MAX_PAGES_PER_RENDER)) {
+        const { stdout } = await invokePdfRenderer([pdfPath, String(start), String(end), tmpDir]);
+        const paths = stdout.split("\n").map(p => p.trim()).filter(Boolean);
+        if (paths.length !== end - start + 1) throw new Error("Renderer page count does not match requested range");
+        for (let index = 0; index < paths.length; index++) {
+          const dimensions = pngDimensions(fs.readFileSync(paths[index]));
+          pages.push({ page: start + index, imagePath: paths[index], imageTokens: estimateImageTokens(active.model, dimensions.width, dimensions.height, detail) });
+        }
+      }
+      const textTokens = (start: number, end: number) => estimateTextTokens(this.contextBuilder.buildUnitGroundingExtractionPrompt({ ...ctx, pageRangeStart: start, pageRangeEnd: end }) + "Extract the curriculum grounding now.");
+      const chunks = planGroundingChunks(pages, target, 4000, textTokens);
       const chunkNotes: GroundingNotes[] = [];
-
-      for (const [chunkStart, chunkEnd] of chunkRanges) {
-        const notes = await this.extractChunk(pdfPath, chunkStart, chunkEnd, ctx, requestingUserId, tmpDir, unit.subjectId + ":" + unit.id);
+      for (const chunk of chunks) {
+        const notes = await this.extractChunk(chunk, ctx, requestingUserId, unitId, detail, active, textTokens(chunk[0].page, chunk[chunk.length - 1].page));
         chunkNotes.push(notes);
       }
 
       const merged = mergeGroundingNotes(chunkNotes);
       const fingerprint = this.computeFingerprint(pdfPath, pageStart, pageEnd);
-      const { model } = await this.providerFactory.getActiveProvider();
+      const { model } = active;
 
       await this.prisma.client.unit.update({
         where: { id: unitId },
@@ -183,7 +196,7 @@ export class UnitGroundingService {
           groundingSourceFingerprint: fingerprint,
         },
       });
-      this.logger.log(`GROUNDING_EXTRACTION_COMPLETED unitId=${unitId} conceptCount=${merged.concepts.length} chunks=${chunkRanges.length}`);
+      this.logger.log(`GROUNDING_EXTRACTION_COMPLETED unitId=${unitId} conceptCount=${merged.concepts.length} chunks=${chunks.length}`);
       return { unitId, groundingVersion: CURRENT_GROUNDING_VERSION, conceptCount: merged.concepts.length };
     } catch (err) {
       this.logger.warn(`GROUNDING_EXTRACTION_FAILED unitId=${unitId}: ${err instanceof Error ? err.message : String(err)}`);
@@ -276,43 +289,35 @@ export class UnitGroundingService {
     }
   }
 
-  /** One page-range chunk (<= MAX_PAGES_PER_CALL pages): render -> AI call -> validate, with its own MAX_ATTEMPTS retry. Never writes anything — the caller merges and persists once ALL chunks succeed. */
+  /** Sequential token-sized request; financial reservation spans SDK retries. */
   private async extractChunk(
-    pdfPath: string,
-    pageStart: number,
-    pageEnd: number,
+    pages: SizedPage[],
     ctx: { curriculumNameEn: string; gradeNameEn: string; subjectNameEn: string; unitNameEn: string },
     requestingUserId: string,
-    tmpDir: string,
-    chunkTag: string,
+    unitId: string,
+    detail: ImageDetail,
+    active: Awaited<ReturnType<AIProviderFactory["getActiveProvider"]>>,
+    textTokens: number,
   ): Promise<GroundingNotes> {
-    const chunkDir = fs.mkdtempSync(path.join(tmpDir, `chunk-${pageStart}-${pageEnd}-`));
-    let imagePaths: string[];
-    try {
-      const { stdout } = await invokePdfRenderer([pdfPath, String(pageStart), String(pageEnd), chunkDir]);
-      imagePaths = stdout
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean);
-      if (imagePaths.length === 0) throw new Error("Page renderer produced no images.");
-    } catch (err) {
-      throw new Error(`Rendering pages ${pageStart}-${pageEnd} failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
+    const pageStart = pages[0].page, pageEnd = pages[pages.length - 1].page;
+    const imagePaths = pages.map(p => p.imagePath);
+    const estimatedInputTokens = textTokens + pages.reduce((sum, p) => sum + p.imageTokens, 0);
+    const chunkTag = unitId;
     const imageParts = imagePaths.map((p) => ({
       type: "image_url" as const,
-      image_url: { url: `data:image/png;base64,${fs.readFileSync(p).toString("base64")}` },
+      image_url: { url: `data:image/png;base64,${fs.readFileSync(p).toString("base64")}`, detail },
     }));
 
     const systemPrompt = this.contextBuilder.buildUnitGroundingExtractionPrompt({ ...ctx, pageRangeStart: pageStart, pageRangeEnd: pageEnd });
     let lastErrors: string[] = [];
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      const { provider, providerKey, model } = await this.providerFactory.getActiveProvider();
+      const { provider, providerKey, model } = active;
 
       const estimatedUsd = await this.usageService.estimateMaxChatCostUsd({
         providerKey,
-        inputText: systemPrompt + "x".repeat(imageParts.length * IMAGE_TOKEN_ESTIMATE * CHARS_PER_TOKEN_CONSERVATIVE),
+        inputText: systemPrompt,
+        estimatedInputTokens,
         maxOutputTokens: 4000,
       });
       const reserveResult = await this.usageService.reserveBudget(requestingUserId, estimatedUsd);
@@ -326,6 +331,7 @@ export class UnitGroundingService {
         result = await provider.generate({
           systemPrompt,
           messages: [{ role: "user", content: [{ type: "text", text: "Extract the curriculum grounding now." }, ...imageParts] }],
+          diagnostics: { operation: "unit_grounding", unitId, pageStart, pageEnd, estimatedInputTokens },
           responseFormat: "json_object",
           maxOutputTokens: 4000,
         });

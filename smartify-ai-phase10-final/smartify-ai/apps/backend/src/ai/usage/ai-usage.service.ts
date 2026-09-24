@@ -275,9 +275,10 @@ export class AIUsageService {
    * (or an explicit override), so this is a true ceiling, not a guess that
    * could come in low.
    */
-  async estimateMaxChatCostUsd(params: { providerKey: string; inputText: string; maxOutputTokens?: number }): Promise<number> {
+  async estimateMaxChatCostUsd(params: { providerKey: string; inputText: string; maxOutputTokens?: number; estimatedInputTokens?: number }): Promise<number> {
     const rates = await this.providerFactory.getCostRates(params.providerKey);
-    const estimatedInputTokens = Math.ceil(params.inputText.length / CHARS_PER_TOKEN_CONSERVATIVE);
+    const estimatedInputTokens = params.estimatedInputTokens ?? Math.ceil(params.inputText.length / CHARS_PER_TOKEN_CONSERVATIVE);
+    if (!Number.isSafeInteger(estimatedInputTokens) || estimatedInputTokens < 0) throw new Error("Invalid input token estimate");
     const maxOutputTokens = params.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
     return estimatedInputTokens * rates.costPerInputToken + maxOutputTokens * rates.costPerOutputToken;
   }
