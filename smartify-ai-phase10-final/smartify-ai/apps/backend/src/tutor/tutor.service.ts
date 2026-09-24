@@ -5,6 +5,9 @@ import { AIContextBuilderService } from "../ai/context/ai-context-builder.servic
 import { AIUsageService } from "../ai/usage/ai-usage.service";
 import { TutorQuestionPacksService } from "../tutor-question-packs/tutor-question-packs.service";
 import { TutorAnswerCacheService } from "./tutor-answer-cache.service";
+import { selectRelevantGrounding } from "../ai/context/grounding-selector.util";
+import type { GroundingNotes } from "../interactive-lesson/unit-grounding/unit-grounding.types";
+import { buildAdaptiveMathTeachingPlan } from "./adaptive-math-teaching.util";
 
 // Hard cap on a single message's length, checked BEFORE any daily-limit
 // slot is reserved or any provider call is made — an oversized prompt
@@ -174,6 +177,8 @@ export class TutorService {
     if (trimmed.length > MAX_MESSAGE_CHARS) {
       throw new BadRequestException(`Message is too long (max ${MAX_MESSAGE_CHARS} characters).`);
     }
+    const currentTurnMathPlan = buildAdaptiveMathTeachingPlan(studentSubject.subject.nameEn, [{ role: "user", content: trimmed }]);
+    const canUseAnswerCache = !input.conversationId && (!currentTurnMathPlan || currentTurnMathPlan.stage === "CURRICULUM_FIRST");
 
     // --- Global/per-user spend circuit breaker (cheap, no cost/slot
     // consumed yet — see AIUsageService.assertWithinBudget) ---
@@ -198,14 +203,18 @@ export class TutorService {
     let budgetReservationId: string | null = null;
 
     try {
-      const cached = await this.answerCache.find({
+      // A cached answer is scoped only by prompt/curriculum/topic, not by
+      // conversation history. It is therefore safe for a new standalone
+      // question, but must never bypass a follow-up whose teaching approach
+      // depends on prior attempts, hints, or methods.
+      const cached = canUseAnswerCache ? await this.answerCache.find({
         curriculumId: profile.curriculum.id,
         gradeId: profile.grade.id,
         subjectId: input.subjectId,
         topicId: input.topicId,
         language: profile.preferredLang,
         prompt: trimmed,
-      });
+      }) : null;
       if (cached) {
         return this.persistCachedReply(profile.id, input, trimmed, cached.answer);
       }
@@ -237,10 +246,25 @@ export class TutorService {
 
       const subject = studentSubject.subject;
       let topicNameEn: string | undefined;
+      let groundingSlice = null;
       if (input.topicId) {
-        const topic = await this.prisma.client.topic.findUnique({ where: { id: input.topicId } });
-        topicNameEn = topic?.nameEn;
+        const topic = await this.prisma.client.topic.findUnique({
+          where: { id: input.topicId },
+          include: { unit: { select: { subjectId: true, groundingNotesJson: true } } },
+        });
+        // A client-supplied Topic must belong to the selected Subject before
+        // it can influence this tutor turn. Its Unit grounding is then
+        // narrowed to this Topic rather than exposing a whole Unit.
+        if (topic?.unit?.subjectId === input.subjectId) {
+          topicNameEn = topic.nameEn;
+          groundingSlice = selectRelevantGrounding(topic.unit.groundingNotesJson as GroundingNotes | null, topic.nameEn);
+        }
       }
+
+      const adaptiveMathPlan = buildAdaptiveMathTeachingPlan(subject.nameEn, [
+        ...priorMessages,
+        { role: "user", content: trimmed },
+      ]);
 
       const systemPrompt = this.contextBuilder.buildTutorSystemPrompt({
         studentFullName: profile.fullName,
@@ -250,6 +274,8 @@ export class TutorService {
         subjectNameEn: subject.nameEn,
         topicNameEn,
         preferredLang: profile.preferredLang as "ar" | "en",
+        groundingSlice,
+        adaptiveMathPlan,
       });
 
       const { provider, providerKey, model } = await this.providerFactory.getActiveProvider();
@@ -357,17 +383,19 @@ export class TutorService {
         ? await this.usageService.getRemainingToday(profile.id, input.subjectId)
         : { remaining: Math.max(0, 2 - ((await this.prisma.client.freeTutorTrial.findUnique({ where: { studentId: profile.id } }))?.questionsUsed ?? 2)), limit: 2 };
 
-      await this.answerCache.save({
-        curriculumId: profile.curriculum.id,
-        gradeId: profile.grade.id,
-        subjectId: input.subjectId,
-        topicId: input.topicId,
-        language: profile.preferredLang,
-        prompt: trimmed,
-        answer: result.content,
-        provider: providerKey,
-        model,
-      });
+      if (canUseAnswerCache) {
+        await this.answerCache.save({
+          curriculumId: profile.curriculum.id,
+          gradeId: profile.grade.id,
+          subjectId: input.subjectId,
+          topicId: input.topicId,
+          language: profile.preferredLang,
+          prompt: trimmed,
+          answer: result.content,
+          provider: providerKey,
+          model,
+        });
+      }
       return {
         conversationId: conversation.id,
         reply: result.content,

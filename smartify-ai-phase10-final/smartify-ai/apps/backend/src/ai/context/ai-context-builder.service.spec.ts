@@ -116,6 +116,34 @@ describe("AIContextBuilderService.buildTutorSystemPrompt", () => {
     });
   });
 
+  describe("adaptive K-6 mathematics teaching", () => {
+    const mathCtx = { ...baseCtx, age: 9, gradeNameEn: "Grade 4", subjectNameEn: "Mathematics", topicNameEn: "Subtraction" };
+
+    it("requires the curriculum method first, then a simple explanation, a different representation, and a concrete bridge without changing the objective", () => {
+      const prompt = service.buildTutorSystemPrompt(mathCtx);
+      expect(prompt).toMatch(/ADAPTIVE MATHEMATICS TEACHING/i);
+      expect(prompt).toMatch(/curriculum.*method.*first/i);
+      expect(prompt).toMatch(/do not merely rephrase/i);
+      expect(prompt).toMatch(/small concrete example.*bridge back/i);
+      expect(prompt).toMatch(/final mathematical answer.*correct/i);
+    });
+
+    it("keeps the adaptive mathematics rules age-appropriate and language-aware for English and Arabic students", () => {
+      for (const preferredLang of ["en", "ar"] as const) {
+        const prompt = service.buildTutorSystemPrompt({ ...mathCtx, preferredLang });
+        expect(prompt).toMatch(/short sentences/i);
+        expect(prompt).toMatch(/one idea at a time/i);
+        expect(prompt).toMatch(/match the language the student actually wrote/i);
+      }
+    });
+
+    it("does not add adaptive mathematics instructions to a non-mathematics Tutor prompt", () => {
+      const prompt = service.buildTutorSystemPrompt({ ...baseCtx, adaptiveMathPlan: { stage: "CONCRETE_BRIDGE", difficultySignals: 3, method: "very small concrete example", avoidMethods: ["number line"] } });
+      expect(prompt).not.toMatch(/ADAPTIVE MATHEMATICS TEACHING/i);
+      expect(prompt).not.toMatch(/CURRENT ADAPTIVE STAGE/i);
+    });
+  });
+
   describe("formatting (regression: LaTeX notation like \\frac{1}{4} rendering as literal backslashes, both on-screen and in TTS)", () => {
     it("instructs the model never to use LaTeX or math markup", () => {
       const prompt = service.buildTutorSystemPrompt(baseCtx);
