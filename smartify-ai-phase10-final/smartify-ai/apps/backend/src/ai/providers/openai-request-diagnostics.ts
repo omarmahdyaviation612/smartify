@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "async_hooks";
 import OpenAI, { type ClientOptions } from "openai";
-import type { AIGenerateRequest } from "../ai-provider.interface";
+import type { AIGenerateRequest, AIRateLimitMetadata } from "../ai-provider.interface";
 import { estimateImageTokens, estimateTextTokens, pngDimensions } from "../vision-request-sizing";
 
 type Context = Record<string, unknown> & { attempt: number };
@@ -20,6 +20,32 @@ export function retryAfterMs(headers: { get(name: string): string | null }): num
   if (seconds === null) return null;
   const delay = Number.isFinite(Number(seconds)) ? Number(seconds) * 1000 : Date.parse(seconds) - Date.now();
   return Number.isFinite(delay) && delay >= 0 ? delay : null;
+}
+
+export function parseRateLimitResetMs(value: string | null): number | null {
+  if (!value) return null;
+  if (/^\d+(?:\.\d+)?$/.test(value)) return Math.ceil(Number(value));
+  let total = 0, found = false;
+  for (const match of value.matchAll(/(\d+(?:\.\d+)?)(ms|s|m|h)/g)) {
+    found = true;
+    const amount = Number(match[1]);
+    total += amount * (match[2] === "ms" ? 1 : match[2] === "s" ? 1_000 : match[2] === "m" ? 60_000 : 3_600_000);
+  }
+  return found && Number.isFinite(total) && total >= 0 ? Math.ceil(total) : null;
+}
+
+function safeIntegerHeader(headers: { get(name: string): string | null }, name: string): number | null {
+  const value = headers.get(name);
+  return value !== null && /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : null;
+}
+
+export function tokenRateLimitMetadata(headers: { get(name: string): string | null }): AIRateLimitMetadata {
+  return {
+    limitTokens: safeIntegerHeader(headers, "x-ratelimit-limit-tokens"),
+    remainingTokens: safeIntegerHeader(headers, "x-ratelimit-remaining-tokens"),
+    resetTokensMs: parseRateLimitResetMs(headers.get("x-ratelimit-reset-tokens")),
+    retryAfterMs: retryAfterMs(headers),
+  };
 }
 
 export function createInstrumentedOpenAI(apiKey: string, log: (entry: Record<string, unknown>) => void, transport: typeof globalThis.fetch = globalThis.fetch): OpenAI {

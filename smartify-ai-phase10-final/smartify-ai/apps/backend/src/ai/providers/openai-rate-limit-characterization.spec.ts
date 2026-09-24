@@ -38,6 +38,22 @@ describe("current OpenAI retry behavior", () => {
     await expect(setup(fetch).generate(request)).rejects.toMatchObject({ code: "insufficient_quota" });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
+  it("returns successful TPM headers and disables SDK retries when the caller owns pacing", async () => {
+    const fetch = jest.fn().mockImplementation(async () => new Response(JSON.stringify({ error: { message: "TPM exhausted", code: "rate_limit_exceeded" } }), {
+      status: 429,
+      headers: { "content-type": "application/json", "retry-after-ms": "695", "x-ratelimit-limit-tokens": "200000", "x-ratelimit-remaining-tokens": "0", "x-ratelimit-reset-tokens": "79s" },
+    }));
+    const provider = setup(fetch);
+    await expect(provider.generate({ ...request, transportRetryMode: "none" } as any)).rejects.toMatchObject({ status: 429 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    const successFetch = jest.fn().mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 10, completion_tokens: 2 }, model: "gpt-4o-mini" }), {
+      status: 200,
+      headers: { "content-type": "application/json", "x-ratelimit-limit-tokens": "200000", "x-ratelimit-remaining-tokens": "52000", "x-ratelimit-reset-tokens": "1m19s" },
+    }));
+    const result: any = await setup(successFetch).generate({ ...request, transportRetryMode: "none" } as any);
+    expect(result.rateLimit).toEqual(expect.objectContaining({ limitTokens: 200000, remainingTokens: 52000, resetTokensMs: 79000 }));
+  });
   it("logs attempts and only allowlisted metadata, with no content or credentials", async () => {
     const log = jest.fn();
     const fetch = jest.fn().mockImplementationOnce(async () => new Response(JSON.stringify({ error: { code: "rate_limit_exceeded", message: "tokens per min; private prompt MUST_NOT_LOG" } }), { status: 429, headers: { "content-type": "application/json", "retry-after-ms": "1", "x-request-id": "req_test", "x-ratelimit-remaining-tokens": "0", authorization: "MUST_NOT_LOG" } })).mockImplementation(async () => ok());
