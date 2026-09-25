@@ -587,7 +587,7 @@ describe("InteractiveLessonService", () => {
     const h = makeHarness();
     h.state.topics["topic-2"] = { id: "topic-2", nameEn: "No Plan", nameAr: "بلا خطة", unitId: "unit-1", teachingStepsJson: null, unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } } };
     const result = await h.service.getState("user-1", "topic-2");
-    expect(result).toEqual({ started: false });
+    expect(result).toEqual({ started: false, preparation: { status: "READY" } });
   });
 
   it("getState() on a genuinely unknown topic id still throws NotFoundException", async () => {

@@ -88,13 +88,21 @@ export class InteractiveLessonService {
    * this path — see LessonPublishService.autoPublishIntoTopic's doc
    * comment for the tradeoff this accepts.
    */
-  private async ensureTopicHasSteps(topicId: string, profile: { userId: string; preferredLang?: string; age?: number }) {
+  private async ensureTopicHasSteps(topicId: string, profile: { userId: string; preferredLang?: string; age?: number }): Promise<any> {
     const existing = await this.prisma.client.topic.findUnique({
       where: { id: topicId },
       include: { unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
     });
     if (!existing) throw new NotFoundException("This lesson is not available as an interactive lesson yet.");
     if (existing.teachingStepsJson) return existing;
+
+    const preparation = typeof (this.draftGenerator as any).prepareTopicGrounding === "function"
+      ? await (this.draftGenerator as any).prepareTopicGrounding(topicId, profile.userId)
+      : { status: "READY" as const };
+    if (preparation.status !== "READY") {
+      if (preparation.status === "CONFIGURATION_ERROR") throw new ServiceUnavailableException("This lesson is not available yet.");
+      return { __preparation: true as const, status: "PREPARING" as const, retryAfterMs: preparation.retryAfterMs ?? 1500 };
+    }
 
     await this.draftGenerator.ensureTopicHasLesson(
       topicId,
@@ -310,6 +318,7 @@ export class InteractiveLessonService {
   async advance(userId: string, topicId: string) {
     const profile = await this.getProfileOrThrow(userId);
     const topic = await this.ensureTopicHasSteps(topicId, { userId, preferredLang: (profile as any).preferredLang, age: (profile as any).age });
+    if ((topic as any).__preparation) return topic;
     const steps = this.getSteps(topic);
     let session = await this.getOwnSession(profile, topicId);
 
@@ -840,7 +849,12 @@ export class InteractiveLessonService {
       include: { unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
     });
     if (!topic) throw new NotFoundException("This lesson is not available as an interactive lesson yet.");
-    if (!topic.teachingStepsJson) return { started: false };
+    if (!topic.teachingStepsJson) {
+      const preparation = typeof (this.draftGenerator as any).getTopicGroundingPreparationStatus === "function"
+        ? await (this.draftGenerator as any).getTopicGroundingPreparationStatus(topicId)
+        : { status: "READY" as const };
+      return { started: false, preparation };
+    }
     const steps = this.getSteps(topic);
     const session = await this.getOwnSession(profile, topicId);
     if (!session) return { started: false };

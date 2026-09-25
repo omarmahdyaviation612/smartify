@@ -430,7 +430,15 @@ export class LessonDraftGeneratorService {
     if (!topic) throw new NotFoundException(`Topic ${topicId} not found.`);
     if (topic.teachingStepsJson) return topic;
 
-    await this.unitGrounding.ensureUnitGrounded(topic.unitId, CONTENT_AUTHORING_ACTOR_ID);
+    if (typeof (this.unitGrounding as any).prepareNextGroundingChunk !== "function") {
+      await this.unitGrounding.ensureUnitGrounded(topic.unitId, CONTENT_AUTHORING_ACTOR_ID);
+    }
+
+    // Legacy direct callers/tests may provide the pre-Phase-3 grounding stub;
+    // the production service is prepared by InteractiveLessonService first.
+    if (typeof (this.unitGrounding as any).prepareNextGroundingChunk !== "function") {
+      await this.unitGrounding.ensureUnitGrounded(topic.unitId, CONTENT_AUTHORING_ACTOR_ID);
+    }
 
     // Deliberately NOT filtering on teachingStepsJson here — Prisma's
     // JSON-column null filters need the Prisma.JsonNull sentinel, not a
@@ -473,6 +481,18 @@ export class LessonDraftGeneratorService {
     }
 
     return this.prisma.client.topic.findUniqueOrThrow({ where: { id: topicId } });
+  }
+
+  async prepareTopicGrounding(topicId: string, requestingActorId: string) {
+    const topic = await this.prisma.client.topic.findUnique({ where: { id: topicId }, select: { unitId: true } });
+    if (!topic) throw new NotFoundException(`Topic ${topicId} not found.`);
+    return this.unitGrounding.prepareNextGroundingChunk(topic.unitId, requestingActorId);
+  }
+
+  async getTopicGroundingPreparationStatus(topicId: string) {
+    const topic = await this.prisma.client.topic.findUnique({ where: { id: topicId }, select: { unitId: true } });
+    if (!topic) return { status: "CONFIGURATION_ERROR" as const };
+    return this.unitGrounding.getPreparationStatus(topic.unitId);
   }
 
   /** Returns the computed costUsd so callers can reconcile the matching USD budget reservation to the exact same figure. */
