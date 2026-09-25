@@ -1,4 +1,5 @@
 import { BadRequestException } from "@nestjs/common";
+import { execFile } from "child_process";
 import { createInstrumentedOpenAI } from "../../ai/providers/openai-request-diagnostics";
 import { OpenAIProvider } from "../../ai/providers/openai.provider";
 import { UnitGroundingTpmPacer } from "./tpm-pacing.util";
@@ -320,8 +321,11 @@ describe("UnitGroundingService.extractUnitGrounding", () => {
 describe("UnitGroundingService.ensureUnitGrounded (production lazy-trigger + single-flight locking)", () => {
   it("already-grounded Unit: returns {used:true} immediately, claims no lock, calls no AI provider (cache checked before any grounding work)", async () => {
     const h = makeHarness({ unitOverrides: { groundingNotesJson: { concepts: [{ name: "cached" }] } } });
+    (execFile as unknown as jest.Mock).mockClear();
     const result = await h.service.ensureUnitGrounded("unit-1", "actor-1");
     expect(result).toEqual({ used: true });
+    expect(h.storage.fetchToTempFile).not.toHaveBeenCalled();
+    expect(execFile).not.toHaveBeenCalled();
     expect(h.generateSpy).not.toHaveBeenCalled();
     expect(h.updateManyCalls).toHaveLength(0);
   });
