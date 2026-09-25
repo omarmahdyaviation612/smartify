@@ -25,3 +25,24 @@ export function parseTutorVisual(content: string): { text: string; visual: Visua
   }).replace(/```(?:json)?\s*```/gi, "").replace(/[ \t]+\n/g, "\n").trim();
   return { text, visual };
 }
+
+const SHOW = /\b(show|draw|visuali[sz]e|picture|diagram)\b|\b visually\b|وريني|ارسم|بصري/iu;
+export function deriveRequestedMathVisual(message: string, subjectName: string): VisualInstruction | null {
+  if (!/\b(math|mathematics|maths)\b|رياضيات/iu.test(subjectName) || !SHOW.test(message)) return null;
+  const fraction = message.match(/\b(\d{1,2})\s*\/\s*(\d{1,2})\b/);
+  if (fraction) {
+    const numerator = Number(fraction[1]), denominator = Number(fraction[2]);
+    if (denominator > 0 && numerator <= denominator && denominator <= MAX) return validateVisualInstruction({ kind: "FRACTION_BAR", numerator, denominator, segments: Array.from({ length: denominator }, (_, i) => i < numerator ? "filled" : "empty"), altText: `${numerator} of ${denominator} equal parts are shaded.` });
+  }
+  const product = message.match(/(\d{1,2})\s*(?:×|x|\*)\s*(\d{1,2})/i);
+  if (product) {
+    const groups = Number(product[1]), itemsPerGroup = Number(product[2]);
+    if (groups > 0 && itemsPerGroup > 0 && groups <= MAX && itemsPerGroup <= MAX) return validateVisualInstruction({ kind: "MULTIPLICATION_GROUPS", groups, itemsPerGroup, item: "apple", altText: `${groups} equal groups with ${itemsPerGroup} apples in each group.` });
+  }
+  const division = message.match(/(\d{1,2})\s*(?:÷|\/|divided by)\s*(\d{1,2})/i);
+  if (division) {
+    const total = Number(division[1]), groups = Number(division[2]);
+    if (total > 0 && groups > 0 && total % groups === 0 && groups <= MAX && total / groups <= MAX) return validateVisualInstruction({ kind: "MULTIPLICATION_GROUPS", groups, itemsPerGroup: total / groups, item: "block", altText: `${total} objects split into ${groups} equal groups.` });
+  }
+  return null;
+}

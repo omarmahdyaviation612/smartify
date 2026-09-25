@@ -1,4 +1,4 @@
-import { parseTutorVisual, validateVisualInstruction } from "./visual-instruction.util";
+import { deriveRequestedMathVisual, parseTutorVisual, validateVisualInstruction } from "./visual-instruction.util";
 
 describe("deterministic visual instructions", () => {
   it("accepts exact multiplication groups", () => {
@@ -28,5 +28,12 @@ describe("deterministic visual instructions", () => {
   });
   it("rejects executable or URL-shaped content", () => {
     expect(validateVisualInstruction({ kind: "NUMBER_LINE", min: 0, max: 5, marks: [0, 5], altText: "<script>alert(1)</script>" })).toBeNull();
+  });
+  it("derives only explicit, unambiguous math requests", () => {
+    expect(deriveRequestedMathVisual("I don't understand 4 × 3. Show me visually.", "Mathematics")).toMatchObject({ kind: "MULTIPLICATION_GROUPS", groups: 4, itemsPerGroup: 3 });
+    expect(deriveRequestedMathVisual("show me 3/4", "Maths")).toMatchObject({ kind: "FRACTION_BAR", numerator: 3, denominator: 4, segments: ["filled", "filled", "filled", "empty"] });
+    expect(deriveRequestedMathVisual("show me 12 ÷ 4", "Mathematics")).toMatchObject({ kind: "MULTIPLICATION_GROUPS", groups: 4, itemsPerGroup: 3 });
+    expect(deriveRequestedMathVisual("show me this", "Science")).toBeNull();
+    expect(deriveRequestedMathVisual("show me 7 ÷ 2", "Mathematics")).toBeNull();
   });
 });
