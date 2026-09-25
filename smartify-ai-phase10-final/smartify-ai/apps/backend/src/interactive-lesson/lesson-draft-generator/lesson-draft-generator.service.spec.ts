@@ -58,6 +58,7 @@ describe("LessonDraftGeneratorService.ensureTopicHasLesson — budget attributio
           findUnique: jest.fn().mockResolvedValue({
             id: UNIT_ID,
             nameEn: "Unit 1",
+            subjectId: "subject-1",
             groundingNotesJson: null,
             groundingVersion: null,
             subject: { nameEn: "Science", grade: { nameEn: "Year 5", curriculum: { nameEn: "Test Curriculum" } } },
@@ -172,6 +173,24 @@ describe("LessonDraftGeneratorService.ensureTopicHasLesson — budget attributio
       groundingNotesJson: { concepts: [], facts: [], vocabulary: [], learningObjectives: [], topicHints: emptyHint ? [{ topicTitle: "Test Topic", relevantConcepts: [], sourcePages: [] }] : [] },
     } as any);
     await expect(h.service.ensureTopicHasLesson(TOPIC_ID, { preferredLang: "en", studentAgeRange: "6-7" }, REAL_STUDENT_ID)).rejects.toThrow("Textbook grounding is unavailable");
+    expect(h.generateSpy).not.toHaveBeenCalled();
+    expect(h.publisher.autoPublishIntoTopic).not.toHaveBeenCalled();
+  });
+
+  it("blocks a mapped Topic when persisted grounding exists but the selector finds no Topic-specific match", async () => {
+    const h = makeHarness();
+    const unit = await h.prisma.client.unit.findUnique();
+    h.prisma.client.unit.findUnique.mockResolvedValue({ ...unit,
+      subject: { ...unit.subject, sourceFile: "textbook.pdf" }, groundingVersion: 1,
+      groundingNotesJson: {
+        concepts: [{ name: "Unrelated concept", description: "Grounded content", sourcePages: [1], importance: "core" }],
+        facts: [], vocabulary: [], learningObjectives: ["Stay within the grounded curriculum."], topicHints: [],
+      },
+    } as any);
+    h.unitGrounding.ensureUnitGrounded.mockResolvedValue({ used: true });
+
+    await expect(h.service.ensureTopicHasLesson(TOPIC_ID, { preferredLang: "en", studentAgeRange: "6-7" }, REAL_STUDENT_ID))
+      .rejects.toThrow("Textbook grounding is unavailable for this topic");
     expect(h.generateSpy).not.toHaveBeenCalled();
     expect(h.publisher.autoPublishIntoTopic).not.toHaveBeenCalled();
   });

@@ -32,6 +32,7 @@ export interface LessonGenerationInput {
  * behavior unchanged.
  */
 export interface ResolvedUnitContext {
+  subjectId: string;
   curriculumNameEn: string;
   gradeNameEn: string;
   subjectNameEn: string;

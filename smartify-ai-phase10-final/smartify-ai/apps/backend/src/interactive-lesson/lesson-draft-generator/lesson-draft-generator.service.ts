@@ -89,7 +89,7 @@ export class LessonDraftGeneratorService {
    * Phase 6 fix. Mirrors the exact include chain interactive-lesson.service
    * already uses for `getTopicOrThrow`.
    */
-  async resolveUnitContext(unitId: string): Promise<ResolvedUnitContext & { unitId: string; sourceFile: string | null }> {
+  async resolveUnitContext(unitId: string): Promise<ResolvedUnitContext & { unitId: string; subjectId: string; sourceFile: string | null }> {
     const unit = await this.prisma.client.unit.findUnique({
       where: { id: unitId },
       include: { subject: { include: { grade: { include: { curriculum: true } } } } },
@@ -99,6 +99,7 @@ export class LessonDraftGeneratorService {
     }
     return {
       unitId: unit.id,
+      subjectId: unit.subjectId,
       sourceFile: resolveEffectiveSourceFile(unit, unit.subject),
       curriculumNameEn: unit.subject.grade.curriculum.nameEn,
       gradeNameEn: unit.subject.grade.nameEn,
@@ -237,6 +238,29 @@ export class LessonDraftGeneratorService {
     // concept recognizably related to this Topic's title). A mapped textbook
     // must supply relevant content; it must never fall back to title-only.
     const groundingSlice = selectRelevantGrounding(unitContext.groundingNotesJson, topic.nameEn);
+    const groundingNotes = unitContext.groundingNotesJson;
+    const groundingConceptCount = groundingNotes?.concepts.length ?? 0;
+    const selectedConceptCount = groundingSlice?.concepts.length ?? 0;
+    const groundingSelectionFailureReason = !groundingNotes
+      ? "no-grounding-notes"
+      : !groundingSlice
+        ? "selector-no-match"
+        : selectedConceptCount === 0 && groundingSlice.facts.length === 0 && groundingSlice.vocabulary.length === 0
+          ? "selector-empty"
+          : null;
+    this.logger.log(JSON.stringify({
+      event: "TEXTBOOK_TOPIC_GROUNDING_SELECTION",
+      topicId: topic.id,
+      topicTitle: topic.nameEn,
+      unitId: topic.unitId,
+      subjectId: unitContext.subjectId,
+      hasGroundingNotes: !!groundingNotes,
+      groundingVersion: unitContext.groundingVersion,
+      groundingConceptCount,
+      selectorMatched: !!groundingSlice,
+      selectedConceptCount,
+      failureReason: groundingSelectionFailureReason,
+    }));
     if (unitContext.sourceFile && (!groundingSlice || (
       groundingSlice.concepts.length === 0 && groundingSlice.facts.length === 0 && groundingSlice.vocabulary.length === 0
     ))) {
