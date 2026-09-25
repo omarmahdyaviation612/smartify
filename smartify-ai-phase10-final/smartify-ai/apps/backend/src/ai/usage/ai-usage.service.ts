@@ -1,4 +1,5 @@
 import { Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
+import { CONTENT_AUTHORING_ACTOR_ID } from "../content-authoring-actor.const";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AIProviderFactory } from "../ai-provider.factory";
 import { GLOBAL_DAILY_AI_BUDGET_USD_KEY, PER_USER_DAILY_AI_BUDGET_USD_KEY, parseBudgetUsd } from "./budget-config.util";
@@ -338,7 +339,7 @@ export class AIUsageService {
 
   private async adjustBudgetCounters(userId: string, usageDate: Date, deltaUsd: number): Promise<void> {
     await this.adjustCounterRow("global", "global", usageDate, deltaUsd);
-    await this.adjustCounterRow("user", userId, usageDate, deltaUsd);
+    if (userId !== CONTENT_AUTHORING_ACTOR_ID) await this.adjustCounterRow("user", userId, usageDate, deltaUsd);
   }
 
   /**
@@ -381,7 +382,8 @@ export class AIUsageService {
       return { ok: false, reason: "global_exceeded" };
     }
 
-    const userOk = await this.attemptReservation("user", userId, usageDate, estimatedUsd, userLimit);
+    const isPlatformAttribution = userId === CONTENT_AUTHORING_ACTOR_ID;
+    const userOk = isPlatformAttribution || await this.attemptReservation("user", userId, usageDate, estimatedUsd, userLimit);
     if (!userOk) {
       // The global slice was already committed above, but the per-user
       // slice never was (this attempt's WHERE clause is what just failed)

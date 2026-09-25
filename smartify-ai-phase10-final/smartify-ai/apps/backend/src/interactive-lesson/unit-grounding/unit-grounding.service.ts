@@ -15,6 +15,7 @@ import { CurriculumSourceStorageFactory } from "./storage/curriculum-source-stor
 import { resolveEffectiveSourceFile } from "./unit-effective-source.util";
 import { UnitGroundingTpmPacer, type TokenRateLimitMetadata } from "./tpm-pacing.util";
 import { isQuotaError, tokenRateLimitMetadata } from "../../ai/providers/openai-request-diagnostics";
+import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
 
 
 const MAX_ATTEMPTS = 2; // one initial attempt + one corrective retry — same bound as every other AI-generation loop in this codebase
@@ -332,7 +333,10 @@ export class UnitGroundingService {
         estimatedInputTokens,
         maxOutputTokens: 4000,
       });
-      const reserveResult = await this.usageService.reserveBudget(requestingUserId, estimatedUsd);
+      // Grounding is platform-funded infrastructure. The triggering actor is
+      // retained for locking/diagnostics, but must never consume a student's
+      // per-user budget or be able to block extraction via that budget.
+      const reserveResult = await this.usageService.reserveBudget(CONTENT_AUTHORING_ACTOR_ID, estimatedUsd);
       if (!reserveResult.ok) {
         throw new Error(`Grounding extraction budget reservation refused (${reserveResult.reason}) for pages ${pageStart}-${pageEnd}.`);
       }
@@ -371,7 +375,7 @@ export class UnitGroundingService {
       await this.prisma.client.aIUsage
         .create({
           data: {
-            userId: requestingUserId,
+            userId: CONTENT_AUTHORING_ACTOR_ID,
             studentId: null,
             subjectId: null,
             feature: "grounding_extraction",

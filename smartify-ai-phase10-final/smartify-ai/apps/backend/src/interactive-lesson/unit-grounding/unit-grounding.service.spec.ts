@@ -30,6 +30,7 @@ jest.mock("fs", () => ({
 }));
 
 import { UnitGroundingService, UnitGroundingExtractionError } from "./unit-grounding.service";
+import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
 
 const VALID_UNIT = {
   id: "unit-1",
@@ -227,9 +228,10 @@ describe("UnitGroundingService.extractUnitGrounding", () => {
     expect(typeof persisted.groundingSourceFingerprint).toBe("string");
     expect(persisted.groundingSourceFingerprint.length).toBeGreaterThan(0);
 
-    expect(h.reserveBudget).toHaveBeenCalledWith("actor-1", expect.any(Number));
+    expect(h.reserveBudget).toHaveBeenCalledWith(CONTENT_AUTHORING_ACTOR_ID, expect.any(Number));
     expect(h.reconcileBudget).toHaveBeenCalledWith("reservation-1", expect.any(Number));
     expect(h.usageCreateCalls[0].feature).toBe("grounding_extraction");
+    expect(h.usageCreateCalls[0].userId).toBe(CONTENT_AUTHORING_ACTOR_ID);
   });
 
   it("malformed output on every attempt: never marks the Unit as grounded — prefers 'extraction failed' over storing bad data", async () => {
