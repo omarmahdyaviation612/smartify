@@ -2,7 +2,7 @@ import { Injectable, Logger, ServiceUnavailableException } from "@nestjs/common"
 import { CONTENT_AUTHORING_ACTOR_ID } from "../content-authoring-actor.const";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AIProviderFactory } from "../ai-provider.factory";
-import { GLOBAL_DAILY_AI_BUDGET_USD_KEY, PER_USER_DAILY_AI_BUDGET_USD_KEY, parseBudgetUsd } from "./budget-config.util";
+import { GLOBAL_DAILY_AI_BUDGET_USD_KEY, PER_USER_DAILY_AI_BUDGET_USD_KEY, PLATFORM_CONTENT_AUTHORING_DAILY_AI_BUDGET_USD_KEY, parseBudgetUsd } from "./budget-config.util";
 
 // Phase 9.4C: conservative chars-per-token divisor for estimating input
 // cost BEFORE a chat call — real English averages ~4 chars/token, so
@@ -16,7 +16,10 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 600;
 
 export type ReserveBudgetResult =
   | { ok: true; reservationId: string }
-  | { ok: false; reason: "misconfigured" | "global_exceeded" | "user_exceeded" };
+  | { ok: false; reason: "misconfigured" | "global_exceeded" | "user_exceeded" | "platform_exceeded" };
+
+/** Generic, student-safe message for BOTH platform-authoring failure cases (missing/invalid config, and cap exhausted) — never the per-user daily-limit wording, and never any internal budget/cost figure. */
+const PLATFORM_UNAVAILABLE_MESSAGE = "This lesson is temporarily unavailable. Please try again later.";
 
 @Injectable()
 export class AIUsageService {
@@ -179,6 +182,12 @@ export class AIUsageService {
     return parseBudgetUsd(config?.value);
   }
 
+  /** Independent platform content-authoring cap — see budget-config.util.ts's doc comment. Never confused with the per-user cap above. */
+  private async getPlatformContentAuthoringDailyBudgetUsd(): Promise<number | null> {
+    const config = await this.prisma.client.systemConfig.findUnique({ where: { key: PLATFORM_CONTENT_AUTHORING_DAILY_AI_BUDGET_USD_KEY } });
+    return parseBudgetUsd(config?.value);
+  }
+
   async getGlobalSpendToday(usageDate = this.startOfToday()): Promise<number> {
     const result = await this.prisma.client.aIUsage.aggregate({
       where: { createdAt: { gte: usageDate } },
@@ -250,6 +259,31 @@ export class AIUsageService {
       throw new ServiceUnavailableException(
         "The AI Tutor is temporarily unavailable due to daily usage limits. Please try again later.",
       );
+    }
+
+    // Platform content-authoring hotfix (2026-09-25): CONTENT_AUTHORING_ACTOR_ID
+    // is NEVER evaluated against the per-user (student) cap below — it has
+    // its own independent, separately-configured cap instead. Without this
+    // branch, this one shared platform account inevitably exhausts the
+    // student-sized per-user cap after ordinary work (e.g. grounding a
+    // single multi-page Unit), and every OTHER platform-funded operation
+    // that day then fails with a message worded as if the STUDENT had hit
+    // their own personal limit — the exact incident this fixes (unitId
+    // cmucxcubj00eh2qd5kfwohz11's lazy lesson generation, 2026-09-25).
+    if (userId === CONTENT_AUTHORING_ACTOR_ID) {
+      const platformLimit = await this.getPlatformContentAuthoringDailyBudgetUsd();
+      if (platformLimit === null) {
+        this.logger.error(
+          `AI budget misconfiguration: "${PLATFORM_CONTENT_AUTHORING_DAILY_AI_BUDGET_USD_KEY}" is missing or invalid in SystemConfig. Blocking all platform content-authoring AI requests until a SUPER_ADMIN sets a valid value via PATCH /admin/ai-config/spending-controls.`,
+        );
+        throw new ServiceUnavailableException(PLATFORM_UNAVAILABLE_MESSAGE);
+      }
+      const platformSpent = await this.getUserSpendToday(CONTENT_AUTHORING_ACTOR_ID, usageDate);
+      if (platformSpent >= platformLimit) {
+        this.logger.warn(`Platform content-authoring daily AI budget reached: $${platformSpent.toFixed(4)} spent >= $${platformLimit} limit.`);
+        throw new ServiceUnavailableException(PLATFORM_UNAVAILABLE_MESSAGE);
+      }
+      return;
     }
 
     const userLimit = await this.getPerUserDailyBudgetUsd();
@@ -339,7 +373,14 @@ export class AIUsageService {
 
   private async adjustBudgetCounters(userId: string, usageDate: Date, deltaUsd: number): Promise<void> {
     await this.adjustCounterRow("global", "global", usageDate, deltaUsd);
-    if (userId !== CONTENT_AUTHORING_ACTOR_ID) await this.adjustCounterRow("user", userId, usageDate, deltaUsd);
+    // Mirrors reserveBudget()'s tiering exactly — a platform-attributed
+    // reservation's reconcile/release adjusts the "platform" row, never
+    // "user" (and never skipped, as it was before this hotfix).
+    if (userId === CONTENT_AUTHORING_ACTOR_ID) {
+      await this.adjustCounterRow("platform", CONTENT_AUTHORING_ACTOR_ID, usageDate, deltaUsd);
+    } else {
+      await this.adjustCounterRow("user", userId, usageDate, deltaUsd);
+    }
   }
 
   /**
@@ -366,10 +407,19 @@ export class AIUsageService {
     }
 
     const usageDate = this.startOfToday();
-    const [globalLimit, userLimit] = await Promise.all([this.getGlobalDailyBudgetUsd(), this.getPerUserDailyBudgetUsd()]);
-    if (globalLimit === null || userLimit === null) {
+    const isPlatformAttribution = userId === CONTENT_AUTHORING_ACTOR_ID;
+
+    // Platform content-authoring hotfix (2026-09-25): only the limit this
+    // specific call actually needs is fetched/validated — a missing
+    // per-user config must never block platform authoring, and a missing
+    // platform config must never block a real student.
+    const [globalLimit, tierLimit] = await Promise.all([
+      this.getGlobalDailyBudgetUsd(),
+      isPlatformAttribution ? this.getPlatformContentAuthoringDailyBudgetUsd() : this.getPerUserDailyBudgetUsd(),
+    ]);
+    if (globalLimit === null || tierLimit === null) {
       this.logger.error(
-        `AI budget misconfiguration: cannot reserve — "${GLOBAL_DAILY_AI_BUDGET_USD_KEY}" or "${PER_USER_DAILY_AI_BUDGET_USD_KEY}" is missing or invalid in SystemConfig.`,
+        `AI budget misconfiguration: cannot reserve — "${GLOBAL_DAILY_AI_BUDGET_USD_KEY}" or "${isPlatformAttribution ? PLATFORM_CONTENT_AUTHORING_DAILY_AI_BUDGET_USD_KEY : PER_USER_DAILY_AI_BUDGET_USD_KEY}" is missing or invalid in SystemConfig.`,
       );
       return { ok: false, reason: "misconfigured" };
     }
@@ -382,18 +432,29 @@ export class AIUsageService {
       return { ok: false, reason: "global_exceeded" };
     }
 
-    const isPlatformAttribution = userId === CONTENT_AUTHORING_ACTOR_ID;
-    const userOk = isPlatformAttribution || await this.attemptReservation("user", userId, usageDate, estimatedUsd, userLimit);
-    if (!userOk) {
-      // The global slice was already committed above, but the per-user
-      // slice never was (this attempt's WHERE clause is what just failed)
-      // — roll back ONLY the global row. adjustBudgetCounters() would
-      // incorrectly also decrement the user's row by estimatedUsd,
-      // wrongly cancelling out that user's OTHER, unrelated committed
-      // reservations for today.
+    // Platform-funded calls reserve against BOTH the global tier (above)
+    // and their own independent "platform" tier — never the per-user
+    // tier. Real students reserve against global + "user", exactly as
+    // before. Same atomic attemptReservation primitive either way — no
+    // new concurrency mechanism, just a different (scope, scopeKey) pair.
+    const tierScope = isPlatformAttribution ? "platform" : "user";
+    const tierKey = isPlatformAttribution ? CONTENT_AUTHORING_ACTOR_ID : userId;
+    const tierOk = await this.attemptReservation(tierScope, tierKey, usageDate, estimatedUsd, tierLimit);
+    if (!tierOk) {
+      // The global slice was already committed above, but this tier's
+      // slice never was (its own WHERE clause is what just failed) — roll
+      // back ONLY the global row. adjustBudgetCounters() would incorrectly
+      // also decrement this tier's row by estimatedUsd, wrongly
+      // cancelling out its OTHER, unrelated committed reservations today.
       await this.adjustCounterRow("global", "global", usageDate, -estimatedUsd);
+      if (isPlatformAttribution) {
+        this.logger.warn(
+          `Platform content-authoring AI budget reservation blocked before provider call: an estimated $${estimatedUsd.toFixed(6)} would exceed the $${tierLimit} daily cap. Global reservation released.`,
+        );
+        return { ok: false, reason: "platform_exceeded" };
+      }
       this.logger.warn(
-        `Per-user AI budget reservation blocked before provider call for user ${userId}: an estimated $${estimatedUsd.toFixed(6)} would exceed the $${userLimit} daily cap. Global reservation released.`,
+        `Per-user AI budget reservation blocked before provider call for user ${userId}: an estimated $${estimatedUsd.toFixed(6)} would exceed the $${tierLimit} daily cap. Global reservation released.`,
       );
       return { ok: false, reason: "user_exceeded" };
     }
