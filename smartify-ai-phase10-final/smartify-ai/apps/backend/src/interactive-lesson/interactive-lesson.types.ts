@@ -28,7 +28,7 @@ export interface TeachingStep {
  * more question shapes later — never hard-code a specific question's numbers.
  */
 export type CheckExpression =
-  | { op: "add" | "subtract" | "equals"; operands: [number, number] }
+  | { op: "add" | "subtract" | "equals" | "multiply" | "divide"; operands: [number, number] }
   | { op: "compare"; operands: [number, number]; comparator: "greater" | "less" };
 
 /**
@@ -64,6 +64,12 @@ export interface StepResult {
    * is already a schemaless Json column.
    */
   strategy?: TeachingStrategy;
+  activeMathProblem?: ActiveMathProblem;
   /** Every switch that happened at or before this step, oldest first. Empty/absent until the first switch. */
   strategyHistory?: StrategySwitchRecord[];
 }
+
+export type ActiveMathProblem =
+  | { operation: "multiply"; groups: number; itemsPerGroup: number; answer: number; itemLabel?: string }
+  | { operation: "divide"; total: number; groups: number; answer: number; itemLabel?: string }
+  | { operation: "fraction"; numerator: number; denominator: number; itemLabel?: string };

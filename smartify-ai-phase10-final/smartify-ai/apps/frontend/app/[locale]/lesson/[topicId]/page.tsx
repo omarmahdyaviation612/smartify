@@ -9,6 +9,8 @@ import { Navbar } from "@/components/Navbar";
 import { useApiClient } from "@/lib/api-client";
 import { renderTutorMessage } from "@/lib/render-tutor-message";
 import type { Locale } from "@/content/marketing";
+import type { VisualInstruction } from "@smartify/shared-types";
+import { TutorVisual } from "@/components/TutorVisual";
 
 interface LessonTurn {
   role: "student" | "teacher";
@@ -30,6 +32,7 @@ interface LessonState {
   content?: string | null;
   completed?: boolean;
   visual?: { type: string; status: "NOT_GENERATED" | "GENERATED"; url: string | null } | null;
+  responseVisual?: VisualInstruction | null;
 }
 
 interface LessonCheckQuestion {
@@ -433,6 +436,7 @@ export default function InteractiveLessonPage() {
                 </div>
               );
             })}
+            {state?.responseVisual && <TutorVisual visual={state.responseVisual} />}
             {state?.visual && (
               <div className="flex justify-start">
                 {state.visual.status === "GENERATED" && visualObjectUrl && !visualFailed ? (

@@ -9,7 +9,9 @@ import { isStudentSubjectRowActive } from "../common/subject-entitlement.util";
 import { LessonDraftGeneratorService } from "./lesson-draft-generator/lesson-draft-generator.service";
 import { QuestionDraftGeneratorService } from "../question-bank/question-draft-generator/question-draft-generator.service";
 import { describeExpectedAnswer, describeOperands, tryDeterministicValidate } from "./answer-validators/deterministic-validator";
-import type { CheckExpression, StepResult, TeachingStep } from "./interactive-lesson.types";
+import type { ActiveMathProblem, CheckExpression, StepResult, TeachingStep } from "./interactive-lesson.types";
+import { deriveRequestedMathVisual, validateVisualInstruction } from "../tutor/visual-instruction.util";
+import type { VisualInstruction } from "@smartify/shared-types";
 import { decideStrategySwitch, getCurrentStrategy, strategyGuidance } from "./teaching-strategy.util";
 
 const MAX_HINTS_BEFORE_FORCED_RESOLUTION = 1;
@@ -137,7 +139,7 @@ export class InteractiveLessonService {
     steps: TeachingStep[],
     content: string | null,
     completed: boolean,
-    stepResults: StepResult[] = [],
+    stepResults: StepResult[] = [], responseVisual: VisualInstruction | null = null,
   ) {
     const currentStep = steps[session.currentStepIndex];
     const currentResult = currentStep ? stepResults.find((r) => r.stepId === currentStep.id) : undefined;
@@ -164,6 +166,7 @@ export class InteractiveLessonService {
       // Never expose `prompt` (an internal generation instruction, not
       // student-facing) — only what the UI needs to render a visual slot.
       visual: currentStep?.visual ? { type: currentStep.visual.type, status: currentStep.visual.status, url: currentStep.visual.url } : null,
+      responseVisual,
     };
   }
 
@@ -395,7 +398,9 @@ export class InteractiveLessonService {
       teachingStrategy: currentStrategy,
       teachingStrategyGuidance: currentStrategy ? strategyGuidance(currentStrategy) : undefined,
     };
-    const systemPrompt = this.contextBuilder.buildLessonTeachingPrompt(ctx);
+    let systemPrompt = this.contextBuilder.buildLessonTeachingPrompt(ctx);
+    const structuredMathExplain = /\b(math|mathematics|maths)\b/iu.test(topic.unit.subject.nameEn) && step.type === "EXPLAIN";
+    if (structuredMathExplain) systemPrompt += '\nFor a concrete arithmetic example, respond as JSON only: {"say":"student-facing explanation","activeMathProblem":null or {"operation":"divide|multiply|fraction",...}}. Include activeMathProblem only when this explanation introduces one exact supported problem. Never include metadata in say.';
     // Deterministic backstop, not just a prompt instruction: real traffic
     // showed the model inventing an arithmetic "expression" (e.g. "if you
     // have 3 apples and add 2 more") for a Science CHECK step about life
@@ -415,10 +420,11 @@ export class InteractiveLessonService {
       systemPrompt,
       userTurnLabel: `Teach the "${step.type}" step now.`,
       responseFormat: isCheckStep ? "json_object" : undefined,
-      persistedContent: isCheckStep ? (rawJson) => this.parseDeliverCheckJson(rawJson, allowExpression).say : undefined,
+      persistedContent: isCheckStep ? (rawJson) => this.parseDeliverCheckJson(rawJson, allowExpression).say : structuredMathExplain ? (rawJson) => this.parseLessonMathJson(rawJson).say : undefined,
     });
 
-    const { say: content, expression } = isCheckStep ? this.parseDeliverCheckJson(raw, allowExpression) : { say: raw, expression: undefined as CheckExpression | undefined };
+    const lessonParsed = structuredMathExplain ? this.parseLessonMathJson(raw) : null;
+    const { say: content, expression } = isCheckStep ? this.parseDeliverCheckJson(raw, allowExpression) : { say: lessonParsed?.say ?? raw, expression: undefined as CheckExpression | undefined };
 
     const updatedResults = this.upsertStepResult(stepResults, {
       stepId: step.id,
@@ -427,6 +433,7 @@ export class InteractiveLessonService {
       correct: step.type === "CHECK" ? false : null,
       hintGiven: false,
       expression,
+      activeMathProblem: lessonParsed?.activeMathProblem ?? this.activeMathProblem(expression),
       strategy: currentStrategy,
     });
     await this.prisma.client.lessonSession.update({ where: { id: session.id }, data: { stepResultsJson: updatedResults as any } });
@@ -489,13 +496,50 @@ export class InteractiveLessonService {
     }
   }
 
+  private activeMathProblem(expression: CheckExpression | undefined): ActiveMathProblem | undefined {
+    if (!expression) return undefined;
+    const [a, b] = expression.operands;
+    if (expression.op === "multiply" && a > 0 && b > 0) return { operation: "multiply", groups: a, itemsPerGroup: b, answer: a * b };
+    if (expression.op === "divide" && a > 0 && b > 0 && a % b === 0) return { operation: "divide", total: a, groups: b, answer: a / b };
+    return undefined;
+  }
+
+  private parseLessonMathJson(raw: string): { say: string; activeMathProblem?: ActiveMathProblem } {
+    try {
+      const parsed = JSON.parse(raw);
+      const say = typeof parsed?.say === "string" && parsed.say.trim() ? parsed.say.trim() : raw;
+      const p = parsed?.activeMathProblem;
+      if (!p || typeof p !== "object") return { say };
+      if (p.operation === "divide" && Number.isInteger(p.total) && Number.isInteger(p.groups) && Number.isInteger(p.answer) && p.total > 0 && p.groups > 0 && p.total <= 100 && p.groups <= 100 && p.total % p.groups === 0 && p.answer === p.total / p.groups && (!p.itemLabel || ["block", "apple"].includes(p.itemLabel))) return { say, activeMathProblem: { operation: "divide", total: p.total, groups: p.groups, answer: p.answer, itemLabel: p.itemLabel } };
+      if (p.operation === "multiply" && Number.isInteger(p.groups) && Number.isInteger(p.itemsPerGroup) && Number.isInteger(p.answer) && p.groups > 0 && p.itemsPerGroup > 0 && p.groups <= 100 && p.itemsPerGroup <= 100 && p.answer === p.groups * p.itemsPerGroup && (!p.itemLabel || ["block", "apple"].includes(p.itemLabel))) return { say, activeMathProblem: { operation: "multiply", groups: p.groups, itemsPerGroup: p.itemsPerGroup, answer: p.answer, itemLabel: p.itemLabel } };
+      if (p.operation === "fraction" && Number.isInteger(p.numerator) && Number.isInteger(p.denominator) && p.denominator > 0 && p.denominator <= 100 && p.numerator >= 0 && p.numerator <= p.denominator) return { say, activeMathProblem: { operation: "fraction", numerator: p.numerator, denominator: p.denominator, itemLabel: p.itemLabel } };
+      return { say };
+    } catch {
+      if (/^\s*\{/.test(raw) && /"(?:activeMathProblem|say)"\s*:/.test(raw)) {
+        const match = raw.match(/"say"\s*:\s*"((?:\\.|[^"\\])*)/);
+        if (match) {
+          try { return { say: JSON.parse(`"${match[1]}"`) }; } catch { /* use neutral fallback */ }
+        }
+        return { say: "Let's continue with this step." };
+      }
+      return { say: raw };
+    }
+  }
+
+  private visualFromActiveProblem(problem: ActiveMathProblem | undefined, subjectName: string): VisualInstruction | null {
+    if (!problem || !/\b(math|mathematics|maths)\b/iu.test(subjectName)) return null;
+    if (problem.operation === "divide") return validateVisualInstruction({ kind: "MULTIPLICATION_GROUPS", groups: problem.groups, itemsPerGroup: problem.answer, item: problem.itemLabel === "block" ? "block" : "apple", altText: `${problem.total} objects split equally into ${problem.groups} groups of ${problem.answer}.` });
+    if (problem.operation === "multiply") return validateVisualInstruction({ kind: "MULTIPLICATION_GROUPS", groups: problem.groups, itemsPerGroup: problem.itemsPerGroup, item: "block", altText: `${problem.groups} equal groups with ${problem.itemsPerGroup} blocks in each group.` });
+    return null;
+  }
+
   private normalizeExpression(candidate: any): CheckExpression | undefined {
     if (!candidate || typeof candidate !== "object") return undefined;
     const operands = candidate.operands;
     if (!Array.isArray(operands) || operands.length !== 2 || !operands.every((n: unknown) => typeof n === "number" && Number.isFinite(n))) {
       return undefined;
     }
-    if (candidate.op === "add" || candidate.op === "subtract" || candidate.op === "equals") {
+    if (["add", "subtract", "equals", "multiply", "divide"].includes(candidate.op)) {
       return { op: candidate.op, operands: [operands[0], operands[1]] };
     }
     if (candidate.op === "compare" && (candidate.comparator === "greater" || candidate.comparator === "less")) {
@@ -611,8 +655,14 @@ export class InteractiveLessonService {
       if (!(await this.consumeNonProgressBudget(session))) {
         return this.toPublicState(topic, session, steps, this.nonProgressLimitMessage(profile), false, stepResults);
       }
-      const content = await this.runInterruption(profile, topic, session, currentStep, trimmed);
-      return this.toPublicState(topic, session, steps, content, false, stepResults);
+      const activeProblemForPrompt = stepResults.find((r) => r.stepId === currentStep.id)?.activeMathProblem;
+      let content = await this.runInterruption(profile, topic, session, currentStep, trimmed, activeProblemForPrompt);
+      const explicitVisual = deriveRequestedMathVisual(trimmed, topic.unit.subject.nameEn);
+      const activeProblem = stepResults.find((r) => r.stepId === currentStep.id)?.activeMathProblem;
+      const responseVisual = explicitVisual ?? this.visualFromActiveProblem(activeProblem, topic.unit.subject.nameEn);
+      this.logger.log(JSON.stringify({ event: "LESSON_VISUAL_INTENT_RESULT", sessionId: session.id, topicId, subjectIsMath: /\b(math|mathematics|maths)\b/iu.test(topic.unit.subject.nameEn), visualRequested: /show|draw|visual|picture|diagram|\u0648\u0631\u064a\u0646\u064a|\u0627\u0631\u0633\u0645/iu.test(trimmed), activeProblemAvailable: !!activeProblem, expressionSource: explicitVisual ? "current_message" : activeProblem ? "step_result" : "none", representationLocked: !!activeProblem, visualKind: responseVisual?.kind ?? null, visualReturned: !!responseVisual, failureReason: responseVisual ? null : activeProblem ? "unsupported_or_invalid_problem" : "active_problem_unavailable" }));
+      if (responseVisual && /I can(?:'t| not) (?:show|draw|display)[^.]*\.\s*/i.test(content)) content = `Sure — look at the diagram below. ${content.replace(/I can(?:'t| not) (?:show|draw|display)[^.]*\.\s*/i, "")}`.trim();
+      return this.toPublicState(topic, session, steps, content, false, stepResults, responseVisual);
     }
 
     return this.evaluateCheck(profile, topic, session, steps, currentStep, stepResults, trimmed);
@@ -643,7 +693,7 @@ export class InteractiveLessonService {
       : "You've asked quite a few questions in this lesson — let's continue with the lesson steps for now. You can ask more next time.";
   }
 
-  private async runInterruption(profile: { id: string }, topic: any, session: any, step: TeachingStep, message: string) {
+  private async runInterruption(profile: { id: string }, topic: any, session: any, step: TeachingStep, message: string, activeMathProblem?: ActiveMathProblem) {
     const ctx: LessonTeachingContext = {
       studentFirstName: (profile as any).fullName?.split(" ")[0] ?? "there",
       age: (profile as any).age ?? 7,
@@ -651,10 +701,11 @@ export class InteractiveLessonService {
       subjectNameEn: topic.unit.subject.nameEn,
       lessonTitleEn: topic.nameEn,
       currentStep: { type: step.type, objective: step.objective, conceptKey: step.conceptKey },
+      activeMathProblem,
       mode: "interrupt",
       studentMessage: message,
     };
-    const systemPrompt = this.contextBuilder.buildLessonTeachingPrompt(ctx);
+    const systemPrompt = this.contextBuilder.buildLessonTeachingPrompt(ctx) + (activeMathProblem ? `\nACTIVE MATH PROBLEM LOCK: ${JSON.stringify(activeMathProblem)}. Explain the SAME problem; preserve operands, operation, and answer; do not substitute another problem such as 6 ÷ 2.` : "");
     return this.runLessonAI({
       userId: (profile as any).userId,
       profileId: profile.id,

@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type { GroundingSlice } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
 import type { AdaptiveMathTeachingPlan } from "../../tutor/adaptive-math-teaching.util";
+import type { ActiveMathProblem } from "../../interactive-lesson/interactive-lesson.types";
 
 export interface TutorContext {
   studentFullName: string;
@@ -30,6 +31,7 @@ export interface LessonTeachingContext {
   subjectNameEn: string;
   lessonTitleEn: string;
   currentStep: LessonStepInfo;
+  activeMathProblem?: ActiveMathProblem;
   /**
    * "deliver": just teach the current step's content (no student input to
    * evaluate — used for the first turn on a step, and for interruption
@@ -394,6 +396,12 @@ export class AIContextBuilderService {
     // step was active. The model must classify the reply and respond in a
     // single structured turn — this is what lets the backend deterministically
     // decide whether to advance the lesson, without trusting free-form prose.
+    const activeProblemSection = ctx.activeMathProblem ? [
+      "ACTIVE MATH PROBLEM (authoritative):",
+      JSON.stringify(ctx.activeMathProblem),
+      "For this immediate follow-up, explain the SAME problem. Preserve its operation, operands, answer, and learning target. Do not substitute a different example or numbers such as 6 ÷ 2.",
+      "",
+    ] : [];
     return [
       `You are the Smartify AI Teacher, teaching ${ctx.studentFirstName} (age ${ctx.age}) a ${ctx.subjectNameEn} lesson: "${ctx.lessonTitleEn}".`,
       "",
@@ -417,6 +425,7 @@ export class AIContextBuilderService {
       ...this.formattingRules(),
       "",
       ...this.safetyRules(),
+      ...activeProblemSection,
       "",
       ...this.contentOriginalityRules(ctx.subjectNameEn),
       "",

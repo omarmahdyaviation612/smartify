@@ -224,6 +224,41 @@ describe("InteractiveLessonService", () => {
     expect(session.status).toBe("IN_PROGRESS");
   });
 
+  it("persists an EXPLAIN ActiveMathProblem and reuses it for a visual follow-up", async () => {
+    const h = makeHarness({ generateImpl: ({ }: any) => ({ content: '{"say":"Imagine you have 12 blocks. If you divide them equally among 4 friends, each gets 3.","activeMathProblem":{"operation":"divide","total":12,"groups":4,"answer":3,"itemLabel":"block"}}', inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }) });
+    await h.service.advance("user-1", "topic-1");
+    const explained = await h.service.advance("user-1", "topic-1");
+    expect(explained.content).toContain("12 blocks");
+    expect(explained.content).not.toContain("activeMathProblem");
+    const session = h.getSession("user-1", "topic-1");
+    expect(session.stepResultsJson.find((r: any) => r.stepId === "s2").activeMathProblem).toEqual({ operation: "divide", total: 12, groups: 4, answer: 3, itemLabel: "block" });
+    const followUp = await h.service.respond("user-1", "topic-1", "Can you show me visually?");
+    expect(followUp.responseVisual).toMatchObject({ kind: "MULTIPLICATION_GROUPS", groups: 4, itemsPerGroup: 3, item: "block" });
+    const visual = followUp.responseVisual as any;
+    expect(visual.groups * visual.itemsPerGroup).toBe(12);
+    expect(h.generateSpy).toHaveBeenCalledTimes(3);
+    const prompt = h.generateSpy.mock.calls[2][0].systemPrompt;
+    expect(prompt).toContain('"operation":"divide"');
+    expect(prompt).toContain('"total":12');
+    expect(prompt).toContain('"groups":4');
+    expect(prompt).toContain('"answer":3');
+    expect(prompt).toMatch(/same problem/i);
+    expect(prompt).toMatch(/do not substitute/i);
+  });
+
+  it.each([
+    ['truncated JSON', '{"say":"Here is the idea","activeMathProblem":{"operation":"divide"'],
+    ['invalid metadata', '{"say":"Here is the idea","activeMathProblem":{"operation":"divide","total":12,"groups":5,"answer":3}}'],
+    ['unsupported metadata', '{"say":"Here is the idea","activeMathProblem":{"operation":"triangle","total":12}}'],
+  ])("keeps malformed or invalid lesson metadata out of student content (%s)", async (_label, content) => {
+    const h = makeHarness({ generateImpl: ({ }: any) => ({ content, inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }) });
+    await h.service.advance("user-1", "topic-1");
+    const explained = await h.service.advance("user-1", "topic-1");
+    expect(explained.content).not.toContain("activeMathProblem");
+    expect(explained.content).not.toContain("operation");
+    expect(h.getSession("user-1", "topic-1").stepResultsJson.find((r: any) => r.stepId === "s2").activeMathProblem).toBeUndefined();
+  });
+
   /**
    * Budget-attribution regression (2026-09-20, "D" in the fix's own test
    * plan): the Interactive Lesson engine's own runtime teaching turns must
