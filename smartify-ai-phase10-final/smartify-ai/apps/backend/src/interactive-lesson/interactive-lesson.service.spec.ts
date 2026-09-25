@@ -21,7 +21,7 @@ describe("InteractiveLessonService", () => {
     { id: "s7", type: "COMPLETE", order: 7, objective: "acknowledge completion" },
   ];
 
-  function makeHarness(opts: { generateImpl?: (args: any) => any; studentSubjectRow?: { expiresAt: Date | null } } = {}) {
+  function makeHarness(opts: { generateImpl?: (args: any) => any; studentSubjectRow?: { expiresAt: Date | null }; extraTopics?: Record<string, any> } = {}) {
     const state: {
       profiles: Record<string, any>;
       topics: Record<string, any>;
@@ -42,6 +42,7 @@ describe("InteractiveLessonService", () => {
           teachingStepsJson: STEPS,
           unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } },
         },
+        ...opts.extraTopics,
       },
       sessions: {},
       conversations: {},
@@ -903,6 +904,127 @@ describe("InteractiveLessonService", () => {
       const h = makeHarness({ generateImpl: strategyGenerateImpl() });
       await driveToSecondWrongAttempt(h); // 5 calls: s1, s2, s3-deliver, attempt1, attempt2(switch)
       expect(h.generateSpy).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  /**
+   * Production hotfix (2026-09-25): a real Student E2E found a Science
+   * lesson about flowering/non-flowering plants taught with "take 2 steps
+   * forward on a number line" — the Phase 8 math-strategy system
+   * (CONCRETE_OBJECTS/NUMBER_LINE switching + guidance) was running for
+   * every subject, unconditionally. These tests prove a Science topic
+   * (isMathSubject("Science") === false) never triggers any of it, while
+   * the Mathematics tests above (unchanged) prove Math behavior is
+   * preserved exactly as before.
+   */
+  describe("subject-safe teaching strategy hotfix (2026-09-25)", () => {
+    const SCIENCE_STEPS = [
+      { id: "sc1", type: "INTRO", order: 1, objective: "greet and frame" },
+      { id: "sc2", type: "EXPLAIN", order: 2, objective: "explain flowering vs non-flowering plants" },
+      { id: "sc3", type: "CHECK", order: 3, objective: "check concept", checkType: "conceptual" },
+      { id: "sc4", type: "COMPLETE", order: 4, objective: "acknowledge completion" },
+    ];
+
+    function scienceExtraTopics(overrides: Partial<{ session: any }> = {}) {
+      return {
+        "topic-science": {
+          id: "topic-science",
+          nameEn: "Flowering and Non-Flowering Plants",
+          teachingStepsJson: SCIENCE_STEPS,
+          unit: { subjectId: "subject-science", subject: { nameEn: "Science" } },
+        },
+      };
+    }
+
+    // Two consecutive wrong conceptual-CHECK attempts — for Mathematics
+    // (see strategyGenerateImpl above) this exact call sequence is what
+    // triggers the CONCRETE_OBJECTS -> NUMBER_LINE switch.
+    function scienceGenerateImpl() {
+      let call = 0;
+      return async () => {
+        call++;
+        if (call <= 2) return { content: "teaching content", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }; // sc1, sc2 deliver
+        if (call === 3) return { content: JSON.stringify({ say: "Does this plant produce flowers?", expression: null }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }; // sc3 deliver
+        if (call === 4) return { content: JSON.stringify({ intent: "answer", isCorrect: false, say: "Not quite, try again." }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }; // attempt 1: wrong
+        if (call === 5) return { content: JSON.stringify({ intent: "answer", isCorrect: false, say: "Still not it — let's look at the plant again." }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }; // attempt 2: wrong
+        return { content: JSON.stringify({ intent: "answer", isCorrect: true, say: "That's right!" }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }; // attempt 3: correct
+      };
+    }
+
+    it("1. repeated incorrect conceptual CHECKs never switch to NUMBER_LINE", async () => {
+      const h = makeHarness({ generateImpl: scienceGenerateImpl(), extraTopics: scienceExtraTopics() });
+      await h.service.advance("user-1", "topic-science"); // sc1
+      await h.service.advance("user-1", "topic-science"); // sc2
+      await h.service.advance("user-1", "topic-science"); // sc3 deliver
+      await h.service.respond("user-1", "topic-science", "no"); // attempt 1: wrong
+      await h.service.respond("user-1", "topic-science", "no"); // attempt 2: wrong — would switch for Math
+      const session = h.getSession("user-1", "topic-science");
+      const sc3 = session.stepResultsJson.find((r: any) => r.stepId === "sc3");
+      expect(sc3.strategy).toBeUndefined();
+      expect(sc3.strategyHistory ?? []).toHaveLength(0);
+    });
+
+    it("2. teaching/check prompts contain no mandatory number-line/math strategy guidance", async () => {
+      const h = makeHarness({ generateImpl: scienceGenerateImpl(), extraTopics: scienceExtraTopics() });
+      await h.service.advance("user-1", "topic-science"); // sc1
+      await h.service.advance("user-1", "topic-science"); // sc2 (EXPLAIN — would carry strategy guidance for Math)
+      await h.service.advance("user-1", "topic-science"); // sc3 deliver (CHECK)
+      await h.service.respond("user-1", "topic-science", "no"); // attempt 1 — evaluate_check prompt
+      for (const call of h.generateSpy.mock.calls) {
+        const prompt = call[0].systemPrompt as string;
+        expect(prompt).not.toMatch(/number.line/i);
+        expect(prompt).not.toMatch(/MANDATORY REPRESENTATION/i);
+        expect(prompt).not.toContain("CONCRETE_OBJECTS");
+        expect(prompt).not.toContain("NUMBER_LINE");
+      }
+    });
+
+    it("3. a resumed Science session already containing strategy: \"NUMBER_LINE\" ignores that persisted strategy", async () => {
+      const h = makeHarness({ generateImpl: scienceGenerateImpl(), extraTopics: scienceExtraTopics() });
+      await h.service.advance("user-1", "topic-science"); // sc1
+      await h.service.advance("user-1", "topic-science"); // sc2
+      await h.service.advance("user-1", "topic-science"); // sc3 deliver
+
+      // Simulate a session left over from BEFORE this hotfix, where sc3 was
+      // persisted with a stale math strategy (the exact production bug).
+      const session = h.getSession("user-1", "topic-science");
+      const sc3 = session.stepResultsJson.find((r: any) => r.stepId === "sc3");
+      sc3.strategy = "NUMBER_LINE";
+      sc3.strategyHistory = [{ strategy: "NUMBER_LINE", reason: "stale_pre_hotfix_data", atStepId: "sc3", switchedAt: new Date().toISOString() }];
+
+      const result = await h.service.respond("user-1", "topic-science", "no"); // attempt 1: wrong
+      expect(result.content).toBe("Not quite, try again.");
+      const evaluatePrompt = h.generateSpy.mock.calls[h.generateSpy.mock.calls.length - 1][0].systemPrompt as string;
+      expect(evaluatePrompt).not.toMatch(/number.line/i);
+      expect(evaluatePrompt).not.toContain("NUMBER_LINE");
+
+      const updatedSession = h.getSession("user-1", "topic-science");
+      const updatedSc3 = updatedSession.stepResultsJson.find((r: any) => r.stepId === "sc3");
+      // Self-healed: the stale value was overwritten with undefined on this
+      // step's next write — no manual DB cleanup was needed.
+      expect(updatedSc3.strategy).toBeUndefined();
+    });
+
+    it("4. remains on normal curriculum/topic remediation — the generic hint-then-force-resolve path, never the Math strategy-switch branch", async () => {
+      const h = makeHarness({ generateImpl: scienceGenerateImpl(), extraTopics: scienceExtraTopics() });
+      await h.service.advance("user-1", "topic-science");
+      await h.service.advance("user-1", "topic-science");
+      await h.service.advance("user-1", "topic-science");
+      await h.service.respond("user-1", "topic-science", "no"); // attempt 1: wrong -> hint given
+      const sc3AfterFirst = h.getSession("user-1", "topic-science").stepResultsJson.find((r: any) => r.stepId === "sc3");
+      expect(sc3AfterFirst.correct).toBe(false);
+      expect(sc3AfterFirst.hintGiven).toBe(true);
+
+      // For Math, this exact second wrong attempt triggers a strategy
+      // switch instead of force-resolving (see "H:" test above). For
+      // Science there is no switch to fall back on, so the EXISTING
+      // generic "no infinite retry — force-resolve after one hint" rule
+      // applies untouched: the check simply resolves.
+      await h.service.respond("user-1", "topic-science", "no"); // attempt 2: wrong, force-resolved
+      const session = h.getSession("user-1", "topic-science");
+      const sc3 = session.stepResultsJson.find((r: any) => r.stepId === "sc3");
+      expect(sc3.correct).toBe(true); // force-resolved — normal remediation, no switch ever happened
+      expect(sc3.strategyHistory ?? []).toHaveLength(0);
     });
   });
 });

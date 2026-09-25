@@ -10,7 +10,7 @@ import { LessonDraftGeneratorService } from "./lesson-draft-generator/lesson-dra
 import { QuestionDraftGeneratorService } from "../question-bank/question-draft-generator/question-draft-generator.service";
 import { describeExpectedAnswer, describeOperands, tryDeterministicValidate } from "./answer-validators/deterministic-validator";
 import type { CheckExpression, StepResult, TeachingStep } from "./interactive-lesson.types";
-import { decideStrategySwitch, getCurrentStrategy, strategyGuidance } from "./teaching-strategy.util";
+import { decideStrategySwitch, getCurrentStrategy, isMathSubject, strategyGuidance } from "./teaching-strategy.util";
 
 const MAX_HINTS_BEFORE_FORCED_RESOLUTION = 1;
 
@@ -391,7 +391,11 @@ export class InteractiveLessonService {
     // applies to the actual teaching content — EXPLAIN/EXAMPLE/CHECK —
     // not to framing steps (INTRO/REVIEW/COMPLETE), and only ever chosen
     // by deterministic code (teaching-strategy.util.ts), never the model.
-    const appliesStrategy = step.type === "EXPLAIN" || step.type === "EXAMPLE" || step.type === "CHECK";
+    // Production hotfix (2026-09-25): also gated on isMathSubject — the
+    // strategy system (CONCRETE_OBJECTS/NUMBER_LINE) is a Math-specific
+    // pedagogy pilot and must never apply to other subjects (a Science
+    // lesson was previously taught via "take 2 steps on a number line").
+    const appliesStrategy = isMathSubject(topic.unit.subject.nameEn) && (step.type === "EXPLAIN" || step.type === "EXAMPLE" || step.type === "CHECK");
     const currentStrategy = appliesStrategy ? getCurrentStrategy(stepResults) : undefined;
     const ctx: LessonTeachingContext = {
       studentFirstName: (profile as any).fullName?.split(" ")[0] ?? "there",
@@ -415,7 +419,7 @@ export class InteractiveLessonService {
     // to full AI-based conceptual grading (already fully supported), never
     // a bogus numeric answer key. Found 2026-09-19, user-confirmed ("بيدخل
     // ال math في ال science").
-    const allowExpression = /math/i.test(topic.unit.subject.nameEn);
+    const allowExpression = isMathSubject(topic.unit.subject.nameEn);
     const raw = await this.runLessonAI({
       userId: (profile as any).userId,
       profileId: profile.id,
@@ -690,7 +694,16 @@ export class InteractiveLessonService {
     // (non-deterministic) checks — deterministic arithmetic checks below
     // are explicitly unaffected, per "deterministic validation remains
     // authoritative" and stay on whatever strategy is already current.
-    const currentStrategy = getCurrentStrategy(stepResults);
+    // Production hotfix (2026-09-25): gated on isMathSubject, same as
+    // deliverStep — undefined here means "the strategy system does not
+    // apply to this subject at all", which also makes any stale
+    // `strategy` value persisted on an OLDER session (e.g. a leftover
+    // "NUMBER_LINE" from before this fix) inert: it's simply never read
+    // back into currentStrategy for a non-Math subject, and gets
+    // overwritten with undefined on this step's next write below — no
+    // manual DB cleanup needed.
+    const isMath = isMathSubject(topic.unit.subject.nameEn);
+    const currentStrategy = isMath ? getCurrentStrategy(stepResults) : undefined;
 
     // Deterministic-first: when this check's question was captured as a
     // gradable expression at delivery time AND the student's reply parses
@@ -747,7 +760,7 @@ export class InteractiveLessonService {
       hintAlreadyGivenThisStep: hintAlreadyGiven,
       studentMessage: message,
       teachingStrategy: currentStrategy,
-      teachingStrategyGuidance: strategyGuidance(currentStrategy),
+      teachingStrategyGuidance: currentStrategy ? strategyGuidance(currentStrategy) : undefined,
     };
     const systemPrompt = this.contextBuilder.buildLessonTeachingPrompt(ctx);
     const raw = await this.runLessonAI({
@@ -771,9 +784,12 @@ export class InteractiveLessonService {
 
     // Phase 8 V1: only a conceptual CHECK's genuinely-wrong answer attempts
     // can trigger a strategy switch — never a question, never a correct
-    // answer, never a deterministic (arithmetic) check.
+    // answer, never a deterministic (arithmetic) check. Production hotfix
+    // (2026-09-25): also never for a non-Math subject — `isMath` gates
+    // this before `currentStrategy` (only ever defined when isMath is
+    // true) is passed in.
     const switchDecision =
-      step.checkType === "conceptual" && isAnswerAttempt && !isCorrectNow
+      isMath && currentStrategy && step.checkType === "conceptual" && isAnswerAttempt && !isCorrectNow
         ? decideStrategySwitch({
             stepId: step.id,
             attemptsSoFar: (prior?.attempts ?? 0) + 1,
@@ -797,8 +813,13 @@ export class InteractiveLessonService {
       correct,
       hintGiven,
       expression,
-      strategy: switchDecision?.strategy ?? prior?.strategy ?? currentStrategy,
-      strategyHistory: switchDecision ? [...(prior?.strategyHistory ?? []), switchDecision.record] : prior?.strategyHistory,
+      // Production hotfix (2026-09-25): for a non-Math subject this
+      // actively overwrites any stale persisted strategy/strategyHistory
+      // (e.g. a resumed session with a leftover "NUMBER_LINE" from before
+      // this fix) with undefined on this step's next write, rather than
+      // just leaving it unread — self-heals with no manual DB cleanup.
+      strategy: isMath ? switchDecision?.strategy ?? prior?.strategy ?? currentStrategy : undefined,
+      strategyHistory: isMath ? (switchDecision ? [...(prior?.strategyHistory ?? []), switchDecision.record] : prior?.strategyHistory) : undefined,
     });
     await this.prisma.client.lessonSession.update({ where: { id: session.id }, data: { stepResultsJson: updatedResults as any } });
 

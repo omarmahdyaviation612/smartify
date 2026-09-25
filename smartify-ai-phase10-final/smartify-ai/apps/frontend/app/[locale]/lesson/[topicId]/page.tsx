@@ -6,9 +6,23 @@ import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getLessonCopy } from "@/content/lesson";
 import { getMarketingCopy } from "@/content/marketing";
 import { Navbar } from "@/components/Navbar";
-import { useApiClient } from "@/lib/api-client";
+import { ApiError, useApiClient } from "@/lib/api-client";
 import { renderTutorMessage } from "@/lib/render-tutor-message";
 import type { Locale } from "@/content/marketing";
+
+// Production hotfix (2026-09-25): a raw browser-level transport failure
+// (fetch() rejecting before any HTTP response exists — offline, DNS, CORS,
+// etc.) surfaces as a plain Error whose message is the native string
+// "Failed to fetch" (Chrome) / "NetworkError when attempting to fetch
+// resource." (Firefox) — never something a student should see. Only an
+// ApiError (see lib/api-client.ts) carries a message actually meant for
+// display: it's always derived from a real HTTP response, either the
+// backend's own localized/safe error message or apiFetch's own generic
+// "Request failed (status)" fallback. Anything else falls back to the
+// page's existing localized generic/transient copy instead.
+function displayableErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? err.message : fallback;
+}
 
 interface LessonTurn {
   role: "student" | "teacher";
@@ -245,7 +259,7 @@ export default function InteractiveLessonPage() {
     } catch (err: any) {
       if (mountedRef.current && run === preparationRunRef.current) {
         setPreparing(false);
-        setError(err?.message ?? copy.genericError);
+        setError(displayableErrorMessage(err, copy.genericError));
       }
     }
   }
@@ -342,7 +356,7 @@ export default function InteractiveLessonPage() {
         if (autoPlay) playTurn(0, result.content, result.conversationId);
       }
     } catch (err: any) {
-      setError(err?.message ?? copy.genericError);
+      setError(displayableErrorMessage(err, copy.genericError));
     } finally {
       clearTimeout(slowStartTimer);
       setSlowStart(false);
@@ -362,7 +376,7 @@ export default function InteractiveLessonPage() {
         if (autoPlay) playTurn(nextIndex, result.content, result.conversationId);
       }
     } catch (err: any) {
-      setError(err?.message ?? copy.genericError);
+      setError(displayableErrorMessage(err, copy.genericError));
     } finally {
       setBusy(false);
     }
@@ -389,7 +403,7 @@ export default function InteractiveLessonPage() {
         if (autoPlay) playTurn(teacherIndex, result.content, result.conversationId);
       }
     } catch (err: any) {
-      setError(err?.message ?? copy.genericError);
+      setError(displayableErrorMessage(err, copy.genericError));
     } finally {
       setBusy(false);
     }
