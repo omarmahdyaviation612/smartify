@@ -8,7 +8,7 @@ import { TutorAnswerCacheService } from "./tutor-answer-cache.service";
 import { selectRelevantGrounding } from "../ai/context/grounding-selector.util";
 import type { GroundingNotes } from "../interactive-lesson/unit-grounding/unit-grounding.types";
 import { buildAdaptiveMathTeachingPlan } from "./adaptive-math-teaching.util";
-import { deriveRequestedMathVisual, parseTutorVisual } from "./visual-instruction.util";
+import { deriveMathVisualWithContext, parseTutorVisual } from "./visual-instruction.util";
 
 // Hard cap on a single message's length, checked BEFORE any daily-limit
 // slot is reserved or any provider call is made — an oversized prompt
@@ -328,7 +328,8 @@ export class TutorService {
       const rawTutorContent = result.content;
       const parsedVisual = parseTutorVisual(rawTutorContent);
       result.content = parsedVisual.text;
-      const deterministicVisual = deriveRequestedMathVisual(trimmed, subject.nameEn);
+      const deterministic = deriveMathVisualWithContext(trimmed, subject.nameEn, priorMessages);
+      const deterministicVisual = deterministic.visual;
       const returnedVisual = deterministicVisual ?? parsedVisual.visual;
       this.logger.log(JSON.stringify({
         event: "TUTOR_VISUAL_INTENT_RESULT",
@@ -342,7 +343,9 @@ export class TutorService {
         validationSucceeded: parsedVisual.visual !== null,
         visualKind: returnedVisual?.kind ?? null,
         visualReturned: returnedVisual !== null,
-        failureReason: deterministicVisual ? null : parsedVisual.visual ? null : "no-safe-visual-intent",
+        visualExpressionSource: deterministic.source === "none" ? (parsedVisual.visual ? "model_intent" : "none") : deterministic.source,
+        resolvedOperation: deterministicVisual?.kind ?? null,
+        failureReason: deterministicVisual || parsedVisual.visual ? null : "no-safe-visual-intent",
       }));
 
       // --- Persist messages + cost ledger atomically ---

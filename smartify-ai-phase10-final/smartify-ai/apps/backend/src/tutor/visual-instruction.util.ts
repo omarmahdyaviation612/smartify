@@ -28,21 +28,40 @@ export function parseTutorVisual(content: string): { text: string; visual: Visua
 
 const SHOW = /\b(show|draw|visuali[sz]e|picture|diagram)\b|\b visually\b|وريني|ارسم|بصري/iu;
 export function deriveRequestedMathVisual(message: string, subjectName: string): VisualInstruction | null {
+  message = message.replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660));
   if (!/\b(math|mathematics|maths)\b|رياضيات/iu.test(subjectName) || !SHOW.test(message)) return null;
   const fraction = message.match(/\b(\d{1,2})\s*\/\s*(\d{1,2})\b/);
   if (fraction) {
     const numerator = Number(fraction[1]), denominator = Number(fraction[2]);
     if (denominator > 0 && numerator <= denominator && denominator <= MAX) return validateVisualInstruction({ kind: "FRACTION_BAR", numerator, denominator, segments: Array.from({ length: denominator }, (_, i) => i < numerator ? "filled" : "empty"), altText: `${numerator} of ${denominator} equal parts are shaded.` });
   }
-  const product = message.match(/(\d{1,2})\s*(?:×|x|\*)\s*(\d{1,2})/i);
+  const product = message.match(/(\d{1,2})\s*(?:\u00d7|x|\*)\s*(\d{1,2})/i);
   if (product) {
     const groups = Number(product[1]), itemsPerGroup = Number(product[2]);
     if (groups > 0 && itemsPerGroup > 0 && groups <= MAX && itemsPerGroup <= MAX) return validateVisualInstruction({ kind: "MULTIPLICATION_GROUPS", groups, itemsPerGroup, item: "apple", altText: `${groups} equal groups with ${itemsPerGroup} apples in each group.` });
   }
-  const division = message.match(/(\d{1,2})\s*(?:÷|\/|divided by)\s*(\d{1,2})/i);
+  const division = message.match(/(\d{1,2})\s*(?:\u00f7|\/|divided by)\s*(\d{1,2})/i);
   if (division) {
     const total = Number(division[1]), groups = Number(division[2]);
     if (total > 0 && groups > 0 && total % groups === 0 && groups <= MAX && total / groups <= MAX) return validateVisualInstruction({ kind: "MULTIPLICATION_GROUPS", groups, itemsPerGroup: total / groups, item: "block", altText: `${total} objects split into ${groups} equal groups.` });
   }
   return null;
+}
+
+export type VisualExpressionSource = "current_message" | "recent_context" | "none";
+export function deriveMathVisualWithContext(message: string, subjectName: string, recentMessages: Array<{ role: string; content: string }>): { visual: VisualInstruction | null; source: VisualExpressionSource } {
+  const current = deriveRequestedMathVisual(message, subjectName);
+  if (current) return { visual: current, source: "current_message" };
+  if (!(/\b(show|draw|visuali[sz]e|picture|diagram)\b|\b visually\b|\u0648\u0631\u064a\u0646\u064a|\u0627\u0631\u0633\u0645|\u0628\u0635\u0631\u064a/iu.test(message))) return { visual: null, source: "none" };
+  const window = recentMessages.slice(-4);
+  const candidates = window.flatMap((turn) => {
+    const normalized = turn.content.replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660));
+    const expressionCount = [...normalized.matchAll(/\d{1,2}\s*(?:\u00d7|x|\*|\u00f7|\/|divided by)\s*\d{1,2}/gi)].length;
+    if (expressionCount !== 1) return [];
+    const probe = deriveRequestedMathVisual(`show me ${turn.content}`, subjectName);
+    return probe ? [probe] : [];
+  });
+  const keys = new Set(candidates.map((v) => JSON.stringify(v)));
+  if (keys.size !== 1 || candidates.length !== 1) return { visual: null, source: "none" };
+  return { visual: candidates[0], source: "recent_context" };
 }
