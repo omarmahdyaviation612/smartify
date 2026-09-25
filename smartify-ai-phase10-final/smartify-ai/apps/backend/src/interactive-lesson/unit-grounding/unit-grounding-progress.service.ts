@@ -63,7 +63,12 @@ export class UnitGroundingProgressService {
     if (!completed.some((chunk) => chunk.chunkId === result.chunkId)) completed.push(result);
     await this.prisma.client.unitGroundingProgress.updateMany({
       where: { unitId, leaseOwner, status: "IN_PROGRESS" },
-      data: { completedChunksJson: completed as Prisma.InputJsonValue, ...(releaseLease ? { leaseOwner: null, leaseExpiresAt: null } : {}) },
+      // Production hotfix (2026-09-25): a real, successful chunk is
+      // genuine forward progress — retryCount resets to 0 so the retry
+      // ceiling in prepareNextGroundingChunk() only ever trips on
+      // CONSECUTIVE failures since the last success, never on stale
+      // failure history from earlier chunks that have since succeeded.
+      data: { completedChunksJson: completed as Prisma.InputJsonValue, retryCount: 0, ...(releaseLease ? { leaseOwner: null, leaseExpiresAt: null } : {}) },
     });
     return true;
   }

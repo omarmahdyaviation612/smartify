@@ -21,6 +21,18 @@ import type { GroundingChunkResult } from "./unit-grounding-progress.service";
 
 
 const MAX_ATTEMPTS = 2; // one initial attempt + one corrective retry — same bound as every other AI-generation loop in this codebase
+
+// Production hotfix (2026-09-25): a Unit whose source PDF object is
+// missing from R2 (or any other deterministic chunk-extraction failure)
+// used to retry forever — RETRYABLE_FAILURE with no ceiling, masked back
+// to a plain "PREPARING" by the nextEligibleAt short-circuit below, so a
+// student polling /advance never saw an error at all (see the
+// "cmucxcubj00eh2qd5kfwohz11" incident: retryCount reached 237 with
+// lastErrorCode "NoSuchKey"). A conservative bound: real transient
+// failures (a momentary network blip, a non-quota 5xx) are expected to
+// clear within a handful of attempts; anything past this many consecutive
+// failures is treated as terminal rather than polled forever.
+const MAX_RETRYABLE_ATTEMPTS = 5;
 const MAX_PAGES_PER_RENDER = 10; // caps vision-token cost per call; a larger Unit range runs multiple sequential calls, merged into one GroundingNotes
 const MAX_TPM_TRANSPORT_ATTEMPTS = 2;
 const MAX_UNIT_PAGE_COUNT = 40; // a sane ceiling on a single Unit's total page range — protects against an accidentally huge manifest range being silently rendered/processed in full
@@ -167,6 +179,15 @@ export class UnitGroundingService {
     const chunkPlan = [];
     for (let page = unit.sourcePageStart; page <= unit.sourcePageEnd; page += 2) chunkPlan.push({ chunkId: `${page}-${Math.min(page + 1, unit.sourcePageEnd)}`, pageStart: page, pageEnd: Math.min(page + 1, unit.sourcePageEnd) });
     const current = await progress.initialize(unitId, identity, chunkPlan);
+    // Production hotfix (2026-09-25): once a Unit has been marked
+    // terminally unrecoverable (missing source object, or the retry
+    // ceiling below), every later call must keep reporting that — never
+    // fall through to claimNextChunk(), whose WHERE clause only matches
+    // status "IN_PROGRESS" and would otherwise return null (masked back
+    // to a plain, misleading "PREPARING" at the `!chunk` branch below).
+    if (current.status === "CONFIGURATION_ERROR") {
+      return { status: "CONFIGURATION_ERROR", reason: current.lastErrorCode ?? "grounding_configuration_error" };
+    }
     if (current.nextEligibleAt && current.nextEligibleAt > new Date()) return { status: "PREPARING", nextEligibleAt: current.nextEligibleAt, retryAfterMs: current.nextEligibleAt.getTime() - Date.now() };
     const leaseOwner = `${requestingActorId}:${crypto.randomUUID()}`;
     const chunk = await progress.claimNextChunk(unitId, leaseOwner, 120000);
@@ -192,10 +213,43 @@ export class UnitGroundingService {
         return { status: "PREPARING", retryAfterMs: 0 };
       } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); if (fetched.isTemporary) fs.rmSync(path.dirname(fetched.localPath), { recursive: true, force: true }); }
     } catch (err) {
+      // Production hotfix (2026-09-25): a missing R2 object (AWS SDK
+      // throws an error named exactly "NoSuchKey" — see
+      // S3CurriculumSourceStorage.fetchToTempFile) is deterministic: it
+      // will never resolve itself by retrying. Narrow, exact name check —
+      // never a broad/guessed match — routes it straight to the existing
+      // terminal CONFIGURATION_ERROR status instead of RETRYABLE_FAILURE.
+      // No storage key, bucket, or exception detail is included in the
+      // reason string — ensureTopicHasSteps() already maps
+      // CONFIGURATION_ERROR to a single generic, student-safe message
+      // (ServiceUnavailableException("This lesson is not available yet.")),
+      // so nothing further is needed on the response side.
+      if (err instanceof Error && err.name === "NoSuchKey") {
+        await progress.markConfigurationError(unitId, leaseOwner, "source_object_not_found");
+        return { status: "CONFIGURATION_ERROR", reason: "source_object_not_found" };
+      }
+
       const metadata = err instanceof BoundedGroundingRetryError ? err.metadata : undefined;
       const retryAfterMs = Math.min(120000, Math.max(5000, metadata?.resetTokensMs ?? metadata?.retryAfterMs ?? 5000));
       const nextEligibleAt = new Date(Date.now() + retryAfterMs);
       const reason = metadata ? "provider_rate_limited" : (err instanceof Error ? err.name : "grounding_error");
+
+      // Bounded ceiling (2026-09-25): `current.retryCount` reflects
+      // consecutive retryable failures SINCE the last successful chunk
+      // (persistChunk resets it to 0 on real progress — see
+      // UnitGroundingProgressService.persistChunk). Past the ceiling, a
+      // failure that keeps recurring is treated as terminal rather than
+      // polled forever, exactly like the NoSuchKey case above — this
+      // covers any OTHER deterministic-but-unclassified failure mode, not
+      // just missing storage objects. A quota/rate-limit retry
+      // (BoundedGroundingRetryError) still counts toward this ceiling —
+      // it is not exempt — but its own retryAfterMs/resetTokensMs timing
+      // is preserved for every attempt up to the ceiling.
+      if (current.retryCount + 1 >= MAX_RETRYABLE_ATTEMPTS) {
+        await progress.markConfigurationError(unitId, leaseOwner, "retryable_failure_limit_exceeded");
+        return { status: "CONFIGURATION_ERROR", reason: "retryable_failure_limit_exceeded" };
+      }
+
       await progress.markRetryable(unitId, leaseOwner, nextEligibleAt, reason);
       return { status: "RETRYABLE_FAILURE", retryAfterMs, nextEligibleAt, reason };
     }

@@ -21,7 +21,7 @@ describe("InteractiveLessonService", () => {
     { id: "s7", type: "COMPLETE", order: 7, objective: "acknowledge completion" },
   ];
 
-  function makeHarness(opts: { generateImpl?: (args: any) => any; studentSubjectRow?: { expiresAt: Date | null }; extraTopics?: Record<string, any> } = {}) {
+  function makeHarness(opts: { generateImpl?: (args: any) => any; studentSubjectRow?: { expiresAt: Date | null }; extraTopics?: Record<string, any>; groundingPreparationResult?: { status: string; retryAfterMs?: number } } = {}) {
     const state: {
       profiles: Record<string, any>;
       topics: Record<string, any>;
@@ -187,6 +187,12 @@ describe("InteractiveLessonService", () => {
         state.topics[topicId] = { ...state.topics[topicId], teachingStepsJson: STEPS };
         return state.topics[topicId];
       }),
+      // Production hotfix (2026-09-25): every OTHER test in this file
+      // relies on the implicit READY default (a title-only topic's
+      // teachingStepsJson is null, so ensureTopicHasSteps must clear the
+      // grounding-preparation gate before ensureTopicHasLesson runs) —
+      // only the dedicated CONFIGURATION_ERROR test below overrides this.
+      prepareTopicGrounding: jest.fn().mockResolvedValue(opts.groundingPreparationResult ?? { status: "READY" }),
     } as any;
     // Question-pool generation is a fire-and-forget-shaped no-op here —
     // no test in this file asserts on it; real behavior is covered by
@@ -589,6 +595,31 @@ describe("InteractiveLessonService", () => {
     h.state.topics["topic-2"] = { id: "topic-2", nameEn: "No Plan", nameAr: "بلا خطة", unitId: "unit-1", teachingStepsJson: null, unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } } };
     const result = await h.service.getState("user-1", "topic-2");
     expect(result).toEqual({ started: false, preparation: { status: "READY" } });
+  });
+
+  /**
+   * Production hotfix (2026-09-25): when grounding preparation reports
+   * CONFIGURATION_ERROR (e.g. a missing R2 source object, or the new
+   * retry-ceiling — see UnitGroundingService), the student must get one
+   * clear, safe, generic error immediately — never the internal `reason`
+   * string (which could otherwise carry a storage key/error name), and
+   * never an endless PREPARING loop.
+   */
+  it("a title-only topic whose grounding preparation reports CONFIGURATION_ERROR surfaces one safe, generic error — never the internal reason", async () => {
+    const h = makeHarness({ groundingPreparationResult: { status: "CONFIGURATION_ERROR" } });
+    h.state.topics["topic-2"] = { id: "topic-2", nameEn: "No Plan", nameAr: "بلا خطة", unitId: "unit-1", teachingStepsJson: null, unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } } };
+
+    await expect(h.service.advance("user-1", "topic-2")).rejects.toThrow("This lesson is not available yet.");
+    expect(h.draftGenerator.ensureTopicHasLesson).not.toHaveBeenCalled();
+
+    try {
+      await h.service.advance("user-1", "topic-2");
+      fail("expected advance() to throw");
+    } catch (err: any) {
+      // Never leaks the internal machine-readable reason (e.g.
+      // "source_object_not_found") to the student-facing exception.
+      expect(String(err.message)).not.toMatch(/source_object_not_found|retryable_failure_limit_exceeded|NoSuchKey/);
+    }
   });
 
   it("getState() on a genuinely unknown topic id still throws NotFoundException", async () => {

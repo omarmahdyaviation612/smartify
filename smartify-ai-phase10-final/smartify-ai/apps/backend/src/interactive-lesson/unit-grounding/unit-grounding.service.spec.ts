@@ -132,13 +132,15 @@ describe("UnitGroundingService.prepareNextGroundingChunk", () => {
   function boundedHarness(overrides: any = {}) {
     const h = makeHarness({ unitOverrides: { sourcePageStart: 8, sourcePageEnd: 11, ...overrides.unitOverrides } });
     const progress = {
-      initialize: jest.fn().mockResolvedValue({ nextEligibleAt: null }),
+      initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 0 }),
       claimNextChunk: jest.fn().mockResolvedValue({ chunkId: "8-9", pageStart: 8, pageEnd: 9 }),
       persistChunk: jest.fn().mockResolvedValue(true),
       get: jest.fn().mockResolvedValue({ completedChunksJson: [{ chunkId: "8-9", pageStart: 8, pageEnd: 9, notes: JSON.parse(VALID_EXTRACTION_JSON) }] }),
       releaseLease: jest.fn().mockResolvedValue(true),
       finalize: jest.fn().mockResolvedValue(true),
       markRetryable: jest.fn().mockResolvedValue(true),
+      markConfigurationError: jest.fn().mockResolvedValue(true),
+      ...overrides.progressOverrides,
     };
     (h.service as any).progressService = progress;
     jest.spyOn(h.service as any, "extractChunk").mockResolvedValue(JSON.parse(VALID_EXTRACTION_JSON));
@@ -171,6 +173,102 @@ describe("UnitGroundingService.prepareNextGroundingChunk", () => {
     expect(result.status).toBe("RETRYABLE_FAILURE");
     expect(result.status === "RETRYABLE_FAILURE" && result.retryAfterMs).toBe(5000);
     expect(h.progress.markRetryable).toHaveBeenCalledTimes(1);
+    expect(h.progress.markConfigurationError).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Production hotfix (2026-09-25) — the "cmucxcubj00eh2qd5kfwohz11"
+   * incident: a missing R2 object was retried 237 times, masked to the
+   * student as endless "PREPARING". A missing source object is
+   * deterministic and must go terminal on the FIRST occurrence, never
+   * retried.
+   */
+  describe("subject-safe... missing-source-object resilience (2026-09-25 hotfix)", () => {
+    it("1. a NoSuchKey storage error transitions to CONFIGURATION_ERROR, not RETRYABLE_FAILURE", async () => {
+      const h = boundedHarness();
+      const noSuchKey = new Error("The specified key does not exist.");
+      noSuchKey.name = "NoSuchKey";
+      h.storage.fetchToTempFile.mockRejectedValueOnce(noSuchKey);
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result).toEqual({ status: "CONFIGURATION_ERROR", reason: "source_object_not_found" });
+      expect(h.progress.markConfigurationError).toHaveBeenCalledWith("unit-1", expect.any(String), "source_object_not_found");
+      expect(h.progress.markRetryable).not.toHaveBeenCalled();
+    });
+
+    it("2. NoSuchKey never increments retryCount forever — a later call sees the terminal status and never re-attempts storage/AI work", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "CONFIGURATION_ERROR", nextEligibleAt: null, retryCount: 1, lastErrorCode: "source_object_not_found" }) } });
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result).toEqual({ status: "CONFIGURATION_ERROR", reason: "source_object_not_found" });
+      // Never falls through to claim/fetch/extract again — this IS what
+      // proves it can't loop: no further work, no further retryCount
+      // increment, ever, once terminal.
+      expect(h.progress.claimNextChunk).not.toHaveBeenCalled();
+      expect(h.storage.fetchToTempFile).not.toHaveBeenCalled();
+      expect(h.progress.markRetryable).not.toHaveBeenCalled();
+      expect(h.progress.markConfigurationError).not.toHaveBeenCalled();
+    });
+
+    it("3. a transient (non-NoSuchKey) failure well below the retry ceiling still returns RETRYABLE_FAILURE, preserving normal retry behavior", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 1 }) } });
+      (h.service as any).extractChunk.mockRejectedValueOnce(new Error("Grounding provider returned no result."));
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result.status).toBe("RETRYABLE_FAILURE");
+      expect(h.progress.markRetryable).toHaveBeenCalledTimes(1);
+      expect(h.progress.markConfigurationError).not.toHaveBeenCalled();
+    });
+
+    it("4. once retryCount reaches the ceiling, a further generic retryable failure transitions terminally instead of retrying again", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 4 }) } });
+      (h.service as any).extractChunk.mockRejectedValueOnce(new Error("Grounding provider returned no result."));
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result).toEqual({ status: "CONFIGURATION_ERROR", reason: "retryable_failure_limit_exceeded" });
+      expect(h.progress.markConfigurationError).toHaveBeenCalledWith("unit-1", expect.any(String), "retryable_failure_limit_exceeded");
+      expect(h.progress.markRetryable).not.toHaveBeenCalled();
+    });
+
+    it("5. a quota/rate-limit retry (BoundedGroundingRetryError) still counts toward the ceiling, but its own timing is preserved below it", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 0 }) } });
+      (h.service as any).extractChunk.mockRejectedValueOnce(Object.assign(new Error("429"), { metadata: { remainingTokens: 0, resetTokensMs: 79000, retryAfterMs: 695 } }));
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      // Same fallback-default 5000ms as the pre-existing TPM test above —
+      // this hotfix does not change quota-retry timing, only whether it
+      // eventually goes terminal.
+      expect(result.status).toBe("RETRYABLE_FAILURE");
+      expect(result.status === "RETRYABLE_FAILURE" && result.retryAfterMs).toBe(5000);
+      expect(h.progress.markConfigurationError).not.toHaveBeenCalled();
+    });
+
+    it("6. never exposes the storage key, bucket, or raw exception message to the returned reason", async () => {
+      const h = boundedHarness();
+      const noSuchKey = new Error("The specified key does not exist: science y5 .pdf in bucket smartify-curriculum-prod");
+      noSuchKey.name = "NoSuchKey";
+      h.storage.fetchToTempFile.mockRejectedValueOnce(noSuchKey);
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result.status === "CONFIGURATION_ERROR" && result.reason).toBe("source_object_not_found");
+      expect(JSON.stringify(result)).not.toContain("science y5 .pdf");
+      expect(JSON.stringify(result)).not.toContain("bucket");
+    });
+
+    it("7. normal successful chunk flow (below the ceiling, no failure at all) is completely unchanged", async () => {
+      const h = boundedHarness();
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+      expect(result.status).toBe("PREPARING");
+      expect(h.progress.persistChunk).toHaveBeenCalledTimes(1);
+      expect(h.progress.markConfigurationError).not.toHaveBeenCalled();
+      expect(h.progress.markRetryable).not.toHaveBeenCalled();
+    });
   });
 });
 
