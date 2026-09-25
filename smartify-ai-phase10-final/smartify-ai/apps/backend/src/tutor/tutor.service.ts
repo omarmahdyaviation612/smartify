@@ -8,6 +8,7 @@ import { TutorAnswerCacheService } from "./tutor-answer-cache.service";
 import { selectRelevantGrounding } from "../ai/context/grounding-selector.util";
 import type { GroundingNotes } from "../interactive-lesson/unit-grounding/unit-grounding.types";
 import { buildAdaptiveMathTeachingPlan } from "./adaptive-math-teaching.util";
+import { parseTutorVisual } from "./visual-instruction.util";
 
 // Hard cap on a single message's length, checked BEFORE any daily-limit
 // slot is reserved or any provider call is made — an oversized prompt
@@ -324,6 +325,8 @@ export class TutorService {
       // Lesson engine's identical pattern — same shared TTS endpoint, so
       // the same bug applies here unchanged).
       result.content = result.content.trim();
+      const parsedVisual = parseTutorVisual(result.content);
+      result.content = parsedVisual.text;
 
       // --- Persist messages + cost ledger atomically ---
       // Both writes happen in one transaction so it's never possible to
@@ -402,6 +405,7 @@ export class TutorService {
         isAiGenerated: true, // surfaced to the frontend so it can badge the message, per the AI-vs-verified-content separation rule
         remainingToday: remainingAfter.remaining,
         dailyLimit: remainingAfter.limit,
+        ...(parsedVisual.visual ? { visual: parsedVisual.visual, visualReason: "adaptive_math" as const } : {}),
       };
     } catch (err) {
       // Single release point for everything that can go wrong AFTER a

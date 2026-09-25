@@ -11,6 +11,8 @@ import { Navbar } from "@/components/Navbar";
 import { useApiClient } from "@/lib/api-client";
 import { renderTutorMessage } from "@/lib/render-tutor-message";
 import type { Locale } from "@/content/marketing";
+import { TutorVisual } from "@/components/TutorVisual";
+import type { VisualInstruction } from "@smartify/shared-types";
 
 interface Subject {
   id: string;
@@ -20,6 +22,7 @@ interface Subject {
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  visual?: VisualInstruction | null;
 }
 
 export default function TutorPage() {
@@ -235,7 +238,7 @@ export default function TutorPage() {
     setError(null);
 
     try {
-      const res = await apiFetch<{ conversationId: string; reply: string }>(
+      const res = await apiFetch<{ conversationId: string; reply: string; visual?: VisualInstruction | null }>(
         "/tutor/message",
         { method: "POST", body: JSON.stringify({ subjectId, conversationId, message: userMessage }) },
       );
@@ -246,7 +249,7 @@ export default function TutorPage() {
       // assistant's eventual index is this snapshot length + 1 (for the
       // user message appended above), not something read back from state.
       const assistantIndex = messages.length + 1;
-      setMessages((prev) => [...prev, { role: "assistant", content: res.reply }]);
+      setMessages((prev) => [...prev, { role: "assistant", content: res.reply, visual: res.visual }]);
       // Auto-play starts exactly once, right when the reply arrives — never
       // for the user's own message, and never re-triggered afterward.
       if (autoPlay) playMessage(assistantIndex, res.reply, res.conversationId);
@@ -369,6 +372,7 @@ export default function TutorPage() {
                     }`}
                   >
                     {m.role === "assistant" ? renderTutorMessage(m.content) : <p className="whitespace-pre-wrap">{m.content}</p>}
+                    {m.role === "assistant" && m.visual && <div className="mt-3"><TutorVisual visual={m.visual} /></div>}
                     {m.role === "assistant" && (
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-medium text-sf-purple-600">
                         {status === "loading" && <span className="text-neutral-400">{copy.loadingReply}</span>}
