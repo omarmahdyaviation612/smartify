@@ -10,6 +10,7 @@ import { AIProviderFactory } from "../../ai/ai-provider.factory";
 import { AIContextBuilderService } from "../../ai/context/ai-context-builder.service";
 import { AIUsageService } from "../../ai/usage/ai-usage.service";
 import { validateGroundingNotes } from "./unit-grounding-validator";
+import { remapSourceImageIndexToPages } from "./unit-grounding-page-remap.util";
 import type { GroundingNotes } from "./unit-grounding.types";
 import { CurriculumSourceStorageFactory } from "./storage/curriculum-source-storage.factory";
 import { resolveEffectiveSourceFile } from "./unit-effective-source.util";
@@ -38,7 +39,19 @@ const MAX_TPM_TRANSPORT_ATTEMPTS = 2;
 const MAX_UNIT_PAGE_COUNT = 40; // a sane ceiling on a single Unit's total page range — protects against an accidentally huge manifest range being silently rendered/processed in full
 
 const CURRENT_GROUNDING_VERSION = 1; // bump only when the extraction schema/methodology changes in a way that makes old groundingNotesJson stale
-const GROUNDING_PROMPT_VERSION = "grounding-extraction-v1";
+// Page-provenance hotfix (2026-09-25): bumped v1 -> v2 because the
+// extraction contract genuinely changed (model-generated absolute
+// sourcePages -> model-generated sourceImageIndex + deterministic backend
+// remapping — see unit-grounding-page-remap.util.ts). This bump is also
+// the ZERO-MANUAL-INTERVENTION production recovery mechanism for any
+// UnitGroundingProgress row stuck in CONFIGURATION_ERROR under the old
+// contract (e.g. unitId cmucxcubj00eh2qd5kfwohz11): since promptVersion is
+// part of UnitGroundingProgressService.sameIdentity()'s comparison, the
+// next real student /advance request will find sameIdentity() false for
+// that stale row and initialize() will delete-and-recreate a fresh
+// IN_PROGRESS row automatically — no manual DB reset/delete, no
+// grounding:extract, ever required.
+const GROUNDING_PROMPT_VERSION = "grounding-extraction-v2";
 
 // Production lazy-grounding lock tuning (ensureUnitGrounded). A stale lock
 // (crashed worker) is reclaimed after this long — long enough to cover a
@@ -234,6 +247,20 @@ export class UnitGroundingService {
       const nextEligibleAt = new Date(Date.now() + retryAfterMs);
       const reason = metadata ? "provider_rate_limited" : (err instanceof Error ? err.name : "grounding_error");
 
+      // Observability hotfix (2026-09-25): `lastErrorCode` on the DB row
+      // only ever held `err.name` (a near-useless generic label like
+      // "UnitGroundingExtractionError") and, worse, got fully overwritten
+      // by the ceiling branch below — the real underlying cause was
+      // provably unrecoverable after the fact (see the
+      // cmucxcubj00eh2qd5kfwohz11 incident, 237 retries, no diagnosable
+      // log anywhere). Logging err.message/status here — safe: it comes
+      // from the SDK's own error object (API-response-derived, never an
+      // echo of the request), never prompts/images/textbook/student data.
+      const status = (err as { status?: number }).status;
+      this.logger.warn(
+        `UNIT_GROUNDING_CHUNK_FAILED unitId=${unitId} reason=${reason}: ${err instanceof Error ? err.message : String(err)}${status ? ` status=${status}` : ""}`,
+      );
+
       // Bounded ceiling (2026-09-25): `current.retryCount` reflects
       // consecutive retryable failures SINCE the last successful chunk
       // (persistChunk resets it to 0 on real progress — see
@@ -246,6 +273,12 @@ export class UnitGroundingService {
       // it is not exempt — but its own retryAfterMs/resetTokensMs timing
       // is preserved for every attempt up to the ceiling.
       if (current.retryCount + 1 >= MAX_RETRYABLE_ATTEMPTS) {
+        // The terminal DB lastErrorCode becomes the generic
+        // "retryable_failure_limit_exceeded" (it must stay a single,
+        // stable, student-safe code) — but the LAST real reason/message
+        // is logged here, one line above the state transition, so it's
+        // never lost the way it was in the original incident.
+        this.logger.warn(`UNIT_GROUNDING_RETRY_CEILING_REACHED unitId=${unitId} lastRealReason=${reason} retryCount=${current.retryCount + 1}`);
         await progress.markConfigurationError(unitId, leaseOwner, "retryable_failure_limit_exceeded");
         return { status: "CONFIGURATION_ERROR", reason: "retryable_failure_limit_exceeded" };
       }
@@ -454,10 +487,15 @@ export class UnitGroundingService {
     const imagePaths = pages.map(p => p.imagePath);
     const estimatedInputTokens = textTokens + pages.reduce((sum, p) => sum + p.imageTokens, 0);
     const chunkTag = unitId;
-    const imageParts = imagePaths.map((p) => ({
-      type: "image_url" as const,
-      image_url: { url: `data:image/png;base64,${fs.readFileSync(p).toString("base64")}`, detail },
-    }));
+    // Page-provenance hotfix (2026-09-25): each image is preceded by its
+    // own "Image N" text label directly in the request — the model must
+    // never rely solely on the system prompt's description of ordering.
+    // This label, not any page number, is what a valid sourceImageIndex
+    // must refer back to (see unit-grounding-validator.ts).
+    const imageParts = imagePaths.flatMap((p, index) => [
+      { type: "text" as const, text: `Image ${index + 1}:` },
+      { type: "image_url" as const, image_url: { url: `data:image/png;base64,${fs.readFileSync(p).toString("base64")}`, detail } },
+    ]);
 
     const systemPrompt = this.contextBuilder.buildUnitGroundingExtractionPrompt({ ...ctx, pageRangeStart: pageStart, pageRangeEnd: pageEnd });
     let lastErrors: string[] = [];
@@ -504,6 +542,18 @@ export class UnitGroundingService {
         }
         if (!result) throw new Error("Grounding provider returned no result.");
       } catch (err) {
+        // Observability hotfix (2026-09-25): previously this raw provider
+        // failure was completely unlogged — only the generic, error-
+        // agnostic "budget released (provider call did not complete)"
+        // line existed (AIUsageService.releaseBudget). err.name/message/
+        // status come from the OpenAI SDK's own error object, derived
+        // from the API's response — never an echo of the request payload
+        // — so this is safe: no prompt text, no image/base64 data, no
+        // textbook or student content.
+        const status = (err as { status?: number }).status;
+        this.logger.warn(
+          `GROUNDING_PROVIDER_CALL_FAILED chunkTag=${chunkTag} pages=${pageStart}-${pageEnd} attempt=${attempt}: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}${status ? ` status=${status}` : ""}`,
+        );
         await this.usageService.releaseBudget(budgetReservationId).catch(() => undefined);
         throw err;
       }
@@ -541,14 +591,24 @@ export class UnitGroundingService {
       const validation = validateGroundingNotes(parsed, {
         unitNameEn: ctx.unitNameEn,
         subjectNameEn: ctx.subjectNameEn,
-        requestedPageRange: { start: pageStart, end: pageEnd },
+        imageCount: pages.length,
       });
-      if (validation.valid && validation.notes) return validation.notes;
+      // Page-provenance hotfix (2026-09-25): the model's sourceImageIndex
+      // ordinals are deterministically translated to REAL PDF page
+      // numbers here — never trusted from the model directly. See
+      // unit-grounding-page-remap.util.ts's doc comment.
+      if (validation.valid && validation.notes) return remapSourceImageIndexToPages(validation.notes, pages);
 
       lastErrors = validation.errors;
       this.logger.warn(`GROUNDING_VALIDATION_FAILED chunkTag=${chunkTag} pages=${pageStart}-${pageEnd} attempt=${attempt}: ${validation.errors.join("; ")}`);
     }
 
+    // Observability hotfix (2026-09-25): each attempt's validation errors
+    // were already logged individually above as they happened; this final
+    // summary line (with the SAME lastErrors the thrown error itself
+    // carries) is what a Railway-logs search for this chunkTag actually
+    // finds first, without needing to reconstruct the attempt sequence.
+    this.logger.warn(`GROUNDING_EXTRACTION_EXHAUSTED chunkTag=${chunkTag} pages=${pageStart}-${pageEnd} after ${MAX_ATTEMPTS} attempt(s): ${lastErrors.join("; ")}`);
     throw new UnitGroundingExtractionError(`Grounding extraction failed validation for pages ${pageStart}-${pageEnd} after ${MAX_ATTEMPTS} attempt(s).`, lastErrors);
   }
 

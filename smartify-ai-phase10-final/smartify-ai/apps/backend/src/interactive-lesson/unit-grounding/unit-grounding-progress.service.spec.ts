@@ -38,6 +38,40 @@ describe("UnitGroundingProgressService", () => {
     expect(h.prisma.client.unitGroundingProgress.delete).toHaveBeenCalledWith({ where: { unitId: "u1" } });
   });
 
+  /**
+   * Grounding-provenance recovery hotfix (2026-09-25): the
+   * GROUNDING_PROMPT_VERSION bump (v1 -> v2, see unit-grounding.service.ts)
+   * is the ZERO-MANUAL-INTERVENTION mechanism for recovering a
+   * UnitGroundingProgress row stranded in CONFIGURATION_ERROR under the
+   * old sourcePages-based extraction contract. This proves the mechanism
+   * itself: a stale row (even one already terminal) is a DIFFERENT
+   * identity once promptVersion changes, so it is deleted and replaced
+   * with a fresh row rather than being reused or requiring any manual
+   * reset — exactly the "initializes fresh progress" behavior the next
+   * real student /advance request relies on.
+   */
+  it("treats a promptVersion change alone as a different identity, replacing even a terminal CONFIGURATION_ERROR row with a fresh one", async () => {
+    const h = make();
+    const staleIdentity = { ...identity, promptVersion: "grounding-extraction-v1" };
+    await h.service.initialize("u1", staleIdentity, [{ chunkId: "c1", pageStart: 21, pageEnd: 22 }]);
+
+    // Simulate the exact production incident state: terminal, with a real
+    // retryCount and lastErrorCode from the old contract's failures.
+    const staleRow = h.rows.get("u1");
+    staleRow.status = "CONFIGURATION_ERROR";
+    staleRow.lastErrorCode = "retryable_failure_limit_exceeded";
+    staleRow.retryCount = 4;
+
+    const newIdentity = { ...identity, promptVersion: "grounding-extraction-v2" };
+    const fresh = await h.service.initialize("u1", newIdentity, [{ chunkId: "c1", pageStart: 21, pageEnd: 22 }]);
+
+    expect(h.prisma.client.unitGroundingProgress.delete).toHaveBeenCalledWith({ where: { unitId: "u1" } });
+    expect(fresh.status).toBe("IN_PROGRESS");
+    expect(fresh.retryCount).toBe(0);
+    expect(fresh.lastErrorCode).toBeUndefined();
+    expect(fresh.promptVersion).toBe("grounding-extraction-v2");
+  });
+
   it("claims, persists, and does not duplicate a completed chunk", async () => {
     const h = make();
     await h.service.initialize("u1", identity, [{ chunkId: "c1", pageStart: 1, pageEnd: 2 }]);

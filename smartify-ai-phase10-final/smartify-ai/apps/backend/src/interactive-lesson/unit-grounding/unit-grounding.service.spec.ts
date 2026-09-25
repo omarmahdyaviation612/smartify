@@ -56,7 +56,7 @@ const VALID_EXTRACTION_JSON = JSON.stringify({
   gradeLevel: "Year 5",
   subject: "Science",
   learningObjectives: ["Identify the main parts of a plant."],
-  concepts: [{ name: "Roots", description: "Roots absorb water and nutrients from the soil.", sourcePages: [8], importance: "core" }],
+  concepts: [{ name: "Roots", description: "Roots absorb water and nutrients from the soil.", sourceImageIndex: [1], importance: "core" }],
   facts: [],
   vocabulary: [],
   skills: [],
@@ -268,6 +268,75 @@ describe("UnitGroundingService.prepareNextGroundingChunk", () => {
       expect(h.progress.persistChunk).toHaveBeenCalledTimes(1);
       expect(h.progress.markConfigurationError).not.toHaveBeenCalled();
       expect(h.progress.markRetryable).not.toHaveBeenCalled();
+      // 10. no additional provider calls beyond the existing bounded
+      // behavior — extractChunk (mocked at this harness level) is called
+      // exactly once per successful chunk, never more.
+      expect((h.service as any).extractChunk).toHaveBeenCalledTimes(1);
+    });
+
+    // 5/6. Observability hotfix (2026-09-25): the underlying failure must
+    // be discoverable in logs, never just the generic terminal code.
+    it("5. a raw provider exception is logged with its real name/message before markRetryable, never just a generic label", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 0 }) } });
+      const warnSpy = jest.spyOn((h.service as any).logger, "warn").mockImplementation(() => undefined);
+      (h.service as any).extractChunk.mockRejectedValueOnce(new Error("Grounding provider returned no result."));
+
+      await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      const logged = warnSpy.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(logged).toContain("Grounding provider returned no result.");
+      expect(h.progress.markRetryable).toHaveBeenCalledTimes(1);
+    });
+
+    it("6. when the retry ceiling trips, the last real failure reason is still logged even though the terminal DB reason becomes the generic code", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 4 }) } });
+      const warnSpy = jest.spyOn((h.service as any).logger, "warn").mockImplementation(() => undefined);
+      (h.service as any).extractChunk.mockRejectedValueOnce(new Error("Grounding provider returned no result."));
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result).toEqual({ status: "CONFIGURATION_ERROR", reason: "retryable_failure_limit_exceeded" });
+      const logged = warnSpy.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(logged).toMatch(/UNIT_GROUNDING_RETRY_CEILING_REACHED/);
+      expect(logged).toContain("lastRealReason=Error"); // err.name of a plain Error — the real reason, not the generic terminal code
+    });
+  });
+
+  // Page-provenance hotfix (2026-09-25): structural coverage of the
+  // OpenAI request payload and extraction-level logging, exercised via
+  // the legacy extractUnitGrounding path (same extractChunk() underneath
+  // — see the two call sites both routing through it).
+  describe("page-provenance request structure & extraction-level logging (2026-09-25 hotfix)", () => {
+    it("labels every attached image with an explicit 'Image N:' text part, never relying only on prompt-described ordering", async () => {
+      const h = makeHarness({
+        generateImpl: async () => ({ content: VALID_EXTRACTION_JSON, inputTokens: 100, outputTokens: 200, model: "gpt-4o-mini" }),
+      });
+      await h.service.extractUnitGrounding("unit-1", {}, "actor-1");
+
+      const call = h.generateSpy.mock.calls[0][0];
+      const content = call.messages[0].content as Array<{ type: string; text?: string }>;
+      const textParts = content.filter((p) => p.type === "text").map((p) => p.text);
+      expect(textParts).toContain("Image 1:");
+    });
+
+    it("2. rejects a model response whose sourceImageIndex is outside the sent image count — never persisted", async () => {
+      const outOfRangeJson = JSON.stringify({ ...JSON.parse(VALID_EXTRACTION_JSON), concepts: [{ name: "Roots", description: "Roots absorb water.", sourceImageIndex: [99], importance: "core" }] });
+      const h = makeHarness({ generateImpl: async () => ({ content: outOfRangeJson, inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }) });
+      await expect(h.service.extractUnitGrounding("unit-1", {}, "actor-1")).rejects.toThrow(UnitGroundingExtractionError);
+      expect(h.updateCalls.some((data: any) => data.groundingNotesJson)).toBe(false);
+    });
+
+    it("6. logs the actual validation errors (not just a generic failure) when extraction is exhausted", async () => {
+      const invalidJson = JSON.stringify({ ...JSON.parse(VALID_EXTRACTION_JSON), concepts: [{ name: "Roots", description: "Roots absorb water.", sourceImageIndex: [99], importance: "core" }] });
+      const h = makeHarness({ generateImpl: async () => ({ content: invalidJson, inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }) });
+      const warnSpy = jest.spyOn((h.service as any).logger, "warn").mockImplementation(() => undefined);
+
+      await expect(h.service.extractUnitGrounding("unit-1", {}, "actor-1")).rejects.toThrow(UnitGroundingExtractionError);
+
+      const logged = warnSpy.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(logged).toContain("GROUNDING_VALIDATION_FAILED");
+      expect(logged).toContain("GROUNDING_EXTRACTION_EXHAUSTED");
+      expect(logged).toMatch(/sourceImageIndex.*outside the sent range/);
     });
   });
 });
@@ -418,7 +487,7 @@ describe("UnitGroundingService.extractUnitGrounding", () => {
   });
 
   it("an explicit page-range override is honored over the Unit's own stored range", async () => {
-    const overrideJson = JSON.stringify({ ...JSON.parse(VALID_EXTRACTION_JSON), concepts: [{ name: "Roots", description: "Roots absorb water.", sourcePages: [20], importance: "core" }] });
+    const overrideJson = JSON.stringify({ ...JSON.parse(VALID_EXTRACTION_JSON), concepts: [{ name: "Roots", description: "Roots absorb water.", sourceImageIndex: [1], importance: "core" }] });
     const h = makeHarness({ generateImpl: async () => ({ content: overrideJson, inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }) });
     await h.service.extractUnitGrounding("unit-1", { pageRangeOverride: [20, 21] }, "actor-1");
     const promptCall = h.contextBuilder.buildUnitGroundingExtractionPrompt.mock.calls.map((call: any[]) => call[0]).find((arg: any) => arg.pageRangeStart === 20 && arg.pageRangeEnd === 21);

@@ -461,11 +461,28 @@ describe("AIContextBuilderService.buildUnitGroundingExtractionPrompt (2026-09-19
     pageRangeEnd: 17,
   };
 
-  it("states the requested page range and asks for the target structured schema", () => {
+  it("states the image count and asks for the target structured schema", () => {
     const prompt = service.buildUnitGroundingExtractionPrompt(extractionCtx);
-    expect(prompt).toContain("pages 8 to 17");
+    expect(prompt).toContain("10 page(s)"); // pageRangeEnd(17) - pageRangeStart(8) + 1
     expect(prompt).toContain('"topicHints"');
     expect(prompt).toContain('"concepts"');
+  });
+
+  /**
+   * Page-provenance hotfix (2026-09-25): the prompt must never ask for an
+   * absolute page number (which the model has no reliable way to know —
+   * see the production incident on unit cmucxcubj00eh2qd5kfwohz11) — only
+   * an ordinal into the images actually sent, explicitly distinguished
+   * from any page number printed inside a page image.
+   */
+  it("asks for sourceImageIndex (an image ordinal), never a page number, and warns against printed page numbers", () => {
+    const prompt = service.buildUnitGroundingExtractionPrompt(extractionCtx);
+    expect(prompt).toContain('"sourceImageIndex"');
+    expect(prompt).not.toContain('"sourcePages"');
+    expect(prompt).toMatch(/sourceImageIndex.*is NEVER a page number/i);
+    expect(prompt).toMatch(/printed page numbers are frequently different/i);
+    expect(prompt).toContain("Image 1");
+    expect(prompt).toContain("Image 2");
   });
 
   it("explicitly forbids verbatim reproduction of prose, exercises, illustrations, and tables", () => {
