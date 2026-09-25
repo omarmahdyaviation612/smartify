@@ -29,6 +29,7 @@ import { QuestionBankModule } from "./question-bank/question-bank.module";
 import { UnitGroundingModule } from "./interactive-lesson/unit-grounding/unit-grounding.module";
 import { TrialModule } from "./trial/trial.module";
 import { ReferralModule } from "./referral/referral.module";
+import { SchoolsModule } from "./schools/schools.module";
 
 @Module({
   imports: [
@@ -67,6 +68,7 @@ import { ReferralModule } from "./referral/referral.module";
     UnitGroundingModule,
     TrialModule,
     ReferralModule,
+    SchoolsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

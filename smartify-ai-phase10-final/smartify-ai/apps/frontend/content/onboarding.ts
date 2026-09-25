@@ -10,6 +10,15 @@ export interface OnboardingCopy {
     countryLabel: string;
     languageLabel: string;
     continueLabel: string;
+    // Student school info V1 (2026-09-25)
+    governorateLabel: string;
+    areaLabel: string;
+    schoolLabel: string;
+    schoolSearchPlaceholder: string;
+    schoolNotListedLabel: string;
+    schoolManualLabel: string;
+    schoolBackToSearchLabel: string;
+    schoolNoResults: string;
   };
   curriculum: {
     title: string;
@@ -59,6 +68,14 @@ const en: OnboardingCopy = {
     countryLabel: "Country",
     languageLabel: "Preferred language",
     continueLabel: "Continue",
+    governorateLabel: "Governorate",
+    areaLabel: "Area / District",
+    schoolLabel: "School",
+    schoolSearchPlaceholder: "Search for your school",
+    schoolNotListedLabel: "My school isn't listed",
+    schoolManualLabel: "Enter your school name",
+    schoolBackToSearchLabel: "Search for my school instead",
+    schoolNoResults: "No matching schools found. Try a different search, or enter it manually.",
   },
   curriculum: {
     title: "Choose your curriculum",
@@ -108,6 +125,14 @@ const ar: OnboardingCopy = {
     countryLabel: "الدولة",
     languageLabel: "اللغة المفضلة",
     continueLabel: "متابعة",
+    governorateLabel: "المحافظة",
+    areaLabel: "المنطقة / الإدارة التعليمية",
+    schoolLabel: "المدرسة",
+    schoolSearchPlaceholder: "ابحث عن مدرستك",
+    schoolNotListedLabel: "مدرستي غير موجودة",
+    schoolManualLabel: "اكتب اسم مدرستك",
+    schoolBackToSearchLabel: "البحث عن مدرستي بدلاً من ذلك",
+    schoolNoResults: "لم يتم العثور على مدارس مطابقة. جرّب بحثًا مختلفًا أو أدخل الاسم يدويًا.",
   },
   curriculum: {
     title: "اختر منهجك الدراسي",

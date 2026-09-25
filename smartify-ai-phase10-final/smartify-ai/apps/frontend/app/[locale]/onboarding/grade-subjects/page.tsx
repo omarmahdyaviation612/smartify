@@ -92,6 +92,10 @@ export default function OnboardingGradeSubjectsPage() {
           subjectIds,
           weeklyStudyHours,
           goals: goals || undefined,
+          governorate: latestDraft.governorate,
+          area: latestDraft.area,
+          schoolId: latestDraft.schoolId,
+          schoolNameManual: latestDraft.schoolNameManual,
         }),
       });
       writeDraft({ gradeId: selectedGrade.id, subjectIds, weeklyStudyHours, goals });

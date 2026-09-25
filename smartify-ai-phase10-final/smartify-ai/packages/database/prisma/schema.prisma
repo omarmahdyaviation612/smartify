@@ -54,6 +54,24 @@ model StudentProfile {
   grade            Grade      @relation(fields: [gradeId], references: [id])
   weeklyStudyHours Int?
   goals            String?
+
+  // Student school info V1 (2026-09-25) — collected as an extension of the
+  // existing onboarding profile step, not a new signup flow. All four are
+  // nullable so every existing production StudentProfile row (created
+  // before this feature) stays valid without a backfill. Deliberately NOT
+  // GPS/address — governorate + area + school only, per product privacy
+  // rule. schoolId and schoolNameManual are mutually exclusive: the
+  // student either picked a real School row (schoolId set, schoolNameManual
+  // null) or typed one manually via "My school isn't listed"
+  // (schoolNameManual set, schoolId null) — enforced by
+  // studentOnboardingSchema, never trusted from the client alone (see
+  // OnboardingService.saveProfile, which re-validates schoolId server-side).
+  governorate      String?
+  area             String?
+  schoolId         String?
+  school           School?    @relation(fields: [schoolId], references: [id])
+  schoolNameManual String?
+
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
@@ -124,6 +142,40 @@ model ParentLinkInvitation {
   createdAt     DateTime       @default(now())
 
   @@index([studentId, expiresAt])
+}
+
+// ============ SCHOOL DIRECTORY (Student school info V1, 2026-09-25) ============
+//
+// Deliberately provider-agnostic: `source`/`externalRef` describe WHERE a
+// row came from without hard-coding to any one provider (e.g. Google
+// Places). Expected future sources: "MOE" (an official Egyptian education
+// dataset), "ADMIN" (admin-managed list), "IMPORT" (a bulk import job),
+// "EXTERNAL" (a future external API) — none of these are integrated yet;
+// "SEED" is used only for tiny dev/test fixtures. StudentProfile.schoolId
+// references this table when a student picks a real, known school;
+// StudentProfile.schoolNameManual is the fallback for a school not yet in
+// this table ("My school isn't listed"), so onboarding never blocks on
+// this table being incomplete.
+model School {
+  id          String   @id @default(cuid())
+  nameEn      String
+  nameAr      String?
+  governorate String
+  area        String?
+  source      String // "SEED" | "MOE" | "ADMIN" | "IMPORT" | "EXTERNAL"
+  externalRef String? // opaque id/code from whatever `source` populated it — never assumed to be a Google Place ID or any specific provider's format
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  studentProfiles StudentProfile[]
+
+  // Powers GET /schools?governorate=&area=&q= — governorate is always
+  // supplied by the frontend (chosen before school search becomes
+  // available), so it leads the composite index; isActive is included so
+  // the common "active schools in this governorate" filter is fully
+  // covered without a separate scan.
+  @@index([governorate, isActive])
+  @@index([governorate, area])
 }
 
 // ============ CURRICULUM HIERARCHY ============
