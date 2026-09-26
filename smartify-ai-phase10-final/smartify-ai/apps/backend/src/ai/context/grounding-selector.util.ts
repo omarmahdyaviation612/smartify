@@ -39,7 +39,29 @@ function overlapScore(a: Set<string>, b: Set<string>): number {
   return score;
 }
 
-export function selectRelevantGrounding(groundingNotesJson: GroundingNotes | null | undefined, topicNameEn: string): GroundingSlice | null {
+/**
+ * `unitTopicCount`, when supplied, is the total number of Topics under this
+ * Topic's own Unit (not a new query result the caller has to fetch
+ * specially — every existing caller already has or can trivially include
+ * this count alongside the Unit it already loads). It is used ONLY as a
+ * narrow, unambiguous fallback (2026-09-26 — see the "Chapter 1" incident:
+ * a Unit's sole Topic given a generic, non-descriptive name has zero
+ * lexical overlap with its own real, correct grounding, and was wrongly
+ * blocked as if unsupported). When normal Topic-scoped selection
+ * (topicHints match, then keyword overlap) finds nothing AND this Topic is
+ * the ONLY Topic under its Unit, there is no cross-topic contamination
+ * risk (unlike a multi-Topic Unit, where a wrong guess could hand one
+ * Topic another Topic's unrelated content) — so the Unit's entire
+ * grounding is unambiguously "this Topic's" grounding, and is returned
+ * instead of null. Every fact/concept returned still comes from the real
+ * textbook grounding; this widens WHICH slice of real grounding is
+ * supplied, it never permits inventing content outside it.
+ */
+export function selectRelevantGrounding(
+  groundingNotesJson: GroundingNotes | null | undefined,
+  topicNameEn: string,
+  unitTopicCount?: number,
+): GroundingSlice | null {
   if (!groundingNotesJson) return null;
 
   const normalizedTopic = normalizeTitle(topicNameEn);
@@ -65,9 +87,22 @@ export function selectRelevantGrounding(groundingNotesJson: GroundingNotes | nul
     .filter((s) => s.score > 0);
 
   if (scoredConcepts.length === 0) {
+    if (unitTopicCount === 1) {
+      // Sole Topic under this Unit — the Unit's whole grounding IS this
+      // Topic's grounding, unambiguously. Never applied when a Unit has
+      // 2+ Topics (see doc comment above).
+      return {
+        matchedViaHint: false,
+        learningObjectives: groundingNotesJson.learningObjectives,
+        concepts: groundingNotesJson.concepts,
+        facts: groundingNotesJson.facts,
+        vocabulary: groundingNotesJson.vocabulary,
+      };
+    }
     // Nothing recognizably related to this Topic's title anywhere in the
-    // Unit's grounding — safer to report "no relevant slice" than to guess
-    // and hand generation an arbitrary, unrelated subset.
+    // Unit's grounding, and this Unit has other Topics too — safer to
+    // report "no relevant slice" than to guess and hand generation an
+    // arbitrary, unrelated subset.
     return null;
   }
 

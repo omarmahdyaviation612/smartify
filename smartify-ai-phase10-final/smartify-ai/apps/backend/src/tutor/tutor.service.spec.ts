@@ -344,6 +344,7 @@ describe("TutorService", () => {
             facts: [], vocabulary: [], skills: [], scopeNotes: [],
             topicHints: [{ topicTitle: "Subtraction within 10", relevantConcepts: ["Subtraction within 10"], sourcePages: [5] }],
           },
+          _count: { topics: 1 },
         },
       };
       const { service, contextBuilder } = makeService({ topic });

@@ -44,7 +44,7 @@ describe("QuestionDraftGeneratorService.ensurePoolForTopic — budget attributio
           findUnique: jest.fn().mockResolvedValue({
             id: TOPIC_ID,
             nameEn: "Test Topic",
-            unit: { nameEn: "Unit 1", groundingNotesJson: null, groundingVersion: null, subject: { nameEn: "Science", grade: { nameEn: "Year 5", curriculum: { nameEn: "Test Curriculum" } } } },
+            unit: { nameEn: "Unit 1", groundingNotesJson: null, groundingVersion: null, subject: { nameEn: "Science", grade: { nameEn: "Year 5", curriculum: { nameEn: "Test Curriculum" } } }, _count: { topics: 1 } },
             lessons: [{ isPlaceholder: false, objectives: [] }],
           }),
         },

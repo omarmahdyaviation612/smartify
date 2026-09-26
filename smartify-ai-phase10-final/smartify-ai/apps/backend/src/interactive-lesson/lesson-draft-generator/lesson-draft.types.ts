@@ -39,6 +39,9 @@ export interface ResolvedUnitContext {
   unitNameEn: string;
   groundingNotesJson: GroundingNotes | null;
   groundingVersion: number | null;
+  /** Total Topics under this Unit — see grounding-selector.util.ts's
+   * single-Topic fallback doc comment. */
+  unitTopicCount: number;
 }
 
 /**

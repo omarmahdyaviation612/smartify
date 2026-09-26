@@ -72,7 +72,7 @@ export class QuestionDraftGeneratorService {
     const topic = await this.prisma.client.topic.findUnique({
       where: { id: topicId },
       include: {
-        unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } },
+        unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } }, _count: { select: { topics: true } } } },
         lessons: { select: { isPlaceholder: true, objectives: { select: { descriptionEn: true } } } },
       },
     });
@@ -89,6 +89,7 @@ export class QuestionDraftGeneratorService {
       isPlaceholder: !topic.lessons.some((l) => !l.isPlaceholder),
       groundingNotesJson: (topic.unit.groundingNotesJson as unknown as GroundingNotes | null) ?? null,
       groundingVersion: topic.unit.groundingVersion ?? null,
+      unitTopicCount: topic.unit._count.topics,
       // §7/§9: the Topic's own already-generated lesson objectives —
       // second priority after grounding, ahead of unguided model knowledge,
       // for question generation (this Topic's real lesson always generates
@@ -234,7 +235,7 @@ export class QuestionDraftGeneratorService {
 
     // 2026-09-19: same grounding-selection principle as generateAutoDraft —
     // see its comment. Computed once, outside the retry loop.
-    const groundingSlice = selectRelevantGrounding(topicContext.groundingNotesJson, topicContext.topicNameEn);
+    const groundingSlice = selectRelevantGrounding(topicContext.groundingNotesJson, topicContext.topicNameEn, topicContext.unitTopicCount);
     if (groundingSlice) {
       this.logger.log(`GROUNDED_TOPIC_GENERATION_STARTED topicId=${topicId} kind=questions`);
     }

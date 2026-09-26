@@ -92,13 +92,14 @@ export class LessonDraftGeneratorService {
   async resolveUnitContext(unitId: string): Promise<ResolvedUnitContext & { unitId: string; subjectId: string; sourceFile: string | null }> {
     const unit = await this.prisma.client.unit.findUnique({
       where: { id: unitId },
-      include: { subject: { include: { grade: { include: { curriculum: true } } } } },
+      include: { subject: { include: { grade: { include: { curriculum: true } } } }, _count: { select: { topics: true } } },
     });
     if (!unit) {
       throw new NotFoundException(`Unit ${unitId} not found — cannot resolve curriculum context.`);
     }
     return {
       unitId: unit.id,
+      unitTopicCount: unit._count.topics,
       subjectId: unit.subjectId,
       sourceFile: resolveEffectiveSourceFile(unit, unit.subject),
       curriculumNameEn: unit.subject.grade.curriculum.nameEn,
@@ -237,7 +238,7 @@ export class LessonDraftGeneratorService {
     // between attempts. null whenever the Unit isn't grounded (or has no
     // concept recognizably related to this Topic's title). A mapped textbook
     // must supply relevant content; it must never fall back to title-only.
-    const groundingSlice = selectRelevantGrounding(unitContext.groundingNotesJson, topic.nameEn);
+    const groundingSlice = selectRelevantGrounding(unitContext.groundingNotesJson, topic.nameEn, unitContext.unitTopicCount);
     const groundingNotes = unitContext.groundingNotesJson;
     const groundingConceptCount = groundingNotes?.concepts.length ?? 0;
     const selectedConceptCount = groundingSlice?.concepts.length ?? 0;

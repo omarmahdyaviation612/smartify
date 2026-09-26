@@ -65,7 +65,7 @@ export class InteractiveLessonService {
   private async getTopicOrThrow(topicId: string) {
     const topic = await this.prisma.client.topic.findUnique({
       where: { id: topicId },
-      include: { unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
+      include: { unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } }, _count: { select: { topics: true } } } } },
     });
     if (!topic || !topic.teachingStepsJson) {
       throw new NotFoundException("This lesson is not available as an interactive lesson yet.");
@@ -86,8 +86,8 @@ export class InteractiveLessonService {
    * Threaded into every runtime LessonTeachingContext so the model can tell
    * a textbook-supported named example from one it would otherwise invent.
    */
-  private topicGroundingSlice(topic: { nameEn: string; unit: { groundingNotesJson: unknown } }) {
-    return selectRelevantGrounding(topic.unit.groundingNotesJson as any, topic.nameEn);
+  private topicGroundingSlice(topic: { nameEn: string; unit: { groundingNotesJson: unknown; _count?: { topics: number } } }) {
+    return selectRelevantGrounding(topic.unit.groundingNotesJson as any, topic.nameEn, topic.unit._count?.topics);
   }
 
   /**

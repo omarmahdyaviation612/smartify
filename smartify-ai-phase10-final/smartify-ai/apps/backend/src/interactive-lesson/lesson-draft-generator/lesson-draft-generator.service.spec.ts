@@ -62,6 +62,7 @@ describe("LessonDraftGeneratorService.ensureTopicHasLesson — budget attributio
             groundingNotesJson: null,
             groundingVersion: null,
             subject: { nameEn: "Science", grade: { nameEn: "Year 5", curriculum: { nameEn: "Test Curriculum" } } },
+            _count: { topics: 1 },
           }),
         },
         lessonDraft: {
@@ -171,6 +172,10 @@ describe("LessonDraftGeneratorService.ensureTopicHasLesson — budget attributio
     h.prisma.client.unit.findUnique.mockResolvedValue({ ...unit,
       subject: { ...unit.subject, sourceFile: "textbook.pdf" },
       groundingNotesJson: { concepts: [], facts: [], vocabulary: [], learningObjectives: [], topicHints: emptyHint ? [{ topicTitle: "Test Topic", relevantConcepts: [], sourcePages: [] }] : [] },
+      // Explicitly a multi-Topic Unit: the 2026-09-26 single-Topic fallback
+      // must never apply here — this must still block, per the original
+      // "no usable topic slice" behavior.
+      _count: { topics: 2 },
     } as any);
     await expect(h.service.ensureTopicHasLesson(TOPIC_ID, { preferredLang: "en", studentAgeRange: "6-7" }, REAL_STUDENT_ID)).rejects.toThrow("Textbook grounding is unavailable");
     expect(h.generateSpy).not.toHaveBeenCalled();
@@ -186,6 +191,8 @@ describe("LessonDraftGeneratorService.ensureTopicHasLesson — budget attributio
         concepts: [{ name: "Unrelated concept", description: "Grounded content", sourcePages: [1], importance: "core" }],
         facts: [], vocabulary: [], learningObjectives: ["Stay within the grounded curriculum."], topicHints: [],
       },
+      // Multi-Topic Unit — the single-Topic fallback must never apply.
+      _count: { topics: 2 },
     } as any);
     h.unitGrounding.ensureUnitGrounded.mockResolvedValue({ used: true });
 
@@ -206,5 +213,36 @@ describe("LessonDraftGeneratorService.ensureTopicHasLesson — budget attributio
     await h.service.ensureTopicHasLesson(TOPIC_ID, { preferredLang: "en", studentAgeRange: "6-7" }, REAL_STUDENT_ID);
     expect(h.generateSpy).toHaveBeenCalledTimes(1);
     expect(h.publisher.autoPublishIntoTopic).toHaveBeenCalledWith("draft-1", TOPIC_ID, expect.objectContaining({ generationSource: "TEXTBOOK_GROUNDED", groundingVersionUsed: 1 }));
+  });
+
+  /**
+   * 2026-09-26 single-Topic Unit fallback ("Chapter 1" incident): a Unit
+   * with exactly ONE Topic whose name has zero lexical overlap with its
+   * own real grounding must still author successfully using that Unit's
+   * full grounding — never blocked as "unsupported" just because the
+   * Topic's own name happens to be generic/non-descriptive.
+   */
+  it("a Unit's SOLE Topic with a generic name (e.g. 'Test Topic' matching nothing) still authors successfully via the single-Topic fallback", async () => {
+    const h = makeHarness();
+    const unit = await h.prisma.client.unit.findUnique();
+    h.prisma.client.unit.findUnique.mockResolvedValue({ ...unit,
+      subject: { ...unit.subject, sourceFile: "textbook.pdf" }, groundingVersion: 1,
+      groundingNotesJson: {
+        // "Explain" deliberately shares no word with the Topic's own name
+        // ("Test Topic") — proving selection reached this Unit's grounding
+        // only via the single-Topic fallback, not ordinary keyword overlap
+        // against the Topic title — while still overlapping with the
+        // harness's default mocked generated content ("Explain" step) so
+        // this test isolates the SELECTION behavior, not an unrelated
+        // content-validation concern.
+        concepts: [{ name: "Explain the real textbook content", description: "Real textbook content.", sourcePages: [1], importance: "core" }],
+        facts: [], vocabulary: [], learningObjectives: [], topicHints: [],
+      },
+      _count: { topics: 1 }, // the sole Topic under this Unit
+    } as any);
+    h.unitGrounding.ensureUnitGrounded.mockResolvedValue({ used: true });
+    await h.service.ensureTopicHasLesson(TOPIC_ID, { preferredLang: "en", studentAgeRange: "6-7" }, REAL_STUDENT_ID);
+    expect(h.generateSpy).toHaveBeenCalledTimes(1);
+    expect(h.publisher.autoPublishIntoTopic).toHaveBeenCalledWith("draft-1", TOPIC_ID, expect.objectContaining({ generationSource: "TEXTBOOK_GROUNDED" }));
   });
 });

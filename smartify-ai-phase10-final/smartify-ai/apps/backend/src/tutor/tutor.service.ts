@@ -251,14 +251,14 @@ export class TutorService {
       if (input.topicId) {
         const topic = await this.prisma.client.topic.findUnique({
           where: { id: input.topicId },
-          include: { unit: { select: { subjectId: true, groundingNotesJson: true } } },
+          include: { unit: { select: { subjectId: true, groundingNotesJson: true, _count: { select: { topics: true } } } } },
         });
         // A client-supplied Topic must belong to the selected Subject before
         // it can influence this tutor turn. Its Unit grounding is then
         // narrowed to this Topic rather than exposing a whole Unit.
         if (topic?.unit?.subjectId === input.subjectId) {
           topicNameEn = topic.nameEn;
-          groundingSlice = selectRelevantGrounding(topic.unit.groundingNotesJson as GroundingNotes | null, topic.nameEn);
+          groundingSlice = selectRelevantGrounding(topic.unit.groundingNotesJson as GroundingNotes | null, topic.nameEn, topic.unit._count.topics);
         }
       }
 
