@@ -34,4 +34,14 @@ describe("PaymentProviderFactory", () => {
     findFirst.mockResolvedValueOnce(null);
     await expect(factory.getActiveProvider()).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
+
+  it("still resolves a StripeProvider instance with no STRIPE_SECRET_KEY configured (construction never requires it)", async () => {
+    const original = process.env.STRIPE_SECRET_KEY;
+    delete process.env.STRIPE_SECRET_KEY;
+    try {
+      await expect(factory.getProviderByKey("stripe")).resolves.toBeInstanceOf(StripeProvider);
+    } finally {
+      if (original !== undefined) process.env.STRIPE_SECRET_KEY = original;
+    }
+  });
 });
