@@ -54,6 +54,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { LessonDraftGeneratorService } from "../interactive-lesson/lesson-draft-generator/lesson-draft-generator.service";
 import { QuestionDraftGeneratorService } from "../question-bank/question-draft-generator/question-draft-generator.service";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../ai/content-authoring-actor.const";
+import { isQuotaError } from "../ai/providers/openai-request-diagnostics";
 
 const EXCLUDED_SUBJECT_ID = "cmucxcuf700gf2qd5t5q38tcx"; // BRITISH_INTL Year 6 English — SOURCE_FILE_MISMATCH
 const MAX_CHUNK_ATTEMPTS_PER_UNIT = 200; // generous ceiling — a real unit needs a few dozen at most; this only guards against an unforeseen infinite loop, never trips in normal operation
@@ -62,6 +63,14 @@ const POLL_CEILING_MS = 90_000; // TPM cooldowns observed in production have run
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Thrown to unwind out of the Units loop entirely — a provider-wide
+ * outage must stop the whole run, not just the one Unit that surfaced it. */
+export class ProviderOutageError extends Error {
+  constructor(readonly unitId: string, readonly reason: string) {
+    super(`Provider outage detected while grounding unit ${unitId} (${reason}). Halting the entire warm-up run — no further Units will be processed. All already-completed grounding/authoring is preserved; rerun this same command once provider availability is confirmed restored.`);
+  }
 }
 
 function parseSubjectIdArg(): string | undefined {
@@ -89,7 +98,7 @@ function estimateTotalChunks(pageStart: number | null, pageEnd: number | null): 
   return Math.ceil((pageEnd - pageStart + 1) / 2);
 }
 
-async function warmUpUnit(
+export async function warmUpUnit(
   draftGenerator: LessonDraftGeneratorService,
   unitId: string,
   anyTopicIdForUnit: string,
@@ -104,6 +113,17 @@ async function warmUpUnit(
     if (result.status === "READY") {
       console.log(`  grounding chunks completed: ${completedChunks}/${totalChunksEstimate ?? "?"} (unit ${unitId} READY)`);
       return "READY";
+    }
+    // 2026-09-26 provider-outage hotfix: a PROVIDER_OUTAGE result means the
+    // OpenAI account itself has no usable quota/credits right now — this is
+    // NOT specific to this Unit (nothing was persisted for it — see
+    // UnitGroundingService), and every subsequent Unit would fail the exact
+    // same way. Halting the ENTIRE run immediately rather than continuing
+    // to the next Unit is the whole point of this fix (the 2026-09-26
+    // incident is exactly what happens without it: 16 Units wrongly
+    // converted to CONFIGURATION_ERROR before anyone noticed).
+    if (result.status === "PROVIDER_OUTAGE") {
+      throw new ProviderOutageError(unitId, result.reason);
     }
     if (result.status === "CONFIGURATION_ERROR") {
       console.log(`  grounding TERMINAL FAILURE for unit ${unitId} after ${completedChunks} chunk(s)`);
@@ -154,6 +174,8 @@ async function main() {
     console.log(`Units in scope: ${units.length}\n`);
 
     let unitIndex = 0;
+    let outage: ProviderOutageError | null = null;
+    try {
     for (const unit of units) {
       unitIndex++;
       console.log(`Unit ${unitIndex}/${units.length}: ${unit.id}`);
@@ -178,6 +200,7 @@ async function main() {
           if (groundingStatus === "READY") report.unitsGrounded.push(unit.id);
           else report.unitsSkippedConfigurationError.push(unit.id);
         } catch (err) {
+          if (err instanceof ProviderOutageError) throw err; // never swallowed — must unwind the whole run
           report.topicsFailed.push({ topicId: unit.topics.map((t) => t.id).join(","), error: err instanceof Error ? err.message : String(err) });
           continue;
         }
@@ -208,9 +231,19 @@ async function main() {
           await questionGenerator.ensurePoolForTopic(topic.id, CONTENT_AUTHORING_ACTOR_ID);
           report.topicsAuthored.push(topic.id);
         } catch (err) {
+          // Same provider-outage guard as grounding above — lesson/question
+          // authoring makes real OpenAI calls too, and an account-level
+          // quota exhaustion here is just as much a whole-run stop signal,
+          // not a per-Topic failure to log and move past.
+          if (isQuotaError(err)) throw new ProviderOutageError(topic.id, "provider_quota_exhausted");
           report.topicsFailed.push({ topicId: topic.id, error: err instanceof Error ? err.message : String(err) });
         }
       }
+    }
+    } catch (err) {
+      if (!(err instanceof ProviderOutageError)) throw err;
+      outage = err;
+      console.log(`\n!!! PROVIDER OUTAGE — HALTED !!!\n${err.message}\n`);
     }
 
     let realCost: { inputTokens: number; outputTokens: number; costUsd: number; calls: number } | null = null;
@@ -242,6 +275,9 @@ async function main() {
     if (report.topicsFailed.length > 0) {
       console.log(`\nFAILURES (investigate before rerunning if unexpected — rerunning is always safe, already-completed work is never lost):`);
       console.log(JSON.stringify(report.topicsFailed, null, 2));
+    }
+    if (outage) {
+      process.exitCode = 1;
     }
   } finally {
     await app.close();

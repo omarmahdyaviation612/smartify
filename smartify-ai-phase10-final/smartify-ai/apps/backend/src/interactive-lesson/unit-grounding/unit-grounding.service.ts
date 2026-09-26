@@ -70,7 +70,21 @@ type BoundedGroundingResult =
   | { status: "READY" }
   | { status: "PREPARING"; retryAfterMs?: number; nextEligibleAt?: Date }
   | { status: "RETRYABLE_FAILURE"; retryAfterMs: number; nextEligibleAt: Date; reason: string }
-  | { status: "CONFIGURATION_ERROR"; reason: string };
+  | { status: "CONFIGURATION_ERROR"; reason: string }
+  // 2026-09-26 provider-outage incident: an OpenAI account-level billing/
+  // quota exhaustion (isQuotaError — a stable SDK error code, e.g.
+  // "insufficient_quota", never fragile string matching) is NOT this
+  // Unit's fault and is NOT expected to resolve by retrying THIS Unit — it
+  // resolves only when the account's credits are restored. Distinct from
+  // CONFIGURATION_ERROR on purpose: nothing is persisted to this Unit's
+  // progress row (no retryCount increment, no status change, no
+  // lastErrorCode) — the exact same Unit is fully retryable, unmarked and
+  // unharmed, the moment the provider is healthy again. A caller (the bulk
+  // warm-up script; a real student's lazy-generation request) must stop
+  // immediately on seeing this rather than treating it like any other
+  // transient failure and burning through more Units/retries against the
+  // same outage.
+  | { status: "PROVIDER_OUTAGE"; reason: string };
 
 class BoundedGroundingRetryError extends Error {
   constructor(readonly metadata: TokenRateLimitMetadata) { super("Grounding provider retry deferred"); }
@@ -240,6 +254,21 @@ export class UnitGroundingService {
       if (err instanceof Error && err.name === "NoSuchKey") {
         await progress.markConfigurationError(unitId, leaseOwner, "source_object_not_found");
         return { status: "CONFIGURATION_ERROR", reason: "source_object_not_found" };
+      }
+
+      // Provider-outage hotfix (2026-09-26): checked BEFORE the generic
+      // retryable/ceiling logic below, using the same isQuotaError() the
+      // TPM pacer already trusts (real OpenAI error code/type, e.g.
+      // "insufficient_quota" — never a fragile message-string match).
+      // Deliberately does NOT call markRetryable/markConfigurationError —
+      // this Unit's progress row (status, retryCount, lastErrorCode) is
+      // left completely untouched, only its lease is released, so the
+      // very next attempt (once the account has credits again) finds it
+      // exactly as it was, including every already-completed chunk.
+      if (isQuotaError(err)) {
+        this.logger.error(`UNIT_GROUNDING_PROVIDER_OUTAGE unitId=${unitId}: provider account has no usable quota/credits — halting without marking this Unit or consuming its retry ceiling: ${err instanceof Error ? err.message : String(err)}`);
+        await progress.releaseLease(unitId, leaseOwner);
+        return { status: "PROVIDER_OUTAGE", reason: "provider_quota_exhausted" };
       }
 
       const metadata = err instanceof BoundedGroundingRetryError ? err.metadata : undefined;

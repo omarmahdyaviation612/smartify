@@ -624,6 +624,27 @@ describe("InteractiveLessonService", () => {
   });
 
   /**
+   * 2026-09-26 provider-outage hotfix: PROVIDER_OUTAGE gets the exact same
+   * safe, generic, student-facing message as CONFIGURATION_ERROR — but
+   * (unlike CONFIGURATION_ERROR) nothing is persisted for this Unit, so a
+   * later request during/after the outage is fully retryable, never stuck.
+   */
+  it("a title-only topic whose grounding preparation reports PROVIDER_OUTAGE surfaces the same safe, generic error, never an internal detail", async () => {
+    const h = makeHarness({ groundingPreparationResult: { status: "PROVIDER_OUTAGE", reason: "provider_quota_exhausted" } as any });
+    h.state.topics["topic-2"] = { id: "topic-2", nameEn: "No Plan", nameAr: "بلا خطة", unitId: "unit-1", teachingStepsJson: null, unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } } };
+
+    await expect(h.service.advance("user-1", "topic-2")).rejects.toThrow("This lesson is not available yet.");
+    expect(h.draftGenerator.ensureTopicHasLesson).not.toHaveBeenCalled();
+
+    try {
+      await h.service.advance("user-1", "topic-2");
+      fail("expected advance() to throw");
+    } catch (err: any) {
+      expect(String(err.message)).not.toMatch(/provider_quota_exhausted|insufficient_quota/);
+    }
+  });
+
+  /**
    * 2026-09-26 UX fix: the PREPARING response now carries a "stage" field
    * (informational only — never changes what happens next) so the
    * frontend can show honest, non-percentage waiting copy instead of one

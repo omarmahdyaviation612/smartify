@@ -115,6 +115,12 @@ export class InteractiveLessonService {
       : { status: "READY" as const };
     if (preparation.status !== "READY") {
       if (preparation.status === "CONFIGURATION_ERROR") throw new ServiceUnavailableException("This lesson is not available yet.");
+      // 2026-09-26 provider-outage hotfix: same generic, safe, student-facing
+      // message as CONFIGURATION_ERROR — but nothing is persisted for this
+      // Unit (see UnitGroundingService's PROVIDER_OUTAGE branch), so a later
+      // request during/after the outage is fully retryable, never stuck.
+      // Stops THIS request's polling immediately rather than looping.
+      if (preparation.status === "PROVIDER_OUTAGE") throw new ServiceUnavailableException("This lesson is not available yet.");
       // "stage" is purely informational UX sugar for the frontend's waiting
       // copy (see LessonState.preparation.stage) — it reflects real,
       // already-computed state (whether textbook grounding itself is still

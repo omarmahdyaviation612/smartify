@@ -302,6 +302,83 @@ describe("UnitGroundingService.prepareNextGroundingChunk", () => {
     });
   });
 
+  /**
+   * 2026-09-26 provider-outage incident: 16 Units were wrongly converted to
+   * CONFIGURATION_ERROR because an OpenAI account-level "no credits
+   * remaining" 429 (isQuotaError — a real, stable SDK error code, e.g.
+   * "insufficient_quota", never a fragile message-string match) was
+   * treated identically to any other transient failure and consumed the
+   * same per-Unit retry ceiling. This is not this Unit's fault and will
+   * never resolve by retrying THIS Unit — only by restoring provider
+   * credits — so it must never mark the Unit CONFIGURATION_ERROR, never
+   * touch retryCount, and must be trivially distinguishable from a normal
+   * TPM/RPM rate limit (which keeps its existing pacing/retry behavior,
+   * proven unchanged by the pre-existing tests above).
+   */
+  describe("provider-outage classification (2026-09-26 hotfix)", () => {
+    function quotaError() {
+      return Object.assign(new Error("You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."), { status: 429, code: "insufficient_quota", type: "insufficient_quota" });
+    }
+
+    it("an OpenAI no-credits 429 is classified as PROVIDER_OUTAGE, distinct from CONFIGURATION_ERROR and RETRYABLE_FAILURE", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 0 }) } });
+      (h.service as any).extractChunk.mockRejectedValueOnce(quotaError());
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result).toEqual({ status: "PROVIDER_OUTAGE", reason: "provider_quota_exhausted" });
+    });
+
+    it("does NOT consume the Unit's retry ceiling — never calls markRetryable or markConfigurationError", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 0 }) } });
+      (h.service as any).extractChunk.mockRejectedValueOnce(quotaError());
+
+      await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(h.progress.markRetryable).not.toHaveBeenCalled();
+      expect(h.progress.markConfigurationError).not.toHaveBeenCalled();
+    });
+
+    it("releases the lease so the SAME Unit is immediately retryable once the provider is healthy — never left locked", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 0 }) } });
+      (h.service as any).extractChunk.mockRejectedValueOnce(quotaError());
+
+      await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(h.progress.releaseLease).toHaveBeenCalledTimes(1);
+    });
+
+    it("even at the retry ceiling (retryCount already 4), a quota error still classifies as PROVIDER_OUTAGE, never CONFIGURATION_ERROR — the ceiling is genuinely bypassed, not just delayed", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 4 }) } });
+      (h.service as any).extractChunk.mockRejectedValueOnce(quotaError());
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result).toEqual({ status: "PROVIDER_OUTAGE", reason: "provider_quota_exhausted" });
+      expect(h.progress.markConfigurationError).not.toHaveBeenCalled();
+    });
+
+    it("a normal TPM 429 (no quota code) remains RETRYABLE_FAILURE and unaffected by this change", async () => {
+      const h = boundedHarness();
+      (h.service as any).extractChunk.mockRejectedValueOnce(Object.assign(new Error("429"), { metadata: { remainingTokens: 0, resetTokensMs: 79000, retryAfterMs: 695 } }));
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result.status).toBe("RETRYABLE_FAILURE");
+      expect(h.progress.markRetryable).toHaveBeenCalledTimes(1);
+    });
+
+    it("a genuinely repeated (non-quota) retryable failure can still reach the existing CONFIGURATION_ERROR ceiling — protection for real broken Units is not weakened", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 4 }) } });
+      (h.service as any).extractChunk.mockRejectedValueOnce(new Error("Grounding provider returned no result."));
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result).toEqual({ status: "CONFIGURATION_ERROR", reason: "retryable_failure_limit_exceeded" });
+      expect(h.progress.markConfigurationError).toHaveBeenCalledWith("unit-1", expect.any(String), "retryable_failure_limit_exceeded");
+    });
+  });
+
   // Page-provenance hotfix (2026-09-25): structural coverage of the
   // OpenAI request payload and extraction-level logging, exercised via
   // the legacy extractUnitGrounding path (same extractChunk() underneath
