@@ -115,7 +115,11 @@ export class InteractiveLessonService {
       : { status: "READY" as const };
     if (preparation.status !== "READY") {
       if (preparation.status === "CONFIGURATION_ERROR") throw new ServiceUnavailableException("This lesson is not available yet.");
-      return { __preparation: true as const, status: "PREPARING" as const, retryAfterMs: preparation.retryAfterMs ?? 1500 };
+      // "stage" is purely informational UX sugar for the frontend's waiting
+      // copy (see LessonState.preparation.stage) — it reflects real,
+      // already-computed state (whether textbook grounding itself is still
+      // in progress) and never changes what work actually happens next.
+      return { __preparation: true as const, status: "PREPARING" as const, stage: "grounding" as const, retryAfterMs: preparation.retryAfterMs ?? 1500 };
     }
 
     await this.draftGenerator.ensureTopicHasLesson(
@@ -892,7 +896,14 @@ export class InteractiveLessonService {
       const preparation = typeof (this.draftGenerator as any).getTopicGroundingPreparationStatus === "function"
         ? await (this.draftGenerator as any).getTopicGroundingPreparationStatus(topicId)
         : { status: "READY" as const };
-      return { started: false, preparation };
+      // Same informational "stage" as ensureTopicHasSteps above: teachingStepsJson
+      // is still null here (the guard above), so preparation.status === "READY"
+      // means grounding has already finished and lesson authoring is what
+      // runs next (synchronously, inside the advance() call this triggers) —
+      // never a new state, just a truer label for the SAME transition the
+      // frontend already special-cases (see LessonState.preparation.stage).
+      const stage = preparation.status === "READY" ? ("authoring" as const) : ("grounding" as const);
+      return { started: false, preparation: { ...preparation, stage } };
     }
     const steps = this.getSteps(topic);
     const session = await this.getOwnSession(profile, topicId);

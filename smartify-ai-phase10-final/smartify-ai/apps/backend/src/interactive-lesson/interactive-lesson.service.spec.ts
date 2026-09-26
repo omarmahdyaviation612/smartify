@@ -193,6 +193,7 @@ describe("InteractiveLessonService", () => {
       // grounding-preparation gate before ensureTopicHasLesson runs) —
       // only the dedicated CONFIGURATION_ERROR test below overrides this.
       prepareTopicGrounding: jest.fn().mockResolvedValue(opts.groundingPreparationResult ?? { status: "READY" }),
+      getTopicGroundingPreparationStatus: jest.fn().mockResolvedValue(opts.groundingPreparationResult ?? { status: "READY" }),
     } as any;
     // Question-pool generation is a fire-and-forget-shaped no-op here —
     // no test in this file asserts on it; real behavior is covered by
@@ -594,7 +595,7 @@ describe("InteractiveLessonService", () => {
     const h = makeHarness();
     h.state.topics["topic-2"] = { id: "topic-2", nameEn: "No Plan", nameAr: "بلا خطة", unitId: "unit-1", teachingStepsJson: null, unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } } };
     const result = await h.service.getState("user-1", "topic-2");
-    expect(result).toEqual({ started: false, preparation: { status: "READY" } });
+    expect(result).toEqual({ started: false, preparation: { status: "READY", stage: "authoring" } });
   });
 
   /**
@@ -620,6 +621,35 @@ describe("InteractiveLessonService", () => {
       // "source_object_not_found") to the student-facing exception.
       expect(String(err.message)).not.toMatch(/source_object_not_found|retryable_failure_limit_exceeded|NoSuchKey/);
     }
+  });
+
+  /**
+   * 2026-09-26 UX fix: the PREPARING response now carries a "stage" field
+   * (informational only — never changes what happens next) so the
+   * frontend can show honest, non-percentage waiting copy instead of one
+   * frozen "Preparing your lesson..." for the entire multi-step process.
+   */
+  it("advance() on a title-only topic still PREPARING reports stage 'grounding'", async () => {
+    const h = makeHarness({ groundingPreparationResult: { status: "PREPARING", retryAfterMs: 2000 } });
+    h.state.topics["topic-2"] = { id: "topic-2", nameEn: "No Plan", nameAr: "بلا خطة", unitId: "unit-1", teachingStepsJson: null, unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } } };
+    const result = await h.service.advance("user-1", "topic-2");
+    expect(result.status).toBe("PREPARING");
+    expect((result as any).stage).toBe("grounding");
+  });
+
+  it("getState() on a title-only topic whose grounding is READY (authoring about to run) reports stage 'authoring'", async () => {
+    const h = makeHarness({ groundingPreparationResult: { status: "READY" } });
+    h.state.topics["topic-2"] = { id: "topic-2", nameEn: "No Plan", nameAr: "بلا خطة", unitId: "unit-1", teachingStepsJson: null, unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } } };
+    const result: any = await h.service.getState("user-1", "topic-2");
+    expect(result.started).toBe(false);
+    expect(result.preparation.stage).toBe("authoring");
+  });
+
+  it("getState() on a title-only topic still grounding reports stage 'grounding'", async () => {
+    const h = makeHarness({ groundingPreparationResult: { status: "PREPARING", retryAfterMs: 1500 } });
+    h.state.topics["topic-2"] = { id: "topic-2", nameEn: "No Plan", nameAr: "بلا خطة", unitId: "unit-1", teachingStepsJson: null, unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } } };
+    const result: any = await h.service.getState("user-1", "topic-2");
+    expect(result.preparation.stage).toBe("grounding");
   });
 
   it("getState() on a genuinely unknown topic id still throws NotFoundException", async () => {

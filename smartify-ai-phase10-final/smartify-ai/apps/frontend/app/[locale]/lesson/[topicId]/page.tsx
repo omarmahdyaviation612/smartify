@@ -44,8 +44,9 @@ interface LessonState {
   content?: string | null;
   completed?: boolean;
   visual?: { type: string; status: "NOT_GENERATED" | "GENERATED"; url: string | null } | null;
-  preparation?: { status: "PREPARING" | "READY" | "CONFIGURATION_ERROR"; retryAfterMs?: number };
+  preparation?: { status: "PREPARING" | "READY" | "CONFIGURATION_ERROR"; retryAfterMs?: number; stage?: "grounding" | "authoring" };
   retryAfterMs?: number;
+  stage?: "grounding" | "authoring";
 }
 
 interface LessonCheckQuestion {
@@ -76,6 +77,16 @@ export default function InteractiveLessonPage() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [preparing, setPreparing] = useState(false);
+  // Truthful, stage-aware waiting copy for first-time lazy generation
+  // (2026-09-26): no fake percentage, just an honest label for whichever
+  // REAL backend phase is actually happening — "grounding" (the textbook is
+  // being read/understood, one durable chunk at a time) or "authoring" (the
+  // lesson itself is being written, which happens synchronously right after
+  // grounding finishes). Falls back to elapsed time only to rotate within
+  // the (real, ongoing) grounding phase, never to claim a phase that isn't
+  // actually happening.
+  const [preparingStage, setPreparingStage] = useState<"grounding" | "authoring" | null>(null);
+  const preparingSinceRef = useRef<number | null>(null);
   const [slowStart, setSlowStart] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notAvailable, setNotAvailable] = useState(false);
@@ -208,6 +219,32 @@ export default function InteractiveLessonPage() {
     micTimeoutRef.current = setTimeout(() => recognition.stop(), 30_000);
   }
 
+  // Honest, stage-derived waiting copy — never a fake percentage. The
+  // stage itself always comes from the backend's real, already-computed
+  // state (see LessonState.preparation.stage); elapsed time only rotates
+  // the wording WITHIN a real ongoing stage (grounding genuinely does take
+  // longer the further in it is), never invents a stage that isn't
+  // actually happening.
+  function preparingMessage(): string {
+    const elapsed = preparingSinceRef.current != null ? Date.now() - preparingSinceRef.current : 0;
+    if (preparingStage === "authoring") return elapsed > 15_000 ? copy.almostReady : copy.creatingLesson;
+    if (elapsed > 25_000) return copy.almostReady;
+    if (elapsed > 8_000) return copy.understandingLesson;
+    return copy.preparingTextbook;
+  }
+
+  function markPreparing(stage?: "grounding" | "authoring") {
+    if (preparingSinceRef.current == null) preparingSinceRef.current = Date.now();
+    setPreparing(true);
+    if (stage) setPreparingStage(stage);
+  }
+
+  function clearPreparing() {
+    preparingSinceRef.current = null;
+    setPreparingStage(null);
+    setPreparing(false);
+  }
+
   useEffect(() => {
     const run = ++preparationRunRef.current;
     apiFetch<LessonState>(`/lesson/topics/${topicId}/state`)
@@ -215,12 +252,14 @@ export default function InteractiveLessonPage() {
         if (!mountedRef.current || run !== preparationRunRef.current) return;
         setState(data);
         if (!data.started && data.preparation?.status === "PREPARING") {
-          setPreparing(true);
+          markPreparing(data.preparation.stage ?? "grounding");
           schedulePreparation(run, data.preparation.retryAfterMs);
           return;
         }
         if (!data.started && data.preparation?.status === "READY") {
-          setPreparing(true);
+          // Grounding just finished — lesson authoring runs next, synchronously,
+          // inside the advance() call this immediately triggers.
+          markPreparing(data.preparation.stage ?? "authoring");
           schedulePreparation(run, 0);
           return;
         }
@@ -246,11 +285,11 @@ export default function InteractiveLessonPage() {
       const result = await apiFetch<LessonState>(`/lesson/topics/${topicId}/advance`, { method: "POST" });
       if (!mountedRef.current || run !== preparationRunRef.current) return;
       if (result.status === "PREPARING") {
-        setPreparing(true);
+        markPreparing(result.stage ?? "grounding");
         schedulePreparation(run, result.retryAfterMs);
         return;
       }
-      setPreparing(false);
+      clearPreparing();
       setState(result);
       if (result.content) {
         setTurns([{ role: "teacher", content: result.content }]);
@@ -258,7 +297,7 @@ export default function InteractiveLessonPage() {
       }
     } catch (err: any) {
       if (mountedRef.current && run === preparationRunRef.current) {
-        setPreparing(false);
+        clearPreparing();
         setError(displayableErrorMessage(err, copy.genericError));
       }
     }
@@ -346,7 +385,7 @@ export default function InteractiveLessonPage() {
       const result = await apiFetch<LessonState>(`/lesson/topics/${topicId}/advance`, { method: "POST" });
       if (result.status === "PREPARING") {
         const run = ++preparationRunRef.current;
-        setPreparing(true);
+        markPreparing(result.stage ?? "grounding");
         schedulePreparation(run, result.retryAfterMs);
         return;
       }
@@ -459,7 +498,7 @@ export default function InteractiveLessonPage() {
             {turns.length === 0 && !started && (
               <div className="flex h-full flex-col items-center justify-center gap-4">
                 {preparing ? (
-                  <p role="status" aria-live="polite" className="text-sm text-neutral-500">{copy.preparing}</p>
+                  <p role="status" aria-live="polite" className="text-sm text-neutral-500">{preparingMessage()}</p>
                 ) : (
                   <SmartifyButton type="button" variant="ai" onClick={handleStart} disabled={busy}>
                     {busy ? (slowStart ? copy.startingFirstTime : copy.starting) : copy.startLesson}
