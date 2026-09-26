@@ -11,6 +11,7 @@ import { QuestionDraftGeneratorService } from "../question-bank/question-draft-g
 import { describeExpectedAnswer, describeOperands, tryDeterministicValidate } from "./answer-validators/deterministic-validator";
 import type { CheckExpression, StepResult, TeachingStep } from "./interactive-lesson.types";
 import { decideStrategySwitch, getCurrentStrategy, isMathSubject, strategyGuidance } from "./teaching-strategy.util";
+import { selectRelevantGrounding } from "../ai/context/grounding-selector.util";
 
 const MAX_HINTS_BEFORE_FORCED_RESOLUTION = 1;
 
@@ -74,6 +75,19 @@ export class InteractiveLessonService {
 
   private getSteps(topic: { teachingStepsJson: unknown }): TeachingStep[] {
     return topic.teachingStepsJson as unknown as TeachingStep[];
+  }
+
+  /**
+   * 2026-09-26 factual-provenance fix: the SAME Topic-scoped selection
+   * `buildAutoLessonGenerationPrompt` used to plan this lesson at authoring
+   * time (see grounding-selector.util.ts) — a pure, deterministic function
+   * over data `getTopicOrThrow` already fetched (topic.unit.groundingNotesJson
+   * via its own include), never a new query, never an AI/grounding call.
+   * Threaded into every runtime LessonTeachingContext so the model can tell
+   * a textbook-supported named example from one it would otherwise invent.
+   */
+  private topicGroundingSlice(topic: { nameEn: string; unit: { groundingNotesJson: unknown } }) {
+    return selectRelevantGrounding(topic.unit.groundingNotesJson as any, topic.nameEn);
   }
 
   /**
@@ -404,6 +418,7 @@ export class InteractiveLessonService {
       subjectNameEn: topic.unit.subject.nameEn,
       lessonTitleEn: topic.nameEn,
       currentStep: { type: step.type, objective: step.objective, conceptKey: step.conceptKey, checkType: step.checkType },
+      groundingSlice: this.topicGroundingSlice(topic),
       mode: "deliver",
       teachingStrategy: currentStrategy,
       teachingStrategyGuidance: currentStrategy ? strategyGuidance(currentStrategy) : undefined,
@@ -576,6 +591,7 @@ export class InteractiveLessonService {
       subjectNameEn: topic.unit.subject.nameEn,
       lessonTitleEn: topic.nameEn,
       currentStep: { type: step.type, objective: step.objective, conceptKey: step.conceptKey, checkType: step.checkType },
+      groundingSlice: this.topicGroundingSlice(topic),
       mode: "narrate_check_result",
       checkOutcome,
       correctAnswerText: checkOutcome === "reveal" ? describeExpectedAnswer(expression) : undefined,
@@ -664,6 +680,7 @@ export class InteractiveLessonService {
       subjectNameEn: topic.unit.subject.nameEn,
       lessonTitleEn: topic.nameEn,
       currentStep: { type: step.type, objective: step.objective, conceptKey: step.conceptKey },
+      groundingSlice: this.topicGroundingSlice(topic),
       mode: "interrupt",
       studentMessage: message,
     };
@@ -756,6 +773,7 @@ export class InteractiveLessonService {
       subjectNameEn: topic.unit.subject.nameEn,
       lessonTitleEn: topic.nameEn,
       currentStep: { type: step.type, objective: step.objective, conceptKey: step.conceptKey, checkType: step.checkType },
+      groundingSlice: this.topicGroundingSlice(topic),
       mode: "evaluate_check",
       hintAlreadyGivenThisStep: hintAlreadyGiven,
       studentMessage: message,

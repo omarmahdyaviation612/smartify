@@ -52,6 +52,18 @@ export interface LessonTeachingContext {
    * contradict it. Plain spoken-friendly text output, no JSON.
    */
   mode: "deliver" | "evaluate_check" | "interrupt" | "narrate_check_result";
+  /**
+   * Topic-scoped grounding (see grounding-selector.util.ts), already
+   * selected once per topic with zero extra AI/DB calls — the SAME slice
+   * `buildAutoLessonGenerationPrompt` used to plan this lesson's steps.
+   * Threaded through so the runtime per-step teacher can distinguish real,
+   * textbook-supported named examples from ones it would otherwise invent
+   * from general knowledge (see factualProvenanceRules below). Absent/null
+   * simply means this Unit has no grounding yet — the runtime teacher must
+   * then avoid ANY specific named real-world example, not just unsupported
+   * ones.
+   */
+  groundingSlice?: GroundingSlice | null;
   hintAlreadyGivenThisStep?: boolean;
   studentMessage?: string;
   /** narrate_check_result only: which of the three fixed narration shapes to produce. */
@@ -121,11 +133,45 @@ export class AIContextBuilderService {
   }
 
   /**
+   * "Grounded facts, free teaching style" (2026-09-26 production incident —
+   * a Year 3 English "stories by the same author" lesson stated as fact
+   * that "J.K. Rowling wrote Harry Potter and The Casual Vacancy", none of
+   * which appeared anywhere in that Unit's real textbook grounding; the
+   * grounding's own actual named example was Atinuke). Root cause:
+   * buildLessonTeachingPrompt (the ONLY prompt that generates what a
+   * student actually reads per step) had no grounding access at all and no
+   * rule distinguishing a specific factual claim from generic teaching
+   * style, so the model filled the gap from its own general knowledge.
+   *
+   * This is the shared rule for every runtime teaching mode. It does NOT
+   * ask the model to copy textbook wording or suppress natural teaching —
+   * generic, unnamed pedagogical framing ("imagine a writer who tells
+   * several stories") never needs grounding. It only gates SPECIFIC,
+   * externally-verifiable factual claims: named real people, named books/
+   * works, dates, places, historical/scientific events, specific
+   * statistics, named organizations, and similar. When `groundingSlice` is
+   * present, such a claim is allowed ONLY if it appears in that slice; when
+   * absent, no such claim is allowed at all — a generic unnamed hypothetical
+   * must be used instead.
+   */
+  private factualProvenanceRules(groundingSlice: GroundingSlice | null | undefined): string[] {
+    return [
+      "FACTUAL PROVENANCE (critical — do not invent real-world facts):",
+      "- A SPECIFIC, externally-verifiable factual claim — a named real person/author, a named book/work, a date, a place, a historical or scientific event, a specific statistic/number, a named organization, or similar — must be supported by the REFERENCE NOTES below if any are provided for this step. Never state one from your own general knowledge instead.",
+      "- Generic pedagogical framing that introduces NO new factual claim is always fine without grounding — e.g. \"imagine a writer who tells several different stories\" or \"think about two experiments that test the same idea\" never needs support.",
+      groundingSlice
+        ? "- The REFERENCE NOTES below ARE available for this step. If they contain a named example that fits what you're teaching, you may use it naturally. If they do NOT contain a suitable named example, use a generic UNNAMED hypothetical instead of inventing a specific real person, book, date, place, or other fact."
+        : "- No REFERENCE NOTES are available for this step. Do not state ANY specific named real person, book, date, place, event, statistic, or organization — use a generic UNNAMED hypothetical instead (e.g. \"imagine a writer who...\" rather than naming one).",
+    ];
+  }
+
+  /**
    * Renders a Topic-scoped GroundingSlice (see grounding-selector.util.ts)
-   * as a delimited prompt block. Used identically by
-   * buildAutoLessonGenerationPrompt and buildAutoQuestionBatchGenerationPrompt
-   * — the ONLY two callers, both one-time-per-topic generation calls, never
-   * the per-turn student-facing teaching prompt. `<curriculum_grounding>`
+   * as a delimited prompt block. Used by buildAutoLessonGenerationPrompt,
+   * buildAutoQuestionBatchGenerationPrompt, and buildLessonTeachingPrompt
+   * (as of the factual-provenance fix above) — always the SAME
+   * already-selected slice, never a fresh grounding/AI call.
+   * `<curriculum_grounding>`
    * is an explicit prompt-injection boundary: source-document text could in
    * principle contain something that reads like an instruction, so the
    * model is told everything inside is DATA, and system/developer
@@ -281,6 +327,12 @@ export class AIContextBuilderService {
         : "",
     ].filter(Boolean);
 
+    // 2026-09-26 factual-provenance fix: the SAME already-selected
+    // Topic-scoped slice buildAutoLessonGenerationPrompt used at planning
+    // time (see LessonTeachingContext.groundingSlice's doc comment) —
+    // reused here, never recomputed, never a fresh AI/grounding call.
+    const groundingSection = ctx.groundingSlice ? ["", ...this.renderGroundingBlock(ctx.groundingSlice), ""] : [];
+
     if (ctx.mode === "deliver") {
       const checkInstruction =
         ctx.currentStep.type === "CHECK"
@@ -302,6 +354,7 @@ export class AIContextBuilderService {
         ...personalityRules,
         "",
         ...stepInstruction,
+        ...groundingSection,
         "",
         ...checkInstruction,
         "",
@@ -309,7 +362,9 @@ export class AIContextBuilderService {
         "",
         ...this.safetyRules(),
         "",
-        ...this.contentOriginalityRules(ctx.subjectNameEn),
+        ...this.contentOriginalityRules(ctx.subjectNameEn, !!ctx.groundingSlice),
+        "",
+        ...this.factualProvenanceRules(ctx.groundingSlice),
         "",
         ageToneInstruction,
         languageInstruction,
@@ -325,6 +380,7 @@ export class AIContextBuilderService {
         "The student just interrupted the current teaching step with a question, unrelated to answering any check (no check is currently pending). Answer it concisely and correctly, then briefly note you'll continue the lesson — do NOT restart the lesson, do NOT re-teach the whole step from scratch, and do NOT advance to a different step than the one below.",
         "",
         ...stepInstruction,
+        ...groundingSection,
         "",
         ...personalityRules,
         "",
@@ -332,7 +388,9 @@ export class AIContextBuilderService {
         "",
         ...this.safetyRules(),
         "",
-        ...this.contentOriginalityRules(ctx.subjectNameEn),
+        ...this.contentOriginalityRules(ctx.subjectNameEn, !!ctx.groundingSlice),
+        "",
+        ...this.factualProvenanceRules(ctx.groundingSlice),
         "",
         ageToneInstruction,
         languageInstruction,
@@ -369,6 +427,7 @@ export class AIContextBuilderService {
         "",
         ...stepInstruction,
         ctx.questionNumbersText ? `- The check question's own numbers are: ${ctx.questionNumbersText}. You do not have the earlier conversation turns, so use exactly these numbers if you reference the question again — never invent or guess different ones.` : "",
+        ...groundingSection,
         "",
         `The student just replied: "${ctx.studentMessage}"`,
         outcomeInstruction,
@@ -381,7 +440,9 @@ export class AIContextBuilderService {
         "",
         ...this.safetyRules(),
         "",
-        ...this.contentOriginalityRules(ctx.subjectNameEn),
+        ...this.contentOriginalityRules(ctx.subjectNameEn, !!ctx.groundingSlice),
+        "",
+        ...this.factualProvenanceRules(ctx.groundingSlice),
         "",
         ageToneInstruction,
         languageInstruction,
@@ -399,6 +460,7 @@ export class AIContextBuilderService {
       "",
       ...stepInstruction,
       ctx.hintAlreadyGivenThisStep ? "- A hint was already given once for this check. If the student is still incorrect, give a brief, clear, correct explanation and move on — do not give a second hint or retry loop." : "",
+      ...groundingSection,
       "",
       "The student just replied to this check. Decide exactly one of:",
       "- \"answer\": the reply is an attempt to answer the check question (evaluate it as correct or incorrect).",
@@ -418,7 +480,9 @@ export class AIContextBuilderService {
       "",
       ...this.safetyRules(),
       "",
-      ...this.contentOriginalityRules(ctx.subjectNameEn),
+      ...this.contentOriginalityRules(ctx.subjectNameEn, !!ctx.groundingSlice),
+      "",
+      ...this.factualProvenanceRules(ctx.groundingSlice),
       "",
       ageToneInstruction,
       languageInstruction,

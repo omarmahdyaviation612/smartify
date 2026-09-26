@@ -1058,4 +1058,107 @@ describe("InteractiveLessonService", () => {
       expect(sc3.strategyHistory ?? []).toHaveLength(0);
     });
   });
+
+  /**
+   * 2026-09-26 factual-provenance fix regression tests: proves the
+   * already-selected Topic-scoped GroundingSlice (grounding-selector.util.ts)
+   * is threaded into the runtime teaching prompt with ZERO extra Prisma
+   * queries and ZERO extra provider/model calls, and that Topic.teachingStepsJson
+   * is never touched by this fix.
+   */
+  describe("2026-09-26 factual-provenance fix", () => {
+  const GROUNDED_STEPS = [
+    { id: "g1", type: "INTRO", order: 1, objective: "greet and frame" },
+    { id: "g2", type: "EXAMPLE", order: 2, objective: "Give an example of an author who has written more than one story." },
+    { id: "g3", type: "COMPLETE", order: 3, objective: "acknowledge completion" },
+  ];
+
+  const GROUNDING_NOTES_JSON = {
+    unitTitle: "Fiction: Different stories by the same author",
+    gradeLevel: "Year 3",
+    subject: "English Language",
+    learningObjectives: ["Recognise that different stories can share the same author, style, or themes."],
+    concepts: [
+      { name: "Author style", description: "Different stories by the same author often share a similar style, characters, or setting.", sourcePages: [5, 6], importance: "core" },
+    ],
+    facts: [{ fact: "Atinuke is an author who has written several different stories.", sourcePages: [6], importance: "core" }],
+    vocabulary: [],
+    skills: [],
+    topicHints: [],
+    scopeNotes: [],
+  };
+
+  function groundedExtraTopics() {
+    return {
+      "topic-grounded": {
+        id: "topic-grounded",
+        nameEn: "Fiction: Different stories by the same author",
+        teachingStepsJson: GROUNDED_STEPS,
+        unit: { subjectId: "subject-english", subject: { nameEn: "English Language" }, groundingNotesJson: GROUNDING_NOTES_JSON },
+      },
+      "topic-ungrounded": {
+        id: "topic-ungrounded",
+        nameEn: "Fiction: Different stories by the same author",
+        teachingStepsJson: GROUNDED_STEPS,
+        unit: { subjectId: "subject-english", subject: { nameEn: "English Language" } }, // no groundingNotesJson at all
+      },
+    };
+  }
+
+  it("threads the Topic-scoped grounding into the runtime prompt for a grounded Unit — no unsupported named example is invited", async () => {
+    const h = makeHarness({
+      extraTopics: groundedExtraTopics(),
+      generateImpl: async () => ({ content: "teaching content", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }),
+    });
+    await h.service.advance("user-1", "topic-grounded");
+    const lastCallArgs = h.generateSpy.mock.calls[h.generateSpy.mock.calls.length - 1][0];
+    expect(lastCallArgs.systemPrompt).toContain("Atinuke");
+    expect(lastCallArgs.systemPrompt).toMatch(/FACTUAL PROVENANCE/i);
+  });
+
+  it("with no grounding available for the Unit, the prompt forbids any specific named real-world example", async () => {
+    const h = makeHarness({
+      extraTopics: groundedExtraTopics(),
+      generateImpl: async () => ({ content: "teaching content", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }),
+    });
+    await h.service.advance("user-1", "topic-ungrounded");
+    const lastCallArgs = h.generateSpy.mock.calls[h.generateSpy.mock.calls.length - 1][0];
+    expect(lastCallArgs.systemPrompt).not.toContain("Atinuke");
+    expect(lastCallArgs.systemPrompt).toMatch(/no REFERENCE NOTES are available/i);
+  });
+
+  it("adds zero extra Prisma queries — grounding selection reuses the Topic already fetched, never a new lookup", async () => {
+    const h = makeHarness({
+      extraTopics: groundedExtraTopics(),
+      generateImpl: async () => ({ content: "teaching content", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }),
+    });
+    (h.prisma.client.topic.findUnique as jest.Mock).mockClear();
+    await h.service.advance("user-1", "topic-grounded");
+    // Exactly one Topic lookup per advance() call (getTopicOrThrow) — the
+    // same count as every ungrounded topic in this file's other tests;
+    // selectRelevantGrounding is a pure in-memory function over data that
+    // single fetch already returned.
+    expect((h.prisma.client.topic.findUnique as jest.Mock).mock.calls.length).toBe(1);
+  });
+
+  it("adds zero extra provider/model calls — exactly one generate() call for a single INTRO delivery", async () => {
+    const h = makeHarness({
+      extraTopics: groundedExtraTopics(),
+      generateImpl: async () => ({ content: "teaching content", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }),
+    });
+    await h.service.advance("user-1", "topic-grounded");
+    expect(h.generateSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("never mutates Topic.teachingStepsJson — the same object reference/content persists through delivery", async () => {
+    const extraTopics = groundedExtraTopics();
+    const before = JSON.stringify(extraTopics["topic-grounded"].teachingStepsJson);
+    const h = makeHarness({
+      extraTopics,
+      generateImpl: async () => ({ content: "teaching content", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }),
+    });
+    await h.service.advance("user-1", "topic-grounded");
+    expect(JSON.stringify(h.state.topics["topic-grounded"].teachingStepsJson)).toBe(before);
+  });
+  });
 });
