@@ -167,8 +167,8 @@ describe("computeDeterministicAssignment — Step 4 (REVIEW_FULL_UNIT)", () => {
     expect(computeDeterministicAssignment(isolatedGapUnit, reviewTopics[0], reviewTopics)!.method).toBe("KEYWORD_OVERLAP");
   });
 
-  it("TOPIC_GROUNDING_ASSIGNMENT_VERSION is bumped to 2 for this semantics change", () => {
-    expect(TOPIC_GROUNDING_ASSIGNMENT_VERSION).toBe(2);
+  it("TOPIC_GROUNDING_ASSIGNMENT_VERSION is bumped to at least 2 for the assessment-shell semantics change", () => {
+    expect(TOPIC_GROUNDING_ASSIGNMENT_VERSION).toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -285,6 +285,57 @@ describe("sliceFromAssignment / resolveAssignedGroundingSlice", () => {
   it("reports EMPTY when a valid row selects nothing from the current grounding", () => {
     const outcome = resolveAssignedGroundingSlice({ ...row, matchedConceptNames: ["Gone"], matchedHintTitles: [] }, unit);
     expect(outcome.state).toBe("EMPTY");
+  });
+
+  // --- Field-scope fix (2026-09-27): a persisted name may be a verbatim
+  // notes.vocabulary[].term rather than a notes.concepts[].name (see
+  // validateMapperResponse's `allowedVocabulary`). Mirrors the real
+  // production cases (Topics "Honoring the Guest", "A Collage") as clean
+  // fixture data, not the literal production topicIds/strings.
+  const vocabRow: PersistedTopicGroundingAssignment = {
+    unitGroundingVersion: 1,
+    unitSourceFingerprint: "fp",
+    assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION,
+    status: "READY",
+    matchedConceptNames: ["Root"], // verbatim in hintUnit.vocabulary, NOT in hintUnit.concepts
+    matchedHintTitles: [],
+  };
+
+  it("resolves a vocabulary-sourced persisted name back to real content with real sourcePages (never an empty/broken slice)", () => {
+    const slice = sliceFromAssignment(hintUnit, vocabRow)!;
+    expect(slice.concepts).toEqual([]);
+    expect(slice.vocabulary.map((v) => v.term)).toEqual(["Root"]);
+    expect(slice.vocabulary[0].sourcePages).toEqual([4]);
+    const outcome = resolveAssignedGroundingSlice(vocabRow, { ...unit, groundingNotesJson: hintUnit });
+    expect(outcome.state).toBe("READY");
+    expect((outcome.state === "READY" && outcome.slice.vocabulary.map((v) => v.term)) || []).toEqual(["Root"]);
+  });
+
+  it("a vocabulary-sourced match does not fabricate unrelated concepts/facts outside its own sourcePages", () => {
+    const slice = sliceFromAssignment(hintUnit, vocabRow)!;
+    // "Root"'s sourcePages is [4]; "Roots absorb water." also lives on page 4,
+    // so it legitimately comes along — but the page-9 "Life Cycle Stages"
+    // concept must never leak in.
+    expect(slice.facts.map((f) => f.fact)).toEqual(["Roots absorb water."]);
+    expect(slice.concepts.some((c) => c.name === "Life Cycle Stages")).toBe(false);
+  });
+
+  it("a near-miss name absent from concepts, hints AND vocabulary still resolves to nothing (no fuzzy matching)", () => {
+    const slice = sliceFromAssignment(hintUnit, { ...row, matchedConceptNames: ["Rootz"], matchedHintTitles: [] })!;
+    expect(slice.concepts).toEqual([]);
+    expect(slice.vocabulary).toEqual([]);
+  });
+
+  it("a vocabulary term persisted on two different Topics' rows resolves independently for each (sliceFromAssignment is per-row/stateless — sibling-claim exclusivity is a Step 5 write-time concern, not a read-time one)", () => {
+    const siblingVocabRow: PersistedTopicGroundingAssignment = { ...vocabRow, matchedConceptNames: ["Root"] };
+    const sliceA = sliceFromAssignment(hintUnit, vocabRow)!;
+    const sliceB = sliceFromAssignment(hintUnit, siblingVocabRow)!;
+    expect(sliceA.vocabulary.map((v) => v.term)).toEqual(["Root"]);
+    expect(sliceB.vocabulary.map((v) => v.term)).toEqual(["Root"]);
+  });
+
+  it("TOPIC_GROUNDING_ASSIGNMENT_VERSION is bumped to 3 for the vocabulary field-scope fix", () => {
+    expect(TOPIC_GROUNDING_ASSIGNMENT_VERSION).toBe(3);
   });
 });
 

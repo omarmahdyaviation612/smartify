@@ -109,10 +109,25 @@ export function validateMapperResponse(rawContent: string, notes: GroundingNotes
 
   // Defence in depth: structurally the model is only ever shown ONE Unit's
   // lists, so a cross-Unit reference should be impossible — verify anyway.
+  //
+  // 2026-09-27 field-scope fix: a forensic production audit (Topics "Honoring
+  // the Guest", "A Collage") found the model sometimes names an item that is
+  // verbatim present in this Unit's own VOCABULARY list rather than its
+  // CONCEPTS list — both are shown to the model in the same prompt (see
+  // buildMapperPrompt) as real, already-verified evidence for this Unit, so a
+  // verbatim vocabulary term is exactly as trustworthy as a verbatim concept
+  // name; only the POOL being checked was too narrow, never the match rule
+  // itself (still character-for-character, never fuzzy/substring/normalized).
+  // `matchedConceptNames` is not renamed/split here: downstream
+  // (sliceFromAssignment in topic-grounding-assignment.util.ts) already
+  // resolves a persisted name against both `notes.concepts` and
+  // `notes.vocabulary`, so one flat name list remains the correct persisted
+  // shape.
   const allowedConcepts = new Set(notes.concepts.map((c) => c.name));
+  const allowedVocabulary = new Set((notes.vocabulary ?? []).map((v) => v.term));
   for (const name of conceptNames) {
-    if (!allowedConcepts.has(name)) {
-      return { ok: false, code: "HALLUCINATED_CONCEPT_NAME", detail: `"${name}" is not a verbatim concept name in this Unit's grounding.` };
+    if (!allowedConcepts.has(name) && !allowedVocabulary.has(name)) {
+      return { ok: false, code: "HALLUCINATED_CONCEPT_NAME", detail: `"${name}" is not a verbatim concept name or vocabulary term in this Unit's grounding.` };
     }
   }
   const allowedHints = new Set((notes.topicHints ?? []).map((h) => h.topicTitle));

@@ -26,8 +26,26 @@ import type { GroundingNotes, GroundingSlice } from "../../interactive-lesson/un
  * This changes deterministic-assignment semantics (a new class of Topic now
  * resolves where it previously did not), so every previously-persisted
  * READY/BLOCKED row is correctly invalidated and recomputed on the next run.
+ *
+ * 2 -> 3 (2026-09-27): a production forensic audit found
+ * `validateMapperResponse` (topic-grounding-mapper.service.ts) only accepted
+ * a returned name against `notes.concepts[].name` / `notes.topicHints[].
+ * topicTitle`, wrongly rejecting genuinely-correct mapper responses that
+ * named an item verbatim present in `notes.vocabulary[].term` instead (real
+ * cases: Topics "Honoring the Guest", "A Collage") — a validation field-scope
+ * bug, not evidence actually being absent. `validateMapperResponse` now also
+ * accepts a verbatim `notes.vocabulary[].term` match (still exact,
+ * character-for-character — only the POOL widened), and `sliceFromAssignment`
+ * below now resolves such a persisted name back to real vocabulary content
+ * (previously it would silently resolve to nothing). This is exactly "the
+ * mapper itself changes" per the BLOCKED-row design note above: every
+ * previously-persisted AI_MAPPER row (READY or BLOCKED) must be invalidated
+ * so it is recomputed against the corrected validation on the next
+ * preparation run — deterministic Steps 1-5 themselves are unchanged by this
+ * fix, but their rows share the same assignmentVersion axis and are
+ * harmlessly recomputed to the identical result.
  */
-export const TOPIC_GROUNDING_ASSIGNMENT_VERSION = 2;
+export const TOPIC_GROUNDING_ASSIGNMENT_VERSION = 3;
 
 /** The minimal persisted-row shape the read path needs (a structural subset of Prisma's TopicGroundingAssignment). */
 export interface PersistedTopicGroundingAssignment {
@@ -93,15 +111,31 @@ export function sliceFromAssignment(notes: GroundingNotes | null | undefined, as
     (c) => conceptNames.has(c.name.toLowerCase()) || hintConceptNames.has(c.name.toLowerCase()) || c.sourcePages.some((p) => hintPages.has(p)),
   );
 
+  // 2026-09-27 field-scope fix: a persisted name (from either the AI mapper —
+  // see validateMapperResponse's `allowedVocabulary` — or, in principle, any
+  // future deterministic step) may be a verbatim `notes.vocabulary[].term`
+  // rather than a `notes.concepts[].name`. Resolving names ONLY against
+  // `notes.concepts` (as before) silently dropped such a name entirely —
+  // producing a persisted READY row whose rebuilt slice had none of the
+  // evidence the assignment actually recorded (an empty/broken slice,
+  // sometimes tripping the "EMPTY" outcome below). Directly matching
+  // `conceptNames` against vocabulary terms too (same lowercase-verbatim rule
+  // already used for concepts/hints here) fixes that without loosening the
+  // match itself — still exact string comparison, only the pool widened.
+  const directVocabMatches = notes.vocabulary.filter((v) => conceptNames.has(v.term.toLowerCase()));
+  const vocabPages = new Set(directVocabMatches.flatMap((v) => v.sourcePages));
+
   const selectedNames = new Set(concepts.map((c) => c.name.toLowerCase()));
-  const pages = new Set<number>([...hintPages, ...concepts.flatMap((c) => c.sourcePages)]);
+  const pages = new Set<number>([...hintPages, ...vocabPages, ...concepts.flatMap((c) => c.sourcePages)]);
 
   return {
     matchedViaHint: matchedHints.length > 0,
     learningObjectives: notes.learningObjectives,
     concepts,
     facts: notes.facts.filter((f) => f.sourcePages.some((p) => pages.has(p))),
-    vocabulary: notes.vocabulary.filter((v) => v.sourcePages.some((p) => pages.has(p)) || selectedNames.has(v.term.toLowerCase())),
+    vocabulary: notes.vocabulary.filter(
+      (v) => v.sourcePages.some((p) => pages.has(p)) || selectedNames.has(v.term.toLowerCase()) || conceptNames.has(v.term.toLowerCase()),
+    ),
   };
 }
 

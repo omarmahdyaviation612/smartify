@@ -54,6 +54,35 @@ describe("validateMapperResponse", () => {
     expect((result as any).code).toBe("HALLUCINATED_CONCEPT_NAME");
   });
 
+  it("accepts a name that is verbatim present in notes.vocabulary[].term, not concepts or hints (field-scope fix, 2026-09-27)", () => {
+    // Mirrors the real production cases (Topics "Honoring the Guest", "A
+    // Collage") where the model correctly named a vocabulary term and was
+    // wrongly rejected because only concepts/hints were checked.
+    const result = validateMapperResponse(
+      JSON.stringify({ matchedConceptNames: ["sequence"], matchedHintTitles: null, confidence: "HIGH", reason: "The Topic teaches this vocabulary term." }),
+      notes,
+    );
+    expect(result.ok).toBe(true);
+    expect((result as any).matchedConceptNames).toEqual(["sequence"]);
+  });
+
+  it("still rejects a name absent from concepts, hints AND vocabulary (near-miss, no fuzzy matching introduced)", () => {
+    const result = validateMapperResponse(
+      JSON.stringify({ matchedConceptNames: ["sequencing"], matchedHintTitles: null, confidence: "HIGH", reason: "r" }),
+      notes,
+    );
+    expect(result.ok).toBe(false);
+    expect((result as any).code).toBe("HALLUCINATED_CONCEPT_NAME");
+  });
+
+  it("still rejects a vocabulary term that differs only by case/whitespace (verbatim means verbatim, even in the widened pool)", () => {
+    const result = validateMapperResponse(
+      JSON.stringify({ matchedConceptNames: ["Sequence "], matchedHintTitles: null, confidence: "HIGH", reason: "r" }),
+      notes,
+    );
+    expect((result as any).code).toBe("HALLUCINATED_CONCEPT_NAME");
+  });
+
   it("rejects a hallucinated hint title", () => {
     const result = validateMapperResponse(JSON.stringify({ matchedConceptNames: [], matchedHintTitles: ["Flying Kites"], confidence: "HIGH", reason: "r" }), notes);
     expect((result as any).code).toBe("HALLUCINATED_HINT_TITLE");
@@ -149,6 +178,15 @@ describe("TopicGroundingMapperService.mapTopic", () => {
     expect(written.mapperPromptVersion).toBe(MAPPER_PROMPT_VERSION);
     expect(written.reason).toBe("It retells a story.");
     expect(written.matchedConceptNames).toEqual(["Sequencing Events"]);
+  });
+
+  it("persists a vocabulary-only selection as an AI_MAPPER / READY row (previously wrongly BLOCKED as HALLUCINATED)", async () => {
+    const { service, upsert } = build(JSON.stringify({ matchedConceptNames: ["sequence"], matchedHintTitles: null, confidence: "HIGH", reason: "This Topic teaches the vocabulary term directly." }));
+    const outcome = await service.mapTopic("t3");
+    expect(outcome.outcome).toBe("READY");
+    const written = upsert.mock.calls[0][0].create;
+    expect(written.status).toBe("READY");
+    expect(written.matchedConceptNames).toEqual(["sequence"]);
   });
 
   it("persists a HALLUCINATED response as BLOCKED with NO selection kept", async () => {
