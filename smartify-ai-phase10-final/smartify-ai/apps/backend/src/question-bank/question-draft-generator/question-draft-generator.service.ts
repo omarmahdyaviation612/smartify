@@ -8,7 +8,7 @@ import { QuestionPublishService } from "./question-publish.service";
 import { LessonDraftGeneratorService } from "../../interactive-lesson/lesson-draft-generator/lesson-draft-generator.service";
 import type { QuestionGenerationInput, ResolvedTopicContext } from "./question-draft.types";
 import type { GroundingNotes } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
-import { selectRelevantGrounding } from "../../ai/context/grounding-selector.util";
+import { assignedGroundingSliceOrNull } from "../../ai/context/topic-grounding-assignment.util";
 import { checkGroundingConsistency } from "../../ai/context/grounding-consistency-validator";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
 
@@ -68,6 +68,26 @@ export class QuestionDraftGeneratorService {
    * existing Topic -> Unit -> Subject -> Grade -> Curriculum relations —
    * never hand-typed. Mirrors LessonDraftGeneratorService.resolveUnitContext.
    */
+  /**
+   * The single authoritative grounding read for question authoring
+   * (2026-09-27) — see LessonDraftGeneratorService.readAssignedGroundingOutcome.
+   */
+  private async readAssignedGroundingSlice(topicId: string) {
+    const row = await this.prisma.client.topic.findUnique({
+      where: { id: topicId },
+      select: {
+        groundingAssignment: true,
+        unit: { select: { groundingNotesJson: true, groundingVersion: true, groundingSourceFingerprint: true } },
+      },
+    });
+    if (!row) return null;
+    return assignedGroundingSliceOrNull(row.groundingAssignment, {
+      groundingVersion: row.unit.groundingVersion,
+      groundingSourceFingerprint: row.unit.groundingSourceFingerprint,
+      groundingNotesJson: row.unit.groundingNotesJson as unknown as GroundingNotes | null,
+    });
+  }
+
   async resolveTopicContext(topicId: string): Promise<ResolvedTopicContext & { topicId: string; isPlaceholder: boolean }> {
     const topic = await this.prisma.client.topic.findUnique({
       where: { id: topicId },
@@ -233,9 +253,11 @@ export class QuestionDraftGeneratorService {
       throw new ServiceUnavailableException("This topic has no real lesson yet — generate the lesson before questions.");
     }
 
-    // 2026-09-19: same grounding-selection principle as generateAutoDraft —
-    // see its comment. Computed once, outside the retry loop.
-    const groundingSlice = selectRelevantGrounding(topicContext.groundingNotesJson, topicContext.topicNameEn, topicContext.unitTopicCount);
+    // 2026-09-27: same authoritative source as generateAutoDraft — the Topic's
+    // PERSISTED TopicGroundingAssignment, not a fresh title-based inference.
+    // A missing/stale/BLOCKED row yields null and takes the pre-existing
+    // "no grounding available" path unchanged; never a live mapper call.
+    const groundingSlice = await this.readAssignedGroundingSlice(topicId);
     if (groundingSlice) {
       this.logger.log(`GROUNDED_TOPIC_GENERATION_STARTED topicId=${topicId} kind=questions`);
     }

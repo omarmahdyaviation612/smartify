@@ -118,3 +118,17 @@ export function resolveAssignedGroundingSlice(
   if (slice.concepts.length === 0 && slice.facts.length === 0 && slice.vocabulary.length === 0) return { state: "EMPTY" };
   return { state: "READY", slice };
 }
+
+/**
+ * Convenience wrapper for the consumers that only need "the slice, or nothing"
+ * — every non-READY outcome collapses to null, which each consumer already
+ * handles as its own safe "no grounding available" path. There is deliberately
+ * no fallback to live title-inference and no path from here to the AI mapper.
+ */
+export function assignedGroundingSliceOrNull(
+  assignment: PersistedTopicGroundingAssignment | null | undefined,
+  unit: AssignmentUnitIdentity & { groundingNotesJson: GroundingNotes | null | undefined },
+): GroundingSlice | null {
+  const outcome = resolveAssignedGroundingSlice(assignment, unit);
+  return outcome.state === "READY" ? outcome.slice : null;
+}

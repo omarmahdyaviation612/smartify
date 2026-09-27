@@ -1145,13 +1145,25 @@ describe("InteractiveLessonService", () => {
         id: "topic-grounded",
         nameEn: "Fiction: Different stories by the same author",
         teachingStepsJson: GROUNDED_STEPS,
-        unit: { subjectId: "subject-english", subject: { nameEn: "English Language" }, groundingNotesJson: GROUNDING_NOTES_JSON },
+        // The persisted TopicGroundingAssignment this Topic already has —
+        // its identity matches the Unit's grounding below, so the runtime
+        // path reconstructs the slice from it rather than inferring live.
+        groundingAssignment: {
+          unitGroundingVersion: 1, unitSourceFingerprint: "fp-fiction", assignmentVersion: 1, status: "READY",
+          matchedConceptNames: ["Author style"], matchedHintTitles: [],
+        },
+        unit: {
+          subjectId: "subject-english", subject: { nameEn: "English Language" },
+          groundingVersion: 1, groundingSourceFingerprint: "fp-fiction",
+          groundingNotesJson: GROUNDING_NOTES_JSON,
+        },
       },
       "topic-ungrounded": {
         id: "topic-ungrounded",
         nameEn: "Fiction: Different stories by the same author",
         teachingStepsJson: GROUNDED_STEPS,
-        unit: { subjectId: "subject-english", subject: { nameEn: "English Language" } }, // no groundingNotesJson at all
+        groundingAssignment: null,
+        unit: { subjectId: "subject-english", subject: { nameEn: "English Language" }, groundingVersion: null, groundingSourceFingerprint: null }, // no groundingNotesJson at all
       },
     };
   }

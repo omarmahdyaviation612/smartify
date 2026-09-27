@@ -206,7 +206,20 @@ async function main() {
         }
       }
 
-      if (groundingStatus !== "READY") continue;
+      if (groundingStatus !== "READY") {
+        // 2026-09-27 reconciliation fix: a Unit-level terminal grounding
+        // failure must not make its Topics silently disappear from the
+        // report. Every Topic in this Unit is BLOCKED on the same
+        // CONFIGURATION_ERROR and is recorded as failed here, exactly once,
+        // so unitsSkippedConfigurationError.length always accounts for the
+        // same Topics topicsFailed lists — no Topic vanishes from either
+        // count.
+        for (const topic of unit.topics) {
+          if (topic.teachingStepsJson) continue; // already authored — unaffected by this Unit's current grounding failure
+          report.topicsFailed.push({ topicId: topic.id, error: `BLOCKED: Unit ${unit.id} grounding terminal failure (CONFIGURATION_ERROR).` });
+        }
+        continue;
+      }
       const topicsMissing = unit.topics.filter((t) => !t.teachingStepsJson);
       if (!apply && !unit.groundingNotesJson) {
         // Dry run and this unit isn't grounded yet: its topics' post-

@@ -5,7 +5,7 @@ import { AIContextBuilderService } from "../ai/context/ai-context-builder.servic
 import { AIUsageService } from "../ai/usage/ai-usage.service";
 import { TutorQuestionPacksService } from "../tutor-question-packs/tutor-question-packs.service";
 import { TutorAnswerCacheService } from "./tutor-answer-cache.service";
-import { selectRelevantGrounding } from "../ai/context/grounding-selector.util";
+import { assignedGroundingSliceOrNull } from "../ai/context/topic-grounding-assignment.util";
 import type { GroundingNotes } from "../interactive-lesson/unit-grounding/unit-grounding.types";
 import { buildAdaptiveMathTeachingPlan } from "./adaptive-math-teaching.util";
 import { deriveMathVisualWithContext, parseTutorVisual } from "./visual-instruction.util";
@@ -251,14 +251,24 @@ export class TutorService {
       if (input.topicId) {
         const topic = await this.prisma.client.topic.findUnique({
           where: { id: input.topicId },
-          include: { unit: { select: { subjectId: true, groundingNotesJson: true, _count: { select: { topics: true } } } } },
+          include: {
+            // 2026-09-27: the Topic's PERSISTED grounding assignment, read in
+            // the same query — the Tutor no longer re-infers relevance from the
+            // Topic title on every turn.
+            groundingAssignment: true,
+            unit: { select: { subjectId: true, groundingNotesJson: true, groundingVersion: true, groundingSourceFingerprint: true } },
+          },
         });
         // A client-supplied Topic must belong to the selected Subject before
         // it can influence this tutor turn. Its Unit grounding is then
         // narrowed to this Topic rather than exposing a whole Unit.
         if (topic?.unit?.subjectId === input.subjectId) {
           topicNameEn = topic.nameEn;
-          groundingSlice = selectRelevantGrounding(topic.unit.groundingNotesJson as GroundingNotes | null, topic.nameEn, topic.unit._count.topics);
+          groundingSlice = assignedGroundingSliceOrNull(topic.groundingAssignment, {
+            groundingVersion: topic.unit.groundingVersion,
+            groundingSourceFingerprint: topic.unit.groundingSourceFingerprint,
+            groundingNotesJson: topic.unit.groundingNotesJson as GroundingNotes | null,
+          });
         }
       }
 

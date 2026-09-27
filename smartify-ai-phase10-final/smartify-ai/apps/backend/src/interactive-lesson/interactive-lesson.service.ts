@@ -11,7 +11,7 @@ import { QuestionDraftGeneratorService } from "../question-bank/question-draft-g
 import { describeExpectedAnswer, describeOperands, tryDeterministicValidate } from "./answer-validators/deterministic-validator";
 import type { CheckExpression, StepResult, TeachingStep } from "./interactive-lesson.types";
 import { decideStrategySwitch, getCurrentStrategy, isMathSubject, strategyGuidance } from "./teaching-strategy.util";
-import { selectRelevantGrounding } from "../ai/context/grounding-selector.util";
+import { assignedGroundingSliceOrNull } from "../ai/context/topic-grounding-assignment.util";
 
 const MAX_HINTS_BEFORE_FORCED_RESOLUTION = 1;
 
@@ -65,7 +65,13 @@ export class InteractiveLessonService {
   private async getTopicOrThrow(topicId: string) {
     const topic = await this.prisma.client.topic.findUnique({
       where: { id: topicId },
-      include: { unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } }, _count: { select: { topics: true } } } } },
+      include: {
+        // 2026-09-27: the Topic's PERSISTED grounding assignment is loaded in
+        // the SAME query the runtime teaching path already makes — no extra
+        // round trip, and no live relevance inference.
+        groundingAssignment: true,
+        unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } }, _count: { select: { topics: true } } } },
+      },
     });
     if (!topic || !topic.teachingStepsJson) {
       throw new NotFoundException("This lesson is not available as an interactive lesson yet.");
@@ -78,16 +84,26 @@ export class InteractiveLessonService {
   }
 
   /**
-   * 2026-09-26 factual-provenance fix: the SAME Topic-scoped selection
+   * 2026-09-26 factual-provenance fix: the SAME Topic-scoped grounding
    * `buildAutoLessonGenerationPrompt` used to plan this lesson at authoring
-   * time (see grounding-selector.util.ts) — a pure, deterministic function
-   * over data `getTopicOrThrow` already fetched (topic.unit.groundingNotesJson
-   * via its own include), never a new query, never an AI/grounding call.
+   * time — since 2026-09-27 that is the PERSISTED TopicGroundingAssignment
+   * (topic-grounding-assignment.util.ts), so authoring and runtime teaching
+   * can no longer drift apart. Still a pure, deterministic function over data
+   * `getTopicOrThrow` already fetched via its own include — never a new query,
+   * never an AI/grounding/mapper call. A missing/stale/BLOCKED assignment
+   * yields null, exactly like an unmatched selection always did.
    * Threaded into every runtime LessonTeachingContext so the model can tell
    * a textbook-supported named example from one it would otherwise invent.
    */
-  private topicGroundingSlice(topic: { nameEn: string; unit: { groundingNotesJson: unknown; _count?: { topics: number } } }) {
-    return selectRelevantGrounding(topic.unit.groundingNotesJson as any, topic.nameEn, topic.unit._count?.topics);
+  private topicGroundingSlice(topic: {
+    groundingAssignment?: unknown;
+    unit: { groundingNotesJson: unknown; groundingVersion?: number | null; groundingSourceFingerprint?: string | null };
+  }) {
+    return assignedGroundingSliceOrNull(topic.groundingAssignment as any, {
+      groundingVersion: topic.unit.groundingVersion ?? null,
+      groundingSourceFingerprint: topic.unit.groundingSourceFingerprint ?? null,
+      groundingNotesJson: topic.unit.groundingNotesJson as any,
+    });
   }
 
   /**

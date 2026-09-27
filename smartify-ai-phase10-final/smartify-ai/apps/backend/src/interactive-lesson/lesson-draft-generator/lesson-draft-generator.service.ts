@@ -10,7 +10,7 @@ import { toUnreviewedBilingualObjectives } from "./lesson-objectives.util";
 import type { GroundingNotes } from "../unit-grounding/unit-grounding.types";
 import { UnitGroundingService } from "../unit-grounding/unit-grounding.service";
 import { resolveEffectiveSourceFile } from "../unit-grounding/unit-effective-source.util";
-import { selectRelevantGrounding } from "../../ai/context/grounding-selector.util";
+import { resolveAssignedGroundingSlice, type AssignmentReadOutcome } from "../../ai/context/topic-grounding-assignment.util";
 import { checkGroundingConsistency } from "../../ai/context/grounding-consistency-validator";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
 
@@ -89,6 +89,29 @@ export class LessonDraftGeneratorService {
    * Phase 6 fix. Mirrors the exact include chain interactive-lesson.service
    * already uses for `getTopicOrThrow`.
    */
+  /**
+   * The single authoritative grounding read for lesson authoring (2026-09-27):
+   * the Topic's PERSISTED TopicGroundingAssignment, verified against the Unit's
+   * current grounding identity, re-filtered against the Unit's CURRENT
+   * groundingNotesJson. Never calls selectRelevantGrounding() live, and never
+   * the AI mapper.
+   */
+  private async readAssignedGroundingOutcome(topicId: string): Promise<AssignmentReadOutcome> {
+    const row = await this.prisma.client.topic.findUnique({
+      where: { id: topicId },
+      select: {
+        groundingAssignment: true,
+        unit: { select: { groundingNotesJson: true, groundingVersion: true, groundingSourceFingerprint: true } },
+      },
+    });
+    if (!row) return { state: "MISSING" };
+    return resolveAssignedGroundingSlice(row.groundingAssignment, {
+      groundingVersion: row.unit.groundingVersion,
+      groundingSourceFingerprint: row.unit.groundingSourceFingerprint,
+      groundingNotesJson: row.unit.groundingNotesJson as unknown as GroundingNotes | null,
+    });
+  }
+
   async resolveUnitContext(unitId: string): Promise<ResolvedUnitContext & { unitId: string; subjectId: string; sourceFile: string | null }> {
     const unit = await this.prisma.client.unit.findUnique({
       where: { id: unitId },
@@ -233,22 +256,30 @@ export class LessonDraftGeneratorService {
   ) {
     await this.usageService.assertWithinBudget(requestingUserId);
     const unitContext = await this.resolveUnitContext(topic.unitId);
-    // 2026-09-19: computed once, outside the retry loop — selection is a
-    // pure function of already-fetched data, not something that changes
-    // between attempts. null whenever the Unit isn't grounded (or has no
-    // concept recognizably related to this Topic's title). A mapped textbook
-    // must supply relevant content; it must never fall back to title-only.
-    const groundingSlice = selectRelevantGrounding(unitContext.groundingNotesJson, topic.nameEn, unitContext.unitTopicCount);
+    // 2026-09-27: the Topic's grounding slice is no longer re-inferred from its
+    // title here. It is read from the PERSISTED TopicGroundingAssignment row
+    // decided once by the preparation step, and reconstructed from the Unit's
+    // CURRENT groundingNotesJson by the persisted NAMES (see
+    // topic-grounding-assignment.util.ts). A missing, stale (identity
+    // mismatch) or BLOCKED row yields null and takes exactly the same safe
+    // failure path a "no relevant grounding" selection always took — there is
+    // no live fallback to title inference and no path to the AI mapper here.
+    const assignmentOutcome = await this.readAssignedGroundingOutcome(topic.id);
+    const groundingSlice = assignmentOutcome.state === "READY" ? assignmentOutcome.slice : null;
     const groundingNotes = unitContext.groundingNotesJson;
     const groundingConceptCount = groundingNotes?.concepts.length ?? 0;
     const selectedConceptCount = groundingSlice?.concepts.length ?? 0;
     const groundingSelectionFailureReason = !groundingNotes
       ? "no-grounding-notes"
-      : !groundingSlice
-        ? "selector-no-match"
-        : selectedConceptCount === 0 && groundingSlice.facts.length === 0 && groundingSlice.vocabulary.length === 0
-          ? "selector-empty"
-          : null;
+      : assignmentOutcome.state === "MISSING"
+        ? "assignment-missing"
+        : assignmentOutcome.state === "STALE"
+          ? "assignment-stale"
+          : assignmentOutcome.state === "BLOCKED"
+            ? "assignment-blocked"
+            : assignmentOutcome.state === "EMPTY"
+              ? "assignment-empty"
+              : null;
     this.logger.log(JSON.stringify({
       event: "TEXTBOOK_TOPIC_GROUNDING_SELECTION",
       topicId: topic.id,

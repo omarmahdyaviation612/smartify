@@ -38,6 +38,13 @@ describe("LessonDraftGeneratorService.ensureTopicHasLesson — budget attributio
       nameAr: "موضوع الاختبار",
       unitId: UNIT_ID,
       teachingStepsJson: null,
+      // readAssignedGroundingOutcome() re-queries topic.findUnique with its
+      // own `select` for the persisted grounding assignment — these tests
+      // don't exercise grounding assignment, so this defaults to a safe
+      // MISSING outcome (null slice), matching the pre-2026-09-27 behavior
+      // of "no grounding" for an ungrounded Unit.
+      groundingAssignment: null,
+      unit: { groundingVersion: null, groundingSourceFingerprint: null, groundingNotesJson: null },
       ...topicOverrides,
     };
 
@@ -206,10 +213,22 @@ describe("LessonDraftGeneratorService.ensureTopicHasLesson — budget attributio
     const h = makeHarness();
     const unit = await h.prisma.client.unit.findUnique();
     h.prisma.client.unit.findUnique.mockResolvedValue({ ...unit,
-      subject: { ...unit.subject, sourceFile: "textbook.pdf" }, groundingVersion: 1,
+      subject: { ...unit.subject, sourceFile: "textbook.pdf" }, groundingVersion: 1, groundingSourceFingerprint: "fp-1",
       groundingNotesJson: { concepts: [{ name: "Introduce Test Topic", description: "Textbook scope", sourcePages: [1], importance: "core" }], facts: [], vocabulary: [], learningObjectives: [], topicHints: [] },
     } as any);
     h.unitGrounding.ensureUnitGrounded.mockResolvedValue({ used: true });
+    // The persisted assignment readAssignedGroundingOutcome() looks up —
+    // matches this Unit's grounding identity and names the one concept
+    // relevant to this Topic.
+    const priorTopic = await h.prisma.client.topic.findUnique();
+    h.prisma.client.topic.findUnique.mockResolvedValue({
+      ...priorTopic,
+      groundingAssignment: {
+        unitGroundingVersion: 1, unitSourceFingerprint: "fp-1", assignmentVersion: 1, status: "READY",
+        matchedConceptNames: ["Introduce Test Topic"], matchedHintTitles: [],
+      },
+      unit: { groundingVersion: 1, groundingSourceFingerprint: "fp-1", groundingNotesJson: { concepts: [{ name: "Introduce Test Topic", description: "Textbook scope", sourcePages: [1], importance: "core" }], facts: [], vocabulary: [], learningObjectives: [], topicHints: [] } },
+    } as any);
     await h.service.ensureTopicHasLesson(TOPIC_ID, { preferredLang: "en", studentAgeRange: "6-7" }, REAL_STUDENT_ID);
     expect(h.generateSpy).toHaveBeenCalledTimes(1);
     expect(h.publisher.autoPublishIntoTopic).toHaveBeenCalledWith("draft-1", TOPIC_ID, expect.objectContaining({ generationSource: "TEXTBOOK_GROUNDED", groundingVersionUsed: 1 }));
@@ -225,22 +244,35 @@ describe("LessonDraftGeneratorService.ensureTopicHasLesson — budget attributio
   it("a Unit's SOLE Topic with a generic name (e.g. 'Test Topic' matching nothing) still authors successfully via the single-Topic fallback", async () => {
     const h = makeHarness();
     const unit = await h.prisma.client.unit.findUnique();
+    const groundingNotesJson = {
+      // "Explain" deliberately shares no word with the Topic's own name
+      // ("Test Topic") — proving selection reached this Unit's grounding
+      // only via the single-Topic fallback, not ordinary keyword overlap
+      // against the Topic title — while still overlapping with the
+      // harness's default mocked generated content ("Explain" step) so
+      // this test isolates the SELECTION behavior, not an unrelated
+      // content-validation concern.
+      concepts: [{ name: "Explain the real textbook content", description: "Real textbook content.", sourcePages: [1], importance: "core" }],
+      facts: [], vocabulary: [], learningObjectives: [], topicHints: [],
+    };
     h.prisma.client.unit.findUnique.mockResolvedValue({ ...unit,
-      subject: { ...unit.subject, sourceFile: "textbook.pdf" }, groundingVersion: 1,
-      groundingNotesJson: {
-        // "Explain" deliberately shares no word with the Topic's own name
-        // ("Test Topic") — proving selection reached this Unit's grounding
-        // only via the single-Topic fallback, not ordinary keyword overlap
-        // against the Topic title — while still overlapping with the
-        // harness's default mocked generated content ("Explain" step) so
-        // this test isolates the SELECTION behavior, not an unrelated
-        // content-validation concern.
-        concepts: [{ name: "Explain the real textbook content", description: "Real textbook content.", sourcePages: [1], importance: "core" }],
-        facts: [], vocabulary: [], learningObjectives: [], topicHints: [],
-      },
+      subject: { ...unit.subject, sourceFile: "textbook.pdf" }, groundingVersion: 1, groundingSourceFingerprint: "fp-1",
+      groundingNotesJson,
       _count: { topics: 1 }, // the sole Topic under this Unit
     } as any);
     h.unitGrounding.ensureUnitGrounded.mockResolvedValue({ used: true });
+    // The Unit's single-Topic fallback is decided once, at persistence time,
+    // by TopicGroundingAssignmentService — here it's already persisted as
+    // the whole Unit's concepts via the fallback method.
+    const priorTopic = await h.prisma.client.topic.findUnique();
+    h.prisma.client.topic.findUnique.mockResolvedValue({
+      ...priorTopic,
+      groundingAssignment: {
+        unitGroundingVersion: 1, unitSourceFingerprint: "fp-1", assignmentVersion: 1, status: "READY",
+        matchedConceptNames: ["Explain the real textbook content"], matchedHintTitles: [],
+      },
+      unit: { groundingVersion: 1, groundingSourceFingerprint: "fp-1", groundingNotesJson },
+    } as any);
     await h.service.ensureTopicHasLesson(TOPIC_ID, { preferredLang: "en", studentAgeRange: "6-7" }, REAL_STUDENT_ID);
     expect(h.generateSpy).toHaveBeenCalledTimes(1);
     expect(h.publisher.autoPublishIntoTopic).toHaveBeenCalledWith("draft-1", TOPIC_ID, expect.objectContaining({ generationSource: "TEXTBOOK_GROUNDED" }));
