@@ -1,0 +1,322 @@
+import { Injectable, Logger } from "@nestjs/common";
+import { PrismaService } from "../../prisma/prisma.service";
+import { AIProviderFactory } from "../ai-provider.factory";
+import { AIUsageService } from "../usage/ai-usage.service";
+import { CONTENT_AUTHORING_ACTOR_ID } from "../content-authoring-actor.const";
+import type { GroundingNotes } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
+import { TopicGroundingAssignmentService, computeDeterministicAssignment } from "./topic-grounding-assignment.service";
+
+/**
+ * The bounded AI mapper — the LAST resort for a Topic whose grounding
+ * assignment the deterministic Steps 1-5 could not decide (2026-09-27).
+ *
+ * ---------------------------------------------------------------------------
+ * NEVER REACHABLE FROM A STUDENT-FACING RUNTIME REQUEST PATH
+ * ---------------------------------------------------------------------------
+ * This service is deliberately NOT registered as a provider in AIModule (or
+ * any other module that a request-handling controller can reach) — see the
+ * comment in ai.module.ts. It is constructed explicitly, by the
+ * preparation/backfill script only (apps/backend/src/scripts/
+ * prepare-topic-grounding-assignments.ts). The four runtime consumers read the
+ * PERSISTED TopicGroundingAssignment row via
+ * topic-grounding-assignment.util.ts and have no reference to this file at
+ * all; a missing/stale/blocked row makes them fail safely as "not ready", it
+ * never triggers a live mapper call.
+ *
+ * The model is never allowed to AUTHOR anything. It only SELECTS from the
+ * verbatim lists it is shown, and every string it returns is re-checked
+ * against those lists before anything is persisted. Any violation at all —
+ * one hallucinated name, unparseable JSON, a missing field, an
+ * empty-but-HIGH-confidence contradiction — discards the WHOLE response and
+ * persists a BLOCKED row. LOW confidence is likewise persisted as BLOCKED and
+ * never usable as grounding.
+ */
+
+/** Bumped whenever this prompt or the mapper's behavior changes. */
+export const MAPPER_PROMPT_VERSION = 1;
+
+const MAPPER_SYSTEM_PROMPT_HEADER = `You are a curriculum librarian assigning ONE lesson Topic to the already-extracted study notes of the textbook Unit it belongs to.
+
+You are selecting EXISTING items from the lists provided below. You may NEVER invent a concept name or hint title that is not verbatim present in the lists. Copy the strings character-for-character, exactly as written, including capitalisation and punctuation. If nothing in the provided lists is genuinely relevant to this Topic, return an empty selection with confidence LOW. Never guess.
+
+The Unit's other Topics are listed so you know what NOT to claim: content that clearly belongs to a sibling Topic must be left to that sibling.
+
+Reply with ONLY a JSON object of exactly this shape:
+{"matchedConceptNames": string[], "matchedHintTitles": string[] | null, "confidence": "HIGH" | "LOW", "reason": string}
+
+- matchedConceptNames: verbatim names from CONCEPTS below that this Topic teaches.
+- matchedHintTitles: verbatim topicTitle values from TOPIC HINTS below that describe this Topic, or null.
+- confidence: HIGH only when you are certain the selected items are this Topic's own content. Otherwise LOW.
+- reason: one short sentence explaining the selection (or why nothing matched).`;
+
+export interface MapperValidationSuccess {
+  ok: true;
+  matchedConceptNames: string[];
+  matchedHintTitles: string[] | null;
+  confidence: "HIGH" | "LOW";
+  reason: string;
+}
+export interface MapperValidationFailure {
+  ok: false;
+  /** Machine-readable rejection code, logged verbatim. */
+  code:
+    | "UNPARSEABLE_JSON"
+    | "NOT_AN_OBJECT"
+    | "MISSING_FIELDS"
+    | "HALLUCINATED_CONCEPT_NAME"
+    | "HALLUCINATED_HINT_TITLE"
+    | "EMPTY_BUT_HIGH_CONFIDENCE";
+  detail: string;
+}
+export type MapperValidationResult = MapperValidationSuccess | MapperValidationFailure;
+
+/**
+ * Post-validation. Runs on EVERY mapper response before anything is persisted.
+ * A single violation rejects the WHOLE response — a bad name is never silently
+ * dropped while the rest is kept, because a response that invented one string
+ * is not trustworthy for the others either.
+ */
+export function validateMapperResponse(rawContent: string, notes: GroundingNotes): MapperValidationResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawContent);
+  } catch {
+    return { ok: false, code: "UNPARSEABLE_JSON", detail: "Response was not valid JSON." };
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, code: "NOT_AN_OBJECT", detail: "Response was not a JSON object." };
+  }
+
+  const obj = parsed as Record<string, unknown>;
+  const names = obj.matchedConceptNames;
+  const titles = obj.matchedHintTitles;
+  const confidence = obj.confidence;
+  const reason = obj.reason;
+
+  const namesOk = Array.isArray(names) && names.every((n) => typeof n === "string");
+  const titlesOk = titles === null || titles === undefined || (Array.isArray(titles) && titles.every((t) => typeof t === "string"));
+  const confidenceOk = confidence === "HIGH" || confidence === "LOW";
+  if (!namesOk || !titlesOk || !confidenceOk || typeof reason !== "string") {
+    return {
+      ok: false,
+      code: "MISSING_FIELDS",
+      detail: `Required fields missing or wrongly typed (matchedConceptNames=${namesOk}, matchedHintTitles=${titlesOk}, confidence=${confidenceOk}, reason=${typeof reason}).`,
+    };
+  }
+
+  const conceptNames = names as string[];
+  const hintTitles = (titles ?? null) as string[] | null;
+
+  // Defence in depth: structurally the model is only ever shown ONE Unit's
+  // lists, so a cross-Unit reference should be impossible — verify anyway.
+  const allowedConcepts = new Set(notes.concepts.map((c) => c.name));
+  for (const name of conceptNames) {
+    if (!allowedConcepts.has(name)) {
+      return { ok: false, code: "HALLUCINATED_CONCEPT_NAME", detail: `"${name}" is not a verbatim concept name in this Unit's grounding.` };
+    }
+  }
+  const allowedHints = new Set((notes.topicHints ?? []).map((h) => h.topicTitle));
+  for (const title of hintTitles ?? []) {
+    if (!allowedHints.has(title)) {
+      return { ok: false, code: "HALLUCINATED_HINT_TITLE", detail: `"${title}" is not a verbatim topicHints title in this Unit's grounding.` };
+    }
+  }
+
+  const selectedNothing = conceptNames.length === 0 && (hintTitles === null || hintTitles.length === 0);
+  if (selectedNothing && confidence === "HIGH") {
+    return { ok: false, code: "EMPTY_BUT_HIGH_CONFIDENCE", detail: "Empty selection reported as HIGH confidence — a contradiction." };
+  }
+
+  return { ok: true, matchedConceptNames: conceptNames, matchedHintTitles: hintTitles, confidence, reason };
+}
+
+/** Builds the mapper prompt for ONE Topic from ONE Unit's data only. */
+export function buildMapperPrompt(input: {
+  topicNameEn: string;
+  topicOrder: number;
+  siblingTopics: { nameEn: string; order: number }[];
+  notes: GroundingNotes;
+}): string {
+  const { notes } = input;
+  const siblings = input.siblingTopics
+    .filter((t) => !(t.order === input.topicOrder && t.nameEn === input.topicNameEn))
+    .sort((a, b) => a.order - b.order)
+    .map((t) => `  ${t.order}. ${t.nameEn}`)
+    .join("\n");
+
+  return [
+    MAPPER_SYSTEM_PROMPT_HEADER,
+    "",
+    `UNIT: ${notes.unitTitle} (${notes.subject}, ${notes.gradeLevel})`,
+    "",
+    `TOPIC TO ASSIGN: "${input.topicNameEn}" (order ${input.topicOrder})`,
+    "",
+    `THE UNIT'S OTHER TOPICS (do not claim their content):\n${siblings || "  (none)"}`,
+    "",
+    `LEARNING OBJECTIVES:\n${notes.learningObjectives.map((o) => `  - ${o}`).join("\n") || "  (none)"}`,
+    "",
+    `TOPIC HINTS (verbatim topicTitle values you may select):\n${
+      (notes.topicHints ?? []).map((h) => `  - topicTitle: ${h.topicTitle} | pages: ${(h.sourcePages ?? []).join(",")} | relevantConcepts: ${h.relevantConcepts.join(" ; ")}`).join("\n") || "  (none)"
+    }`,
+    "",
+    `CONCEPTS (verbatim names you may select):\n${notes.concepts.map((c) => `  - name: ${c.name} | pages: ${c.sourcePages.join(",")} | ${c.description}`).join("\n") || "  (none)"}`,
+    "",
+    `FACTS:\n${notes.facts.map((f) => `  - ${f.fact} | pages: ${f.sourcePages.join(",")}`).join("\n") || "  (none)"}`,
+    "",
+    `VOCABULARY:\n${notes.vocabulary.map((v) => `  - ${v.term}: ${v.meaning} | pages: ${v.sourcePages.join(",")}`).join("\n") || "  (none)"}`,
+  ].join("\n");
+}
+
+export type MapperOutcome =
+  | { outcome: "SKIPPED_DETERMINISTIC"; reason: string }
+  | { outcome: "NOT_GROUNDED"; reason: string }
+  | { outcome: "READY"; matchedConceptNames: string[]; matchedHintTitles: string[] | null; model: string }
+  | { outcome: "BLOCKED"; reason: string; code?: MapperValidationFailure["code"] | "BUDGET_UNAVAILABLE" };
+
+@Injectable()
+export class TopicGroundingMapperService {
+  private readonly logger = new Logger(TopicGroundingMapperService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly providerFactory: AIProviderFactory,
+    private readonly usageService: AIUsageService,
+    private readonly assignmentService: TopicGroundingAssignmentService,
+  ) {}
+
+  /**
+   * One bounded AI call for ONE Topic. Refuses to run at all if the
+   * deterministic Steps 1-5 would in fact have resolved this Topic (so the
+   * mapper can never override cheaper, provable logic), and always persists an
+   * outcome: READY, or BLOCKED on any validation failure / LOW confidence.
+   *
+   * Budgeted exactly like every other content-authoring call: platform-scoped
+   * CONTENT_AUTHORING_ACTOR_ID, reserve -> provider call -> log usage ->
+   * reconcile, never a real student's per-student budget.
+   */
+  async mapTopic(topicId: string): Promise<MapperOutcome> {
+    const topic = await this.prisma.client.topic.findUnique({
+      where: { id: topicId },
+      include: {
+        unit: {
+          select: {
+            id: true,
+            groundingNotesJson: true,
+            groundingVersion: true,
+            groundingSourceFingerprint: true,
+            topics: { select: { id: true, nameEn: true, order: true }, orderBy: { order: "asc" } },
+          },
+        },
+      },
+    });
+    if (!topic) return { outcome: "NOT_GROUNDED", reason: `Topic ${topicId} not found.` };
+
+    const unit = topic.unit;
+    if (unit.groundingVersion === null || unit.groundingSourceFingerprint === null || !unit.groundingNotesJson) {
+      return { outcome: "NOT_GROUNDED", reason: `Unit ${unit.id} has no completed grounding — nothing to map from.` };
+    }
+    const notes = unit.groundingNotesJson as unknown as GroundingNotes;
+    const siblings = unit.topics.map((t) => ({ id: t.id, nameEn: t.nameEn, order: t.order }));
+
+    const deterministic = computeDeterministicAssignment(notes, { id: topic.id, nameEn: topic.nameEn, order: topic.order }, siblings);
+    if (deterministic) {
+      return { outcome: "SKIPPED_DETERMINISTIC", reason: `Deterministic Step resolved this Topic as ${deterministic.method} — the mapper must not override it.` };
+    }
+
+    const systemPrompt = buildMapperPrompt({ topicNameEn: topic.nameEn, topicOrder: topic.order, siblingTopics: siblings, notes });
+    const userMessage = "Select this Topic's items now.";
+
+    const { provider, providerKey, model } = await this.providerFactory.getActiveProvider();
+    const estimatedUsd = await this.usageService.estimateMaxChatCostUsd({ providerKey, inputText: systemPrompt + userMessage });
+    const reserveResult = await this.usageService.reserveBudget(CONTENT_AUTHORING_ACTOR_ID, estimatedUsd);
+    if (!reserveResult.ok) {
+      return { outcome: "BLOCKED", reason: `Budget unavailable (${reserveResult.reason}) — nothing persisted, safe to retry later.`, code: "BUDGET_UNAVAILABLE" };
+    }
+
+    let result: Awaited<ReturnType<typeof provider.generate>>;
+    try {
+      result = await provider.generate({
+        systemPrompt,
+        messages: [{ role: "user", content: userMessage }],
+        responseFormat: "json_object",
+      });
+    } catch (err) {
+      await this.usageService.releaseBudget(reserveResult.reservationId).catch(() => undefined);
+      throw err;
+    }
+
+    const actualCostUsd = await this.logUsage(providerKey, model, result.inputTokens, result.outputTokens);
+    await this.usageService.reconcileBudget(reserveResult.reservationId, actualCostUsd).catch(() => undefined);
+
+    const validation = validateMapperResponse(result.content, notes);
+
+    const persist = (status: "READY" | "BLOCKED", confidence: "HIGH" | "LOW", names: string[], titles: string[] | null, reason: string) =>
+      this.assignmentService.upsert({
+        topicId,
+        unitGroundingVersion: unit.groundingVersion!,
+        unitSourceFingerprint: unit.groundingSourceFingerprint!,
+        method: "AI_MAPPER",
+        confidence,
+        status,
+        matchedConceptNames: names,
+        matchedHintTitles: titles,
+        mapperModel: model,
+        mapperPromptVersion: MAPPER_PROMPT_VERSION,
+        reason,
+      });
+
+    if (!validation.ok) {
+      this.logger.warn(
+        JSON.stringify({ event: "TOPIC_GROUNDING_MAPPER_REJECTED", topicId, unitId: unit.id, code: validation.code, detail: validation.detail, model }),
+      );
+      // Malformed/hallucinated -> the whole response is discarded. Nothing the
+      // model said is persisted as a selection; only the audit reason is.
+      await persist("BLOCKED", "LOW", [], null, `Mapper response rejected (${validation.code}): ${validation.detail}`);
+      return { outcome: "BLOCKED", reason: validation.detail, code: validation.code };
+    }
+
+    if (validation.confidence === "LOW") {
+      this.logger.warn(JSON.stringify({ event: "TOPIC_GROUNDING_MAPPER_LOW_CONFIDENCE", topicId, unitId: unit.id, model }));
+      // LOW confidence is persisted as BLOCKED even when some names passed
+      // validation — a BLOCKED row is never treated as usable grounding, so no
+      // lesson/question content can be auto-published from it.
+      await persist("BLOCKED", "LOW", validation.matchedConceptNames, validation.matchedHintTitles, validation.reason);
+      return { outcome: "BLOCKED", reason: validation.reason };
+    }
+
+    await persist("READY", "HIGH", validation.matchedConceptNames, validation.matchedHintTitles, validation.reason);
+    this.logger.log(
+      JSON.stringify({
+        event: "TOPIC_GROUNDING_MAPPER_ASSIGNED",
+        topicId,
+        unitId: unit.id,
+        model,
+        mapperPromptVersion: MAPPER_PROMPT_VERSION,
+        conceptCount: validation.matchedConceptNames.length,
+      }),
+    );
+    return { outcome: "READY", matchedConceptNames: validation.matchedConceptNames, matchedHintTitles: validation.matchedHintTitles, model };
+  }
+
+  private async logUsage(providerKey: string, model: string, inputTokens: number, outputTokens: number): Promise<number> {
+    const rates = await this.providerFactory.getCostRates(providerKey);
+    const costUsd = inputTokens * rates.costPerInputToken + outputTokens * rates.costPerOutputToken;
+    await this.prisma.client.aIUsage
+      .create({
+        data: {
+          userId: CONTENT_AUTHORING_ACTOR_ID,
+          studentId: null,
+          subjectId: null,
+          feature: "topic_grounding_mapper",
+          provider: providerKey,
+          model,
+          inputTokens,
+          outputTokens,
+          creditsUsed: 0,
+          costUsd,
+        },
+      })
+      .catch((err) => this.logger.warn(`Usage log failed (mapping still completed): ${err instanceof Error ? err.message : String(err)}`));
+    return costUsd;
+  }
+}
