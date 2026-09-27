@@ -50,7 +50,7 @@ import { AIProviderFactory } from "../ai/ai-provider.factory";
 import { AIUsageService } from "../ai/usage/ai-usage.service";
 import { TopicGroundingAssignmentService, computeDeterministicAssignment, type AssignmentTopic } from "../ai/context/topic-grounding-assignment.service";
 import { TopicGroundingMapperService } from "../ai/context/topic-grounding-mapper.service";
-import { TOPIC_GROUNDING_ASSIGNMENT_VERSION } from "../ai/context/topic-grounding-assignment.util";
+import { DETERMINISTIC_ASSIGNMENT_VERSION, MAPPER_PROMPT_VERSION } from "../ai/context/topic-grounding-assignment.util";
 import { isQuotaError } from "../ai/providers/openai-request-diagnostics";
 import type { GroundingNotes } from "../interactive-lesson/unit-grounding/unit-grounding.types";
 
@@ -132,6 +132,7 @@ interface ScopedTopic {
     unitSourceFingerprint: string;
     assignmentVersion: number;
     method: string;
+    mapperPromptVersion: number | null;
     status: string;
   } | null;
 }
@@ -169,7 +170,7 @@ export async function loadScopedTopics(prisma: PrismaService, scope: { topicId?:
         },
       },
       groundingAssignment: {
-        select: { unitGroundingVersion: true, unitSourceFingerprint: true, assignmentVersion: true, method: true, status: true },
+        select: { unitGroundingVersion: true, unitSourceFingerprint: true, assignmentVersion: true, method: true, mapperPromptVersion: true, status: true },
       },
     },
   })) as unknown as ScopedTopic[];
@@ -177,17 +178,22 @@ export async function loadScopedTopics(prisma: PrismaService, scope: { topicId?:
   return { all, totalTopics };
 }
 
+/**
+ * Mirrors assignmentIdentityMatches() in topic-grounding-assignment.util.ts:
+ * an AI_MAPPER row is checked against mapperPromptVersion only, a
+ * deterministic-method row against DETERMINISTIC_ASSIGNMENT_VERSION only.
+ * Kept as a local, DB-shape-specific mirror (rather than importing the util
+ * function directly) because this script's ScopedTopic select omits fields
+ * (matchedConceptNames/matchedHintTitles) that the shared type requires but
+ * this dry-run report never needs.
+ */
 function identityValid(topic: ScopedTopic): boolean {
   const a = topic.groundingAssignment;
   const u = topic.unit;
-  return (
-    !!a &&
-    u.groundingVersion !== null &&
-    u.groundingSourceFingerprint !== null &&
-    a.unitGroundingVersion === u.groundingVersion &&
-    a.unitSourceFingerprint === u.groundingSourceFingerprint &&
-    a.assignmentVersion === TOPIC_GROUNDING_ASSIGNMENT_VERSION
-  );
+  if (!a || u.groundingVersion === null || u.groundingSourceFingerprint === null) return false;
+  if (a.unitGroundingVersion !== u.groundingVersion || a.unitSourceFingerprint !== u.groundingSourceFingerprint) return false;
+  if (a.method === "AI_MAPPER") return a.mapperPromptVersion === MAPPER_PROMPT_VERSION;
+  return a.assignmentVersion === DETERMINISTIC_ASSIGNMENT_VERSION;
 }
 
 /** Dry-run classification only — pure, DB-free, makes zero writes/provider calls. */

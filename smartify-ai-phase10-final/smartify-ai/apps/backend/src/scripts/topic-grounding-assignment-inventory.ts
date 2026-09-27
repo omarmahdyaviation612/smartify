@@ -12,7 +12,7 @@
 import "dotenv/config";
 import { prisma as prismaClient } from "@smartify/database";
 import { computeDeterministicAssignment, type AssignmentTopic } from "../ai/context/topic-grounding-assignment.service";
-import { TOPIC_GROUNDING_ASSIGNMENT_VERSION } from "../ai/context/topic-grounding-assignment.util";
+import { DETERMINISTIC_ASSIGNMENT_VERSION, MAPPER_PROMPT_VERSION } from "../ai/context/topic-grounding-assignment.util";
 import type { GroundingNotes } from "../interactive-lesson/unit-grounding/unit-grounding.types";
 
 const EXCLUDED_SUBJECT_ID = "cmucxcuf700gf2qd5t5q38tcx"; // BRITISH_INTL Year 6 English — SOURCE_FILE_MISMATCH, hard-excluded everywhere
@@ -39,6 +39,7 @@ async function main() {
                 unitSourceFingerprint: true,
                 assignmentVersion: true,
                 method: true,
+                mapperPromptVersion: true,
                 status: true,
                 confidence: true,
               },
@@ -95,7 +96,7 @@ async function main() {
           !!a &&
           a.unitGroundingVersion === unit.groundingVersion &&
           a.unitSourceFingerprint === unit.groundingSourceFingerprint &&
-          a.assignmentVersion === TOPIC_GROUNDING_ASSIGNMENT_VERSION;
+          (a.method === "AI_MAPPER" ? a.mapperPromptVersion === MAPPER_PROMPT_VERSION : a.assignmentVersion === DETERMINISTIC_ASSIGNMENT_VERSION);
 
         if (a && identityValid) {
           assignmentRowsPresentValid++;

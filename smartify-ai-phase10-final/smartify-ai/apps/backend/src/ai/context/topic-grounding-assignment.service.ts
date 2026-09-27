@@ -2,7 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { GroundingNotes } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
 import { selectRelevantGrounding } from "./grounding-selector.util";
-import { TOPIC_GROUNDING_ASSIGNMENT_VERSION } from "./topic-grounding-assignment.util";
+import { DETERMINISTIC_ASSIGNMENT_VERSION, MAPPER_PROMPT_VERSION } from "./topic-grounding-assignment.util";
 
 /**
  * The WRITE side of the persisted Topic->grounding assignment (2026-09-27) —
@@ -342,25 +342,67 @@ export class TopicGroundingAssignmentService {
     }
 
     const existing = topic.groundingAssignment;
-    if (
-      existing &&
-      existing.unitGroundingVersion === unit.groundingVersion &&
-      existing.unitSourceFingerprint === unit.groundingSourceFingerprint &&
-      existing.assignmentVersion === TOPIC_GROUNDING_ASSIGNMENT_VERSION
-    ) {
-      // Idempotent no-op: identity matches on all three axes, so the persisted
-      // decision is still valid. Nothing is recomputed and nothing is written.
+    const notes = unit.groundingNotesJson as unknown as GroundingNotes;
+    const siblings = unit.topics.map((t) => ({ id: t.id, nameEn: t.nameEn, order: t.order }));
+
+    const factualIdentityMatches =
+      !!existing && existing.unitGroundingVersion === unit.groundingVersion && existing.unitSourceFingerprint === unit.groundingSourceFingerprint;
+
+    if (existing && factualIdentityMatches && existing.method === "AI_MAPPER") {
+      // AI_MAPPER rows are governed by their OWN mapperPromptVersion axis, not
+      // by DETERMINISTIC_ASSIGNMENT_VERSION — see assignmentIdentityMatches in
+      // topic-grounding-assignment.util.ts for why conflating the two axes
+      // was the production reliability bug this split fixes (a purely
+      // deterministic version bump must never force-recompute — and
+      // re-sample, since the mapper is stochastic — an unrelated, already
+      // validated AI_MAPPER row).
+      if (existing.mapperPromptVersion === MAPPER_PROMPT_VERSION) {
+        // Opportunistic, FREE upgrade check: deterministic Steps 1-5 are
+        // pure/DB-free, so re-running them here costs nothing (no LLM call,
+        // no budget spend). If an IMPROVED deterministic pass can now resolve
+        // this Topic on its own, that is strictly better than a stochastic
+        // mapper result and replaces it. If deterministic still declines
+        // (the common case), the existing validated AI_MAPPER row is left
+        // completely untouched — no recompute, no re-invocation, no
+        // re-sampling risk.
+        const prior = await this.loadPriorAssignments(unit.id, unit.groundingVersion, unit.groundingSourceFingerprint, topicId);
+        const upgraded = computeDeterministicAssignment(notes, { id: topic.id, nameEn: topic.nameEn, order: topic.order }, siblings, prior);
+        if (upgraded) {
+          await this.upsert({
+            topicId,
+            unitGroundingVersion: unit.groundingVersion,
+            unitSourceFingerprint: unit.groundingSourceFingerprint,
+            method: upgraded.method,
+            confidence: upgraded.confidence,
+            status: "READY",
+            matchedConceptNames: upgraded.matchedConceptNames,
+            matchedHintTitles: upgraded.matchedHintTitles,
+            reason: upgraded.reason,
+          });
+          this.logger.log(
+            JSON.stringify({ event: "TOPIC_GROUNDING_ASSIGNMENT_UPGRADED_FROM_MAPPER", topicId, unitId: unit.id, method: upgraded.method }),
+          );
+          return { outcome: "ASSIGNED", method: upgraded.method, status: "READY" };
+        }
+        return { outcome: "UNCHANGED", method: "AI_MAPPER", status: existing.status as "READY" | "BLOCKED" };
+      }
+      // mapperPromptVersion is stale: fall through to the normal deterministic
+      // pass below, exactly as if there were no existing row — if Steps 1-5
+      // still decline, this Topic becomes UNRESOLVED and is correctly
+      // eligible for the (corrected) mapper to re-run.
+    } else if (existing && factualIdentityMatches && existing.assignmentVersion === DETERMINISTIC_ASSIGNMENT_VERSION) {
+      // Idempotent no-op for a deterministic-method row: identity matches on
+      // both axes, so the persisted decision is still valid. Nothing is
+      // recomputed and nothing is written.
       return { outcome: "UNCHANGED", method: existing.method as DeterministicMethod | "AI_MAPPER", status: existing.status as "READY" | "BLOCKED" };
     }
 
-    const notes = unit.groundingNotesJson as unknown as GroundingNotes;
-    const siblings = unit.topics.map((t) => ({ id: t.id, nameEn: t.nameEn, order: t.order }));
     const prior = await this.loadPriorAssignments(unit.id, unit.groundingVersion, unit.groundingSourceFingerprint, topicId);
 
     const assignment = computeDeterministicAssignment(notes, { id: topic.id, nameEn: topic.nameEn, order: topic.order }, siblings, prior);
     if (!assignment) {
       this.logger.log(
-        JSON.stringify({ event: "TOPIC_GROUNDING_ASSIGNMENT_UNRESOLVED", topicId, unitId: unit.id, topicTitle: topic.nameEn, assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION }),
+        JSON.stringify({ event: "TOPIC_GROUNDING_ASSIGNMENT_UNRESOLVED", topicId, unitId: unit.id, topicTitle: topic.nameEn, assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION }),
       );
       return { outcome: "UNRESOLVED", reason: "Deterministic Steps 1-5 found no assignment — eligible for the bounded AI mapper." };
     }
@@ -384,7 +426,7 @@ export class TopicGroundingAssignmentService {
         unitId: unit.id,
         method: assignment.method,
         conceptCount: assignment.matchedConceptNames.length,
-        assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION,
+        assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION,
       }),
     );
     return { outcome: "ASSIGNED", method: assignment.method, status: "READY" };
@@ -399,7 +441,7 @@ export class TopicGroundingAssignmentService {
         status: "READY",
         unitGroundingVersion: groundingVersion,
         unitSourceFingerprint: fingerprint,
-        assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION,
+        assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION,
       },
       select: { topicId: true, matchedConceptNames: true },
     });
@@ -416,7 +458,7 @@ export class TopicGroundingAssignmentService {
     const data = {
       unitGroundingVersion: input.unitGroundingVersion,
       unitSourceFingerprint: input.unitSourceFingerprint,
-      assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION,
+      assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION,
       method: input.method as any,
       confidence: input.confidence as any,
       status: input.status as any,

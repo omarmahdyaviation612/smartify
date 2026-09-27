@@ -61,16 +61,35 @@ describe("dryRunOne — pure classification, zero writes/provider calls by const
 
   it("an existing valid READY row is counted under alreadyReady by its method, not reprocessed", () => {
     const report = emptyReport();
-    dryRunOne(makeTopic({ groundingAssignment: { unitGroundingVersion: 1, unitSourceFingerprint: "fp-1", assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION, method: "HINT_MATCH", status: "READY" } }), report);
+    dryRunOne(makeTopic({ groundingAssignment: { unitGroundingVersion: 1, unitSourceFingerprint: "fp-1", assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION, method: "HINT_MATCH", mapperPromptVersion: null, status: "READY" } }), report);
     expect(report.alreadyReady["HINT_MATCH"]).toBe(1);
     expect(Object.keys(report.deterministicAssigned)).toHaveLength(0);
   });
 
   it("a stale-identity row (fingerprint mismatch) is recomputed and counted as staleRecomputed, deterministically resolvable here", () => {
     const report = emptyReport();
-    dryRunOne(makeTopic({ groundingAssignment: { unitGroundingVersion: 1, unitSourceFingerprint: "OLD-fp", assignmentVersion: 1, method: "HINT_MATCH", status: "READY" } }), report);
+    dryRunOne(makeTopic({ groundingAssignment: { unitGroundingVersion: 1, unitSourceFingerprint: "OLD-fp", assignmentVersion: 1, method: "HINT_MATCH", mapperPromptVersion: null, status: "READY" } }), report);
     expect(report.staleRecomputed).toBe(1);
     expect(report.deterministicAssigned["HINT_MATCH"]).toBe(1);
+  });
+
+  it("an existing valid AI_MAPPER row is counted under alreadyReady and NOT recomputed when only the deterministic axis is stale (production bug regression)", () => {
+    const report = emptyReport();
+    dryRunOne(
+      makeTopic({
+        groundingAssignment: {
+          unitGroundingVersion: 1,
+          unitSourceFingerprint: "fp-1",
+          assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION - 1,
+          method: "AI_MAPPER",
+          mapperPromptVersion: 1,
+          status: "READY",
+        },
+      }),
+      report,
+    );
+    expect(report.alreadyReady["AI_MAPPER"]).toBe(1);
+    expect(report.staleRecomputed).toBe(0);
   });
 
   it("a missing row that deterministic Steps 1-5 cannot resolve counts as aiMapperRequired", () => {

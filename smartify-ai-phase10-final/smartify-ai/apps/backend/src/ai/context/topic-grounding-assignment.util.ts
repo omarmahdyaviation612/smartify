@@ -37,21 +37,69 @@ import type { GroundingNotes, GroundingSlice } from "../../interactive-lesson/un
  * accepts a verbatim `notes.vocabulary[].term` match (still exact,
  * character-for-character — only the POOL widened), and `sliceFromAssignment`
  * below now resolves such a persisted name back to real vocabulary content
- * (previously it would silently resolve to nothing). This is exactly "the
- * mapper itself changes" per the BLOCKED-row design note above: every
- * previously-persisted AI_MAPPER row (READY or BLOCKED) must be invalidated
- * so it is recomputed against the corrected validation on the next
- * preparation run — deterministic Steps 1-5 themselves are unchanged by this
- * fix, but their rows share the same assignmentVersion axis and are
- * harmlessly recomputed to the identical result.
+ * (previously it would silently resolve to nothing).
+ *
+ * ---------------------------------------------------------------------------
+ * 2026-09-27 (later same day) — SPLIT INTO TWO INDEPENDENT ALGORITHM AXES
+ * ---------------------------------------------------------------------------
+ * The single version above used to gate BOTH the deterministic Steps 1-5 AND
+ * the AI mapper's own logic. In production this caused a real reliability
+ * bug: the 1->2 bump (a purely deterministic Step 4 pattern change, see
+ * ASSESSMENT_SHELL_TITLE_PATTERN in topic-grounding-assignment.service.ts)
+ * never touched `validateMapperResponse` or the mapper prompt at all, yet it
+ * invalidated every persisted `AI_MAPPER` row too — forcing ~48 paid,
+ * stochastic LLM re-invocations that had nothing to do with the change, and
+ * because the mapper is stochastic, some previously-READY Topics randomly
+ * flipped to BLOCKED on re-sampling. The 2->3 bump above, by contrast,
+ * genuinely DID change mapper validation and correctly needed to invalidate
+ * AI_MAPPER rows — that bump was right; the mechanism was too coarse.
+ *
+ * `DETERMINISTIC_ASSIGNMENT_VERSION` (renamed from
+ * `TOPIC_GROUNDING_ASSIGNMENT_VERSION`, old name kept as a compatibility
+ * alias below) now governs ONLY deterministic-method rows (HINT_MATCH,
+ * KEYWORD_OVERLAP, SINGLE_TOPIC_FALLBACK, REVIEW_FULL_UNIT, PAGE_ORDER_GAP).
+ * `AI_MAPPER` rows are governed instead by the mapper's OWN, already-existing
+ * per-row `mapperPromptVersion` field against `MAPPER_PROMPT_VERSION` (also
+ * re-exported here so both the read util and the write service/mapper share
+ * one definition without a circular import — this file has no dependency on
+ * either service). A deterministic-only version bump therefore never
+ * revisits an AI_MAPPER row's mapper-identity validity, and a mapper-only
+ * version bump never revisits a deterministic row's validity — each row is
+ * checked only against the axis that actually produced it, on top of the
+ * Unit factual-identity check (`unitGroundingVersion`/
+ * `unitSourceFingerprint`), which unconditionally invalidates BOTH kinds of
+ * row exactly as before: re-grounding a Unit always invalidates everything
+ * under it, regardless of algorithm version.
+ *
+ * No data migration was required: `assignmentVersion` keeps its existing
+ * column and existing persisted values (1, 2 or 3) are untouched — the
+ * change is purely in what is CHECKED, not what is stored. See
+ * `assignGroundingForTopic` (topic-grounding-assignment.service.ts) for the
+ * companion write-side decision: whether a stale-for-mapper-purposes
+ * AI_MAPPER row should ever be opportunistically re-derived by an IMPROVED
+ * deterministic pass without re-invoking the paid mapper.
  */
-export const TOPIC_GROUNDING_ASSIGNMENT_VERSION = 3;
+export const DETERMINISTIC_ASSIGNMENT_VERSION = 3;
+/** @deprecated Use `DETERMINISTIC_ASSIGNMENT_VERSION`. Kept so any external/tooling import of the old name keeps compiling. */
+export const TOPIC_GROUNDING_ASSIGNMENT_VERSION = DETERMINISTIC_ASSIGNMENT_VERSION;
+
+/**
+ * Bumped whenever the AI mapper's prompt or response-validation behavior
+ * changes (mirrors `MAPPER_PROMPT_VERSION` in topic-grounding-mapper.service.ts
+ * — defined here, the shared dependency-free layer, and re-exported from
+ * there, to avoid a circular import between the read util and the mapper
+ * service). Governs ONLY `AI_MAPPER`-method rows; deterministic rows never
+ * check this value.
+ */
+export const MAPPER_PROMPT_VERSION = 1;
 
 /** The minimal persisted-row shape the read path needs (a structural subset of Prisma's TopicGroundingAssignment). */
 export interface PersistedTopicGroundingAssignment {
   unitGroundingVersion: number;
   unitSourceFingerprint: string;
   assignmentVersion: number;
+  method: string;
+  mapperPromptVersion: number | null;
   status: "READY" | "BLOCKED";
   matchedConceptNames: unknown;
   matchedHintTitles: unknown;
@@ -76,18 +124,27 @@ function asStringArray(value: unknown): string[] {
 }
 
 /**
- * Both the Unit grounding's identity AND the assignment algorithm's own
- * version must match for a persisted row to be trusted. A Unit that was never
- * successfully grounded (null version/fingerprint) can never match — there is
- * nothing to reconstruct a slice from.
+ * The Unit grounding's factual identity ALWAYS gates trust (a re-grounded
+ * Unit invalidates everything under it, unconditionally). Which ALGORITHM
+ * axis additionally gates trust depends on which method produced the row:
+ * an `AI_MAPPER` row is checked against `mapperPromptVersion` only (the
+ * mapper's own, independently-versioned axis); every deterministic-method
+ * row is checked against `DETERMINISTIC_ASSIGNMENT_VERSION` only. Neither
+ * axis is cross-checked against the other's rows — see the version-history
+ * comment above `DETERMINISTIC_ASSIGNMENT_VERSION` for why that used to be a
+ * production reliability bug. A Unit that was never successfully grounded
+ * (null version/fingerprint) can never match — there is nothing to
+ * reconstruct a slice from.
  */
 export function assignmentIdentityMatches(assignment: PersistedTopicGroundingAssignment, unit: AssignmentUnitIdentity): boolean {
   if (unit.groundingVersion === null || unit.groundingSourceFingerprint === null) return false;
-  return (
-    assignment.unitGroundingVersion === unit.groundingVersion &&
-    assignment.unitSourceFingerprint === unit.groundingSourceFingerprint &&
-    assignment.assignmentVersion === TOPIC_GROUNDING_ASSIGNMENT_VERSION
-  );
+  if (assignment.unitGroundingVersion !== unit.groundingVersion || assignment.unitSourceFingerprint !== unit.groundingSourceFingerprint) {
+    return false;
+  }
+  if (assignment.method === "AI_MAPPER") {
+    return assignment.mapperPromptVersion === MAPPER_PROMPT_VERSION;
+  }
+  return assignment.assignmentVersion === DETERMINISTIC_ASSIGNMENT_VERSION;
 }
 
 /**

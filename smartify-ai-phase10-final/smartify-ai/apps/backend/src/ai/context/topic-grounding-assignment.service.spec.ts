@@ -1,6 +1,8 @@
 import { computeDeterministicAssignment, TopicGroundingAssignmentService } from "./topic-grounding-assignment.service";
 import {
   TOPIC_GROUNDING_ASSIGNMENT_VERSION,
+  DETERMINISTIC_ASSIGNMENT_VERSION,
+  MAPPER_PROMPT_VERSION,
   assignmentIdentityMatches,
   resolveAssignedGroundingSlice,
   sliceFromAssignment,
@@ -221,13 +223,15 @@ describe("assignment identity", () => {
   const row: PersistedTopicGroundingAssignment = {
     unitGroundingVersion: 2,
     unitSourceFingerprint: "fp-abc",
-    assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION,
+    assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION,
+    method: "HINT_MATCH",
+    mapperPromptVersion: null,
     status: "READY",
     matchedConceptNames: ["Roots"],
     matchedHintTitles: null,
   };
 
-  it("matches when all three axes agree", () => {
+  it("matches when factual identity and the deterministic axis agree", () => {
     expect(assignmentIdentityMatches(row, { groundingVersion: 2, groundingSourceFingerprint: "fp-abc" })).toBe(true);
   });
 
@@ -239,12 +243,47 @@ describe("assignment identity", () => {
     expect(assignmentIdentityMatches(row, { groundingVersion: 2, groundingSourceFingerprint: "fp-different" })).toBe(false);
   });
 
-  it("invalidates when the assignmentVersion changes (assignment-logic-only bump)", () => {
-    expect(assignmentIdentityMatches({ ...row, assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION + 1 }, { groundingVersion: 2, groundingSourceFingerprint: "fp-abc" })).toBe(false);
+  it("invalidates a deterministic-method row when DETERMINISTIC_ASSIGNMENT_VERSION changes (assignment-logic-only bump)", () => {
+    expect(assignmentIdentityMatches({ ...row, assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION + 1 }, { groundingVersion: 2, groundingSourceFingerprint: "fp-abc" })).toBe(false);
   });
 
   it("never matches a Unit that was never successfully grounded", () => {
     expect(assignmentIdentityMatches(row, { groundingVersion: null, groundingSourceFingerprint: null })).toBe(false);
+  });
+
+  // --- The bug fix under test: split algorithm axes per method ---
+
+  const mapperRow: PersistedTopicGroundingAssignment = {
+    unitGroundingVersion: 2,
+    unitSourceFingerprint: "fp-abc",
+    assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION,
+    method: "AI_MAPPER",
+    mapperPromptVersion: MAPPER_PROMPT_VERSION,
+    status: "READY",
+    matchedConceptNames: ["Roots"],
+    matchedHintTitles: null,
+  };
+
+  it("an AI_MAPPER row stays valid when DETERMINISTIC_ASSIGNMENT_VERSION changes but mapperPromptVersion and factual identity are unchanged (the production bug this fixes)", () => {
+    const bumped = { ...mapperRow, assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION + 1 };
+    expect(assignmentIdentityMatches(bumped, { groundingVersion: 2, groundingSourceFingerprint: "fp-abc" })).toBe(true);
+  });
+
+  it("an AI_MAPPER row is invalidated when mapperPromptVersion changes, even if the deterministic axis is untouched", () => {
+    const stale = { ...mapperRow, mapperPromptVersion: MAPPER_PROMPT_VERSION - 1 };
+    expect(assignmentIdentityMatches(stale, { groundingVersion: 2, groundingSourceFingerprint: "fp-abc" })).toBe(false);
+  });
+
+  it("a deterministic-method row is NOT affected by mapperPromptVersion at all (it is never even consulted)", () => {
+    const detWithStaleMapperField = { ...row, mapperPromptVersion: -999 };
+    expect(assignmentIdentityMatches(detWithStaleMapperField, { groundingVersion: 2, groundingSourceFingerprint: "fp-abc" })).toBe(true);
+  });
+
+  it("a Unit factual-identity change unconditionally invalidates BOTH a deterministic row and an AI_MAPPER row", () => {
+    expect(assignmentIdentityMatches(row, { groundingVersion: 99, groundingSourceFingerprint: "fp-abc" })).toBe(false);
+    expect(assignmentIdentityMatches(mapperRow, { groundingVersion: 99, groundingSourceFingerprint: "fp-abc" })).toBe(false);
+    expect(assignmentIdentityMatches(row, { groundingVersion: 2, groundingSourceFingerprint: "fp-changed" })).toBe(false);
+    expect(assignmentIdentityMatches(mapperRow, { groundingVersion: 2, groundingSourceFingerprint: "fp-changed" })).toBe(false);
   });
 });
 
@@ -253,6 +292,8 @@ describe("sliceFromAssignment / resolveAssignedGroundingSlice", () => {
     unitGroundingVersion: 1,
     unitSourceFingerprint: "fp",
     assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION,
+    method: "HINT_MATCH",
+    mapperPromptVersion: null,
     status: "READY",
     matchedConceptNames: ["Roots"],
     matchedHintTitles: ["Parts of a Plant"],
@@ -296,6 +337,8 @@ describe("sliceFromAssignment / resolveAssignedGroundingSlice", () => {
     unitGroundingVersion: 1,
     unitSourceFingerprint: "fp",
     assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION,
+    method: "AI_MAPPER",
+    mapperPromptVersion: MAPPER_PROMPT_VERSION,
     status: "READY",
     matchedConceptNames: ["Root"], // verbatim in hintUnit.vocabulary, NOT in hintUnit.concepts
     matchedHintTitles: [],
@@ -412,5 +455,152 @@ describe("TopicGroundingAssignmentService.assignGroundingForTopic", () => {
     const { service, upsert } = buildService({ id: "t1", nameEn: "Parts of a Plant", order: 1, groundingAssignment: null, unit });
     expect((await service.assignGroundingForTopic("t1")).outcome).toBe("NOT_GROUNDED");
     expect(upsert).not.toHaveBeenCalled();
+  });
+
+  // --- Regression coverage for the algorithm-identity split (production bug fix) ---
+
+  // A Topic the deterministic pass genuinely cannot resolve (mirrors "The
+  // Lost Kite (Reading)" from the UNRESOLVED test above) with a previously
+  // persisted, still-valid AI_MAPPER row.
+  const unresolvableUnit = {
+    id: "u2",
+    groundingNotesJson: keywordUnit,
+    groundingVersion: 1,
+    groundingSourceFingerprint: "fp",
+    topics: [
+      { id: "t1", nameEn: "Roots and Stem", order: 1 },
+      { id: "t2", nameEn: "Volcanoes", order: 2 },
+      { id: "t3", nameEn: "The Lost Kite (Reading)", order: 3 },
+    ],
+  };
+
+  it("a deterministic-only DETERMINISTIC_ASSIGNMENT_VERSION bump does NOT invalidate/recompute an existing valid AI_MAPPER row (the production bug: unrelated bumps must never force a stochastic re-sample)", async () => {
+    const existingMapperRow = {
+      method: "AI_MAPPER",
+      status: "READY",
+      unitGroundingVersion: 1,
+      unitSourceFingerprint: "fp",
+      assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION - 1, // stale on the deterministic axis only
+      mapperPromptVersion: MAPPER_PROMPT_VERSION, // current on the mapper axis
+    };
+    const { service, upsert } = buildService({
+      id: "t3",
+      nameEn: "The Lost Kite (Reading)",
+      order: 3,
+      groundingAssignment: existingMapperRow,
+      unit: unresolvableUnit,
+    });
+    const outcome = await service.assignGroundingForTopic("t3");
+    expect(outcome).toEqual({ outcome: "UNCHANGED", method: "AI_MAPPER", status: "READY" });
+    // Steps 1-5 are re-run in-memory (free, DB-free) to check for an
+    // opportunistic upgrade — they still decline here, so nothing is written
+    // and the existing validated AI_MAPPER row is left completely untouched.
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("a mapperPromptVersion bump DOES correctly invalidate an existing AI_MAPPER row (this fix must not regress the validation-bug fix that legitimately needed it)", async () => {
+    const existingMapperRow = {
+      method: "AI_MAPPER",
+      status: "READY",
+      unitGroundingVersion: 1,
+      unitSourceFingerprint: "fp",
+      assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION,
+      mapperPromptVersion: MAPPER_PROMPT_VERSION - 1, // stale on the mapper axis
+    };
+    const { service, upsert } = buildService({
+      id: "t3",
+      nameEn: "The Lost Kite (Reading)",
+      order: 3,
+      groundingAssignment: existingMapperRow,
+      unit: unresolvableUnit,
+    });
+    const outcome = await service.assignGroundingForTopic("t3");
+    // Deterministic Steps 1-5 still can't resolve it, so it correctly falls
+    // through to UNRESOLVED — eligible for the (corrected) mapper to re-run.
+    expect(outcome.outcome).toBe("UNRESOLVED");
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("a Unit factual-identity change (re-grounding) invalidates an AI_MAPPER row unconditionally, regardless of mapperPromptVersion", async () => {
+    const existingMapperRow = {
+      method: "AI_MAPPER",
+      status: "READY",
+      unitGroundingVersion: 1,
+      unitSourceFingerprint: "fp",
+      assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION,
+      mapperPromptVersion: MAPPER_PROMPT_VERSION,
+    };
+    const regroundedUnit = { ...unresolvableUnit, groundingVersion: 2, groundingSourceFingerprint: "fp-new" };
+    const { service, upsert } = buildService({
+      id: "t3",
+      nameEn: "The Lost Kite (Reading)",
+      order: 3,
+      groundingAssignment: existingMapperRow,
+      unit: regroundedUnit,
+    });
+    const outcome = await service.assignGroundingForTopic("t3");
+    expect(outcome.outcome).toBe("UNRESOLVED");
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("a Unit factual-identity change also still invalidates a deterministic-method row (existing behavior, must not regress)", async () => {
+    const existingDetRow = {
+      method: "HINT_MATCH",
+      status: "READY",
+      unitGroundingVersion: 1,
+      unitSourceFingerprint: "fp",
+      assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION,
+      mapperPromptVersion: null,
+    };
+    const regroundedUnit = { ...groundedUnit, groundingVersion: 2, groundingSourceFingerprint: "fp-new" };
+    const { service, upsert } = buildService({ id: "t1", nameEn: "Parts of a Plant", order: 1, groundingAssignment: existingDetRow, unit: regroundedUnit });
+    const outcome = await service.assignGroundingForTopic("t1");
+    expect(outcome).toEqual({ outcome: "ASSIGNED", method: "HINT_MATCH", status: "READY" });
+    expect(upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("a deterministic-only version bump still DOES cause a deterministic-method row to be recomputed (existing behavior, must not regress)", async () => {
+    const existingDetRow = {
+      method: "HINT_MATCH",
+      status: "READY",
+      unitGroundingVersion: 1,
+      unitSourceFingerprint: "fp",
+      assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION - 1,
+      mapperPromptVersion: null,
+    };
+    const { service, upsert } = buildService({ id: "t1", nameEn: "Parts of a Plant", order: 1, groundingAssignment: existingDetRow, unit: groundedUnit });
+    const outcome = await service.assignGroundingForTopic("t1");
+    expect(outcome).toEqual({ outcome: "ASSIGNED", method: "HINT_MATCH", status: "READY" });
+    expect(upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("DECISION: an existing AI_MAPPER row is opportunistically (and for free) upgraded to a deterministic result when an IMPROVED deterministic pass can now resolve the Topic on its own — the mapper is never re-invoked for this, only the pure/DB-free deterministic steps", async () => {
+    // A previously mapper-resolved Topic whose title now matches the newer
+    // REVIEW_FULL_UNIT structural pattern (Step 4) — simulating "deterministic
+    // logic improved after this row was mapper-derived".
+    const existingMapperRow = {
+      method: "AI_MAPPER",
+      status: "READY",
+      unitGroundingVersion: 1,
+      unitSourceFingerprint: "fp",
+      assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION - 1,
+      mapperPromptVersion: MAPPER_PROMPT_VERSION,
+    };
+    const reviewUnit = {
+      id: "u3",
+      groundingNotesJson: isolatedGapUnit,
+      groundingVersion: 1,
+      groundingSourceFingerprint: "fp",
+      topics: [
+        { id: "t1", nameEn: "Addition Facts", order: 1 },
+        { id: "t2", nameEn: "Taking Away", order: 2 },
+        { id: "t3", nameEn: "Unit 3 Review", order: 3 },
+      ],
+    };
+    const { service, upsert } = buildService({ id: "t3", nameEn: "Unit 3 Review", order: 3, groundingAssignment: existingMapperRow, unit: reviewUnit });
+    const outcome = await service.assignGroundingForTopic("t3");
+    expect(outcome).toEqual({ outcome: "ASSIGNED", method: "REVIEW_FULL_UNIT", status: "READY" });
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(upsert.mock.calls[0][0].create.method).toBe("REVIEW_FULL_UNIT");
   });
 });

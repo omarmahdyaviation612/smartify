@@ -5,6 +5,7 @@ import { AIUsageService } from "../usage/ai-usage.service";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../content-authoring-actor.const";
 import type { GroundingNotes } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
 import { TopicGroundingAssignmentService, computeDeterministicAssignment } from "./topic-grounding-assignment.service";
+import { MAPPER_PROMPT_VERSION } from "./topic-grounding-assignment.util";
 
 /**
  * The bounded AI mapper — the LAST resort for a Topic whose grounding
@@ -32,8 +33,13 @@ import { TopicGroundingAssignmentService, computeDeterministicAssignment } from 
  * never usable as grounding.
  */
 
-/** Bumped whenever this prompt or the mapper's behavior changes. */
-export const MAPPER_PROMPT_VERSION = 1;
+/**
+ * Bumped whenever this prompt or the mapper's behavior changes. Defined in
+ * topic-grounding-assignment.util.ts (the shared, dependency-free layer both
+ * this service and the read path use) and re-exported here so existing
+ * imports of `MAPPER_PROMPT_VERSION` from this module keep compiling.
+ */
+export { MAPPER_PROMPT_VERSION };
 
 const MAPPER_SYSTEM_PROMPT_HEADER = `You are a curriculum librarian assigning ONE lesson Topic to the already-extracted study notes of the textbook Unit it belongs to.
 
