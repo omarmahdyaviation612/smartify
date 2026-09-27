@@ -12,7 +12,8 @@ import { describeExpectedAnswer, describeOperands, tryDeterministicValidate } fr
 import type { ActiveMathProblem, CheckExpression, StepResult, TeachingStep } from "./interactive-lesson.types";
 import { deriveRequestedMathVisual, validateVisualInstruction } from "../tutor/visual-instruction.util";
 import type { VisualInstruction } from "@smartify/shared-types";
-import { decideStrategySwitch, getCurrentStrategy, strategyGuidance } from "./teaching-strategy.util";
+import { decideStrategySwitch, getCurrentStrategy, isMathSubject, strategyGuidance } from "./teaching-strategy.util";
+import { assignedGroundingSliceOrNull } from "../ai/context/topic-grounding-assignment.util";
 
 const MAX_HINTS_BEFORE_FORCED_RESOLUTION = 1;
 
@@ -66,7 +67,13 @@ export class InteractiveLessonService {
   private async getTopicOrThrow(topicId: string) {
     const topic = await this.prisma.client.topic.findUnique({
       where: { id: topicId },
-      include: { unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
+      include: {
+        // 2026-09-27: the Topic's PERSISTED grounding assignment is loaded in
+        // the SAME query the runtime teaching path already makes — no extra
+        // round trip, and no live relevance inference.
+        groundingAssignment: true,
+        unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } }, _count: { select: { topics: true } } } },
+      },
     });
     if (!topic || !topic.teachingStepsJson) {
       throw new NotFoundException("This lesson is not available as an interactive lesson yet.");
@@ -76,6 +83,29 @@ export class InteractiveLessonService {
 
   private getSteps(topic: { teachingStepsJson: unknown }): TeachingStep[] {
     return topic.teachingStepsJson as unknown as TeachingStep[];
+  }
+
+  /**
+   * 2026-09-26 factual-provenance fix: the SAME Topic-scoped grounding
+   * `buildAutoLessonGenerationPrompt` used to plan this lesson at authoring
+   * time — since 2026-09-27 that is the PERSISTED TopicGroundingAssignment
+   * (topic-grounding-assignment.util.ts), so authoring and runtime teaching
+   * can no longer drift apart. Still a pure, deterministic function over data
+   * `getTopicOrThrow` already fetched via its own include — never a new query,
+   * never an AI/grounding/mapper call. A missing/stale/BLOCKED assignment
+   * yields null, exactly like an unmatched selection always did.
+   * Threaded into every runtime LessonTeachingContext so the model can tell
+   * a textbook-supported named example from one it would otherwise invent.
+   */
+  private topicGroundingSlice(topic: {
+    groundingAssignment?: unknown;
+    unit: { groundingNotesJson: unknown; groundingVersion?: number | null; groundingSourceFingerprint?: string | null };
+  }) {
+    return assignedGroundingSliceOrNull(topic.groundingAssignment as any, {
+      groundingVersion: topic.unit.groundingVersion ?? null,
+      groundingSourceFingerprint: topic.unit.groundingSourceFingerprint ?? null,
+      groundingNotesJson: topic.unit.groundingNotesJson as any,
+    });
   }
 
   /**
@@ -90,13 +120,31 @@ export class InteractiveLessonService {
    * this path — see LessonPublishService.autoPublishIntoTopic's doc
    * comment for the tradeoff this accepts.
    */
-  private async ensureTopicHasSteps(topicId: string, profile: { userId: string; preferredLang?: string; age?: number }) {
+  private async ensureTopicHasSteps(topicId: string, profile: { userId: string; preferredLang?: string; age?: number }): Promise<any> {
     const existing = await this.prisma.client.topic.findUnique({
       where: { id: topicId },
       include: { unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
     });
     if (!existing) throw new NotFoundException("This lesson is not available as an interactive lesson yet.");
     if (existing.teachingStepsJson) return existing;
+
+    const preparation = typeof (this.draftGenerator as any).prepareTopicGrounding === "function"
+      ? await (this.draftGenerator as any).prepareTopicGrounding(topicId, profile.userId)
+      : { status: "READY" as const };
+    if (preparation.status !== "READY") {
+      if (preparation.status === "CONFIGURATION_ERROR") throw new ServiceUnavailableException("This lesson is not available yet.");
+      // 2026-09-26 provider-outage hotfix: same generic, safe, student-facing
+      // message as CONFIGURATION_ERROR — but nothing is persisted for this
+      // Unit (see UnitGroundingService's PROVIDER_OUTAGE branch), so a later
+      // request during/after the outage is fully retryable, never stuck.
+      // Stops THIS request's polling immediately rather than looping.
+      if (preparation.status === "PROVIDER_OUTAGE") throw new ServiceUnavailableException("This lesson is not available yet.");
+      // "stage" is purely informational UX sugar for the frontend's waiting
+      // copy (see LessonState.preparation.stage) — it reflects real,
+      // already-computed state (whether textbook grounding itself is still
+      // in progress) and never changes what work actually happens next.
+      return { __preparation: true as const, status: "PREPARING" as const, stage: "grounding" as const, retryAfterMs: preparation.retryAfterMs ?? 1500 };
+    }
 
     await this.draftGenerator.ensureTopicHasLesson(
       topicId,
@@ -313,6 +361,7 @@ export class InteractiveLessonService {
   async advance(userId: string, topicId: string) {
     const profile = await this.getProfileOrThrow(userId);
     const topic = await this.ensureTopicHasSteps(topicId, { userId, preferredLang: (profile as any).preferredLang, age: (profile as any).age });
+    if ((topic as any).__preparation) return topic;
     const steps = this.getSteps(topic);
     let session = await this.getOwnSession(profile, topicId);
 
@@ -385,7 +434,11 @@ export class InteractiveLessonService {
     // applies to the actual teaching content — EXPLAIN/EXAMPLE/CHECK —
     // not to framing steps (INTRO/REVIEW/COMPLETE), and only ever chosen
     // by deterministic code (teaching-strategy.util.ts), never the model.
-    const appliesStrategy = step.type === "EXPLAIN" || step.type === "EXAMPLE" || step.type === "CHECK";
+    // Production hotfix (2026-09-25): also gated on isMathSubject — the
+    // strategy system (CONCRETE_OBJECTS/NUMBER_LINE) is a Math-specific
+    // pedagogy pilot and must never apply to other subjects (a Science
+    // lesson was previously taught via "take 2 steps on a number line").
+    const appliesStrategy = isMathSubject(topic.unit.subject.nameEn) && (step.type === "EXPLAIN" || step.type === "EXAMPLE" || step.type === "CHECK");
     const currentStrategy = appliesStrategy ? getCurrentStrategy(stepResults) : undefined;
     const ctx: LessonTeachingContext = {
       studentFirstName: (profile as any).fullName?.split(" ")[0] ?? "there",
@@ -394,6 +447,7 @@ export class InteractiveLessonService {
       subjectNameEn: topic.unit.subject.nameEn,
       lessonTitleEn: topic.nameEn,
       currentStep: { type: step.type, objective: step.objective, conceptKey: step.conceptKey, checkType: step.checkType },
+      groundingSlice: this.topicGroundingSlice(topic),
       mode: "deliver",
       teachingStrategy: currentStrategy,
       teachingStrategyGuidance: currentStrategy ? strategyGuidance(currentStrategy) : undefined,
@@ -411,7 +465,7 @@ export class InteractiveLessonService {
     // to full AI-based conceptual grading (already fully supported), never
     // a bogus numeric answer key. Found 2026-09-19, user-confirmed ("بيدخل
     // ال math في ال science").
-    const allowExpression = /math/i.test(topic.unit.subject.nameEn);
+    const allowExpression = isMathSubject(topic.unit.subject.nameEn);
     const raw = await this.runLessonAI({
       userId: (profile as any).userId,
       profileId: profile.id,
@@ -607,6 +661,7 @@ export class InteractiveLessonService {
       subjectNameEn: topic.unit.subject.nameEn,
       lessonTitleEn: topic.nameEn,
       currentStep: { type: step.type, objective: step.objective, conceptKey: step.conceptKey, checkType: step.checkType },
+      groundingSlice: this.topicGroundingSlice(topic),
       mode: "narrate_check_result",
       checkOutcome,
       correctAnswerText: checkOutcome === "reveal" ? describeExpectedAnswer(expression) : undefined,
@@ -702,6 +757,7 @@ export class InteractiveLessonService {
       lessonTitleEn: topic.nameEn,
       currentStep: { type: step.type, objective: step.objective, conceptKey: step.conceptKey },
       activeMathProblem,
+      groundingSlice: this.topicGroundingSlice(topic),
       mode: "interrupt",
       studentMessage: message,
     };
@@ -732,7 +788,16 @@ export class InteractiveLessonService {
     // (non-deterministic) checks — deterministic arithmetic checks below
     // are explicitly unaffected, per "deterministic validation remains
     // authoritative" and stay on whatever strategy is already current.
-    const currentStrategy = getCurrentStrategy(stepResults);
+    // Production hotfix (2026-09-25): gated on isMathSubject, same as
+    // deliverStep — undefined here means "the strategy system does not
+    // apply to this subject at all", which also makes any stale
+    // `strategy` value persisted on an OLDER session (e.g. a leftover
+    // "NUMBER_LINE" from before this fix) inert: it's simply never read
+    // back into currentStrategy for a non-Math subject, and gets
+    // overwritten with undefined on this step's next write below — no
+    // manual DB cleanup needed.
+    const isMath = isMathSubject(topic.unit.subject.nameEn);
+    const currentStrategy = isMath ? getCurrentStrategy(stepResults) : undefined;
 
     // Deterministic-first: when this check's question was captured as a
     // gradable expression at delivery time AND the student's reply parses
@@ -785,11 +850,12 @@ export class InteractiveLessonService {
       subjectNameEn: topic.unit.subject.nameEn,
       lessonTitleEn: topic.nameEn,
       currentStep: { type: step.type, objective: step.objective, conceptKey: step.conceptKey, checkType: step.checkType },
+      groundingSlice: this.topicGroundingSlice(topic),
       mode: "evaluate_check",
       hintAlreadyGivenThisStep: hintAlreadyGiven,
       studentMessage: message,
       teachingStrategy: currentStrategy,
-      teachingStrategyGuidance: strategyGuidance(currentStrategy),
+      teachingStrategyGuidance: currentStrategy ? strategyGuidance(currentStrategy) : undefined,
     };
     const systemPrompt = this.contextBuilder.buildLessonTeachingPrompt(ctx);
     const raw = await this.runLessonAI({
@@ -813,9 +879,12 @@ export class InteractiveLessonService {
 
     // Phase 8 V1: only a conceptual CHECK's genuinely-wrong answer attempts
     // can trigger a strategy switch — never a question, never a correct
-    // answer, never a deterministic (arithmetic) check.
+    // answer, never a deterministic (arithmetic) check. Production hotfix
+    // (2026-09-25): also never for a non-Math subject — `isMath` gates
+    // this before `currentStrategy` (only ever defined when isMath is
+    // true) is passed in.
     const switchDecision =
-      step.checkType === "conceptual" && isAnswerAttempt && !isCorrectNow
+      isMath && currentStrategy && step.checkType === "conceptual" && isAnswerAttempt && !isCorrectNow
         ? decideStrategySwitch({
             stepId: step.id,
             attemptsSoFar: (prior?.attempts ?? 0) + 1,
@@ -839,8 +908,13 @@ export class InteractiveLessonService {
       correct,
       hintGiven,
       expression,
-      strategy: switchDecision?.strategy ?? prior?.strategy ?? currentStrategy,
-      strategyHistory: switchDecision ? [...(prior?.strategyHistory ?? []), switchDecision.record] : prior?.strategyHistory,
+      // Production hotfix (2026-09-25): for a non-Math subject this
+      // actively overwrites any stale persisted strategy/strategyHistory
+      // (e.g. a resumed session with a leftover "NUMBER_LINE" from before
+      // this fix) with undefined on this step's next write, rather than
+      // just leaving it unread — self-heals with no manual DB cleanup.
+      strategy: isMath ? switchDecision?.strategy ?? prior?.strategy ?? currentStrategy : undefined,
+      strategyHistory: isMath ? (switchDecision ? [...(prior?.strategyHistory ?? []), switchDecision.record] : prior?.strategyHistory) : undefined,
     });
     await this.prisma.client.lessonSession.update({ where: { id: session.id }, data: { stepResultsJson: updatedResults as any } });
 
@@ -891,7 +965,19 @@ export class InteractiveLessonService {
       include: { unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
     });
     if (!topic) throw new NotFoundException("This lesson is not available as an interactive lesson yet.");
-    if (!topic.teachingStepsJson) return { started: false };
+    if (!topic.teachingStepsJson) {
+      const preparation = typeof (this.draftGenerator as any).getTopicGroundingPreparationStatus === "function"
+        ? await (this.draftGenerator as any).getTopicGroundingPreparationStatus(topicId)
+        : { status: "READY" as const };
+      // Same informational "stage" as ensureTopicHasSteps above: teachingStepsJson
+      // is still null here (the guard above), so preparation.status === "READY"
+      // means grounding has already finished and lesson authoring is what
+      // runs next (synchronously, inside the advance() call this triggers) —
+      // never a new state, just a truer label for the SAME transition the
+      // frontend already special-cases (see LessonState.preparation.stage).
+      const stage = preparation.status === "READY" ? ("authoring" as const) : ("grounding" as const);
+      return { started: false, preparation: { ...preparation, stage } };
+    }
     const steps = this.getSteps(topic);
     const session = await this.getOwnSession(profile, topicId);
     if (!session) return { started: false };

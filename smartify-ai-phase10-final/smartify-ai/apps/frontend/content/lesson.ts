@@ -4,6 +4,11 @@ export interface LessonCopy {
   startLesson: string;
   starting: string;
   startingFirstTime: string;
+  preparing: string;
+  preparingTextbook: string;
+  understandingLesson: string;
+  creatingLesson: string;
+  almostReady: string;
   continueLabel: string;
   answerPlaceholder: string;
   askPlaceholder: string;
@@ -41,6 +46,11 @@ export interface LessonCopy {
 }
 
 const en: LessonCopy = {
+  preparing: "Preparing your lesson...",
+  preparingTextbook: "Preparing textbook...",
+  understandingLesson: "Understanding this lesson...",
+  creatingLesson: "Creating your lesson...",
+  almostReady: "Almost ready...",
   startLesson: "Start Lesson",
   starting: "Starting...",
   startingFirstTime: "Getting your lesson ready for the first time — almost there!",
@@ -81,6 +91,11 @@ const en: LessonCopy = {
 };
 
 const ar: LessonCopy = {
+  preparing: "بنجهز لك الدرس...",
+  preparingTextbook: "بنجهز الكتاب المدرسي...",
+  understandingLesson: "بنفهم محتوى الدرس...",
+  creatingLesson: "بنجهز درسك...",
+  almostReady: "خلصنا تقريبًا...",
   startLesson: "ابدأ الدرس",
   starting: "جاري البدء...",
   startingFirstTime: "بنجهز درسك لأول مرة — تقريبًا خلصنا!",

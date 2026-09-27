@@ -35,6 +35,26 @@ export class OnboardingService {
       throw new BadRequestException("One or more subjects are invalid for the selected grade.");
     }
 
+    // Student school info V1 (2026-09-25) — schoolId/schoolNameManual are
+    // already mutually exclusive per studentOnboardingSchema's .refine, but
+    // that only checks shape, not that the referenced School actually
+    // exists — the frontend is never trusted for that. A schoolId must
+    // resolve to a real, active School, and (when the student also chose a
+    // governorate) that School's own governorate must match what was
+    // selected, so a stale/mismatched schoolId from an earlier draft can
+    // never silently attach to the wrong governorate.
+    let schoolId: string | null = null;
+    if (input.schoolId) {
+      const school = await this.prisma.client.school.findUnique({ where: { id: input.schoolId } });
+      if (!school || !school.isActive) {
+        throw new BadRequestException("Selected school does not exist or is no longer active.");
+      }
+      if (input.governorate && school.governorate !== input.governorate) {
+        throw new BadRequestException("Selected school does not belong to the selected governorate.");
+      }
+      schoolId = school.id;
+    }
+
     const profile = await this.prisma.client.studentProfile.upsert({
       where: { userId },
       update: {
@@ -46,6 +66,10 @@ export class OnboardingService {
         gradeId: grade.id,
         weeklyStudyHours: input.weeklyStudyHours,
         goals: input.goals,
+        governorate: input.governorate,
+        area: input.area,
+        schoolId,
+        schoolNameManual: schoolId ? null : input.schoolNameManual ?? null,
       },
       create: {
         userId,
@@ -57,6 +81,10 @@ export class OnboardingService {
         gradeId: grade.id,
         weeklyStudyHours: input.weeklyStudyHours,
         goals: input.goals,
+        governorate: input.governorate,
+        area: input.area,
+        schoolId,
+        schoolNameManual: schoolId ? null : input.schoolNameManual ?? null,
       },
     });
 

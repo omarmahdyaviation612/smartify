@@ -1,4 +1,5 @@
 import { StripeProvider } from "./stripe.provider";
+import Stripe from "stripe";
 
 const retrieve = jest.fn();
 const constructEvent = jest.fn();
@@ -7,6 +8,53 @@ jest.mock("stripe", () => ({ __esModule: true, default: jest.fn().mockImplementa
 })) }));
 let mockEnv: any = { STRIPE_SECRET_KEY: "sk_test_fixture", STRIPE_WEBHOOK_SECRET: "fixture" };
 jest.mock("@smartify/config", () => ({ loadBackendEnv: () => mockEnv }));
+
+// Smartify is not launching with Stripe active — STRIPE_SECRET_KEY will
+// commonly be entirely absent in production. This must never crash the
+// Stripe SDK client construction, and every public method must fail with a
+// clear, controlled error instead of throwing from inside the SDK.
+describe("Stripe disabled (no STRIPE_SECRET_KEY configured)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockEnv = { STRIPE_SECRET_KEY: undefined, STRIPE_WEBHOOK_SECRET: undefined };
+  });
+
+  it("never instantiates the Stripe SDK client when no key is configured", () => {
+    new StripeProvider();
+    expect(Stripe as unknown as jest.Mock).not.toHaveBeenCalled();
+  });
+
+  it("fails safely (not a crash) when creating a checkout session", async () => {
+    await expect(
+      new StripeProvider().createCheckoutSession({
+        amountEGP: 100,
+        description: "test",
+        subscriptionId: "sub",
+        studentUserId: "user",
+        successUrl: "https://example.com/success",
+        cancelUrl: "https://example.com/cancel",
+      } as any),
+    ).rejects.toThrow(/not configured/i);
+  });
+
+  it("fails safely when verifying a webhook", async () => {
+    await expect(
+      new StripeProvider().verifyAndParseWebhook(Buffer.from("{}"), { "stripe-signature": "whatever" }),
+    ).rejects.toThrow(/not configured/i);
+  });
+
+  it("reports 'unverified' rather than throwing when checking a checkout session's status", async () => {
+    expect(
+      await new StripeProvider().verifyCheckoutSession({
+        externalSessionId: "cs_x", studentUserId: "user", subscriptionId: "sub", amountEGP: 100,
+      }),
+    ).toBe("unverified");
+  });
+
+  it("fails safely when canceling a subscription", async () => {
+    await expect(new StripeProvider().cancelSubscription("sub_x")).rejects.toThrow(/not configured/i);
+  });
+});
 
 describe("Stripe payment verification boundary", () => {
   const expected = { externalSessionId: "cs_own", studentUserId: "user", subscriptionId: "sub", amountEGP: 500 };

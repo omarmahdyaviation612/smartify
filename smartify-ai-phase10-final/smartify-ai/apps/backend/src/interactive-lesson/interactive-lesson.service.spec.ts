@@ -21,7 +21,7 @@ describe("InteractiveLessonService", () => {
     { id: "s7", type: "COMPLETE", order: 7, objective: "acknowledge completion" },
   ];
 
-  function makeHarness(opts: { generateImpl?: (args: any) => any; studentSubjectRow?: { expiresAt: Date | null } } = {}) {
+  function makeHarness(opts: { generateImpl?: (args: any) => any; studentSubjectRow?: { expiresAt: Date | null }; extraTopics?: Record<string, any>; groundingPreparationResult?: { status: string; retryAfterMs?: number } } = {}) {
     const state: {
       profiles: Record<string, any>;
       topics: Record<string, any>;
@@ -42,6 +42,7 @@ describe("InteractiveLessonService", () => {
           teachingStepsJson: STEPS,
           unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } },
         },
+        ...opts.extraTopics,
       },
       sessions: {},
       conversations: {},
@@ -186,6 +187,13 @@ describe("InteractiveLessonService", () => {
         state.topics[topicId] = { ...state.topics[topicId], teachingStepsJson: STEPS };
         return state.topics[topicId];
       }),
+      // Production hotfix (2026-09-25): every OTHER test in this file
+      // relies on the implicit READY default (a title-only topic's
+      // teachingStepsJson is null, so ensureTopicHasSteps must clear the
+      // grounding-preparation gate before ensureTopicHasLesson runs) —
+      // only the dedicated CONFIGURATION_ERROR test below overrides this.
+      prepareTopicGrounding: jest.fn().mockResolvedValue(opts.groundingPreparationResult ?? { status: "READY" }),
+      getTopicGroundingPreparationStatus: jest.fn().mockResolvedValue(opts.groundingPreparationResult ?? { status: "READY" }),
     } as any;
     // Question-pool generation is a fire-and-forget-shaped no-op here —
     // no test in this file asserts on it; real behavior is covered by
@@ -622,7 +630,82 @@ describe("InteractiveLessonService", () => {
     const h = makeHarness();
     h.state.topics["topic-2"] = { id: "topic-2", nameEn: "No Plan", nameAr: "بلا خطة", unitId: "unit-1", teachingStepsJson: null, unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } } };
     const result = await h.service.getState("user-1", "topic-2");
-    expect(result).toEqual({ started: false });
+    expect(result).toEqual({ started: false, preparation: { status: "READY", stage: "authoring" } });
+  });
+
+  /**
+   * Production hotfix (2026-09-25): when grounding preparation reports
+   * CONFIGURATION_ERROR (e.g. a missing R2 source object, or the new
+   * retry-ceiling — see UnitGroundingService), the student must get one
+   * clear, safe, generic error immediately — never the internal `reason`
+   * string (which could otherwise carry a storage key/error name), and
+   * never an endless PREPARING loop.
+   */
+  it("a title-only topic whose grounding preparation reports CONFIGURATION_ERROR surfaces one safe, generic error — never the internal reason", async () => {
+    const h = makeHarness({ groundingPreparationResult: { status: "CONFIGURATION_ERROR" } });
+    h.state.topics["topic-2"] = { id: "topic-2", nameEn: "No Plan", nameAr: "بلا خطة", unitId: "unit-1", teachingStepsJson: null, unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } } };
+
+    await expect(h.service.advance("user-1", "topic-2")).rejects.toThrow("This lesson is not available yet.");
+    expect(h.draftGenerator.ensureTopicHasLesson).not.toHaveBeenCalled();
+
+    try {
+      await h.service.advance("user-1", "topic-2");
+      fail("expected advance() to throw");
+    } catch (err: any) {
+      // Never leaks the internal machine-readable reason (e.g.
+      // "source_object_not_found") to the student-facing exception.
+      expect(String(err.message)).not.toMatch(/source_object_not_found|retryable_failure_limit_exceeded|NoSuchKey/);
+    }
+  });
+
+  /**
+   * 2026-09-26 provider-outage hotfix: PROVIDER_OUTAGE gets the exact same
+   * safe, generic, student-facing message as CONFIGURATION_ERROR — but
+   * (unlike CONFIGURATION_ERROR) nothing is persisted for this Unit, so a
+   * later request during/after the outage is fully retryable, never stuck.
+   */
+  it("a title-only topic whose grounding preparation reports PROVIDER_OUTAGE surfaces the same safe, generic error, never an internal detail", async () => {
+    const h = makeHarness({ groundingPreparationResult: { status: "PROVIDER_OUTAGE", reason: "provider_quota_exhausted" } as any });
+    h.state.topics["topic-2"] = { id: "topic-2", nameEn: "No Plan", nameAr: "بلا خطة", unitId: "unit-1", teachingStepsJson: null, unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } } };
+
+    await expect(h.service.advance("user-1", "topic-2")).rejects.toThrow("This lesson is not available yet.");
+    expect(h.draftGenerator.ensureTopicHasLesson).not.toHaveBeenCalled();
+
+    try {
+      await h.service.advance("user-1", "topic-2");
+      fail("expected advance() to throw");
+    } catch (err: any) {
+      expect(String(err.message)).not.toMatch(/provider_quota_exhausted|insufficient_quota/);
+    }
+  });
+
+  /**
+   * 2026-09-26 UX fix: the PREPARING response now carries a "stage" field
+   * (informational only — never changes what happens next) so the
+   * frontend can show honest, non-percentage waiting copy instead of one
+   * frozen "Preparing your lesson..." for the entire multi-step process.
+   */
+  it("advance() on a title-only topic still PREPARING reports stage 'grounding'", async () => {
+    const h = makeHarness({ groundingPreparationResult: { status: "PREPARING", retryAfterMs: 2000 } });
+    h.state.topics["topic-2"] = { id: "topic-2", nameEn: "No Plan", nameAr: "بلا خطة", unitId: "unit-1", teachingStepsJson: null, unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } } };
+    const result = await h.service.advance("user-1", "topic-2");
+    expect(result.status).toBe("PREPARING");
+    expect((result as any).stage).toBe("grounding");
+  });
+
+  it("getState() on a title-only topic whose grounding is READY (authoring about to run) reports stage 'authoring'", async () => {
+    const h = makeHarness({ groundingPreparationResult: { status: "READY" } });
+    h.state.topics["topic-2"] = { id: "topic-2", nameEn: "No Plan", nameAr: "بلا خطة", unitId: "unit-1", teachingStepsJson: null, unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } } };
+    const result: any = await h.service.getState("user-1", "topic-2");
+    expect(result.started).toBe(false);
+    expect(result.preparation.stage).toBe("authoring");
+  });
+
+  it("getState() on a title-only topic still grounding reports stage 'grounding'", async () => {
+    const h = makeHarness({ groundingPreparationResult: { status: "PREPARING", retryAfterMs: 1500 } });
+    h.state.topics["topic-2"] = { id: "topic-2", nameEn: "No Plan", nameAr: "بلا خطة", unitId: "unit-1", teachingStepsJson: null, unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } } };
+    const result: any = await h.service.getState("user-1", "topic-2");
+    expect(result.preparation.stage).toBe("grounding");
   });
 
   it("getState() on a genuinely unknown topic id still throws NotFoundException", async () => {
@@ -939,5 +1022,241 @@ describe("InteractiveLessonService", () => {
       await driveToSecondWrongAttempt(h); // 5 calls: s1, s2, s3-deliver, attempt1, attempt2(switch)
       expect(h.generateSpy).toHaveBeenCalledTimes(5);
     });
+  });
+
+  /**
+   * Production hotfix (2026-09-25): a real Student E2E found a Science
+   * lesson about flowering/non-flowering plants taught with "take 2 steps
+   * forward on a number line" — the Phase 8 math-strategy system
+   * (CONCRETE_OBJECTS/NUMBER_LINE switching + guidance) was running for
+   * every subject, unconditionally. These tests prove a Science topic
+   * (isMathSubject("Science") === false) never triggers any of it, while
+   * the Mathematics tests above (unchanged) prove Math behavior is
+   * preserved exactly as before.
+   */
+  describe("subject-safe teaching strategy hotfix (2026-09-25)", () => {
+    const SCIENCE_STEPS = [
+      { id: "sc1", type: "INTRO", order: 1, objective: "greet and frame" },
+      { id: "sc2", type: "EXPLAIN", order: 2, objective: "explain flowering vs non-flowering plants" },
+      { id: "sc3", type: "CHECK", order: 3, objective: "check concept", checkType: "conceptual" },
+      { id: "sc4", type: "COMPLETE", order: 4, objective: "acknowledge completion" },
+    ];
+
+    function scienceExtraTopics(overrides: Partial<{ session: any }> = {}) {
+      return {
+        "topic-science": {
+          id: "topic-science",
+          nameEn: "Flowering and Non-Flowering Plants",
+          teachingStepsJson: SCIENCE_STEPS,
+          unit: { subjectId: "subject-science", subject: { nameEn: "Science" } },
+        },
+      };
+    }
+
+    // Two consecutive wrong conceptual-CHECK attempts — for Mathematics
+    // (see strategyGenerateImpl above) this exact call sequence is what
+    // triggers the CONCRETE_OBJECTS -> NUMBER_LINE switch.
+    function scienceGenerateImpl() {
+      let call = 0;
+      return async () => {
+        call++;
+        if (call <= 2) return { content: "teaching content", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }; // sc1, sc2 deliver
+        if (call === 3) return { content: JSON.stringify({ say: "Does this plant produce flowers?", expression: null }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }; // sc3 deliver
+        if (call === 4) return { content: JSON.stringify({ intent: "answer", isCorrect: false, say: "Not quite, try again." }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }; // attempt 1: wrong
+        if (call === 5) return { content: JSON.stringify({ intent: "answer", isCorrect: false, say: "Still not it — let's look at the plant again." }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }; // attempt 2: wrong
+        return { content: JSON.stringify({ intent: "answer", isCorrect: true, say: "That's right!" }), inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }; // attempt 3: correct
+      };
+    }
+
+    it("1. repeated incorrect conceptual CHECKs never switch to NUMBER_LINE", async () => {
+      const h = makeHarness({ generateImpl: scienceGenerateImpl(), extraTopics: scienceExtraTopics() });
+      await h.service.advance("user-1", "topic-science"); // sc1
+      await h.service.advance("user-1", "topic-science"); // sc2
+      await h.service.advance("user-1", "topic-science"); // sc3 deliver
+      await h.service.respond("user-1", "topic-science", "no"); // attempt 1: wrong
+      await h.service.respond("user-1", "topic-science", "no"); // attempt 2: wrong — would switch for Math
+      const session = h.getSession("user-1", "topic-science");
+      const sc3 = session.stepResultsJson.find((r: any) => r.stepId === "sc3");
+      expect(sc3.strategy).toBeUndefined();
+      expect(sc3.strategyHistory ?? []).toHaveLength(0);
+    });
+
+    it("2. teaching/check prompts contain no mandatory number-line/math strategy guidance", async () => {
+      const h = makeHarness({ generateImpl: scienceGenerateImpl(), extraTopics: scienceExtraTopics() });
+      await h.service.advance("user-1", "topic-science"); // sc1
+      await h.service.advance("user-1", "topic-science"); // sc2 (EXPLAIN — would carry strategy guidance for Math)
+      await h.service.advance("user-1", "topic-science"); // sc3 deliver (CHECK)
+      await h.service.respond("user-1", "topic-science", "no"); // attempt 1 — evaluate_check prompt
+      for (const call of h.generateSpy.mock.calls) {
+        const prompt = call[0].systemPrompt as string;
+        expect(prompt).not.toMatch(/number.line/i);
+        expect(prompt).not.toMatch(/MANDATORY REPRESENTATION/i);
+        expect(prompt).not.toContain("CONCRETE_OBJECTS");
+        expect(prompt).not.toContain("NUMBER_LINE");
+      }
+    });
+
+    it("3. a resumed Science session already containing strategy: \"NUMBER_LINE\" ignores that persisted strategy", async () => {
+      const h = makeHarness({ generateImpl: scienceGenerateImpl(), extraTopics: scienceExtraTopics() });
+      await h.service.advance("user-1", "topic-science"); // sc1
+      await h.service.advance("user-1", "topic-science"); // sc2
+      await h.service.advance("user-1", "topic-science"); // sc3 deliver
+
+      // Simulate a session left over from BEFORE this hotfix, where sc3 was
+      // persisted with a stale math strategy (the exact production bug).
+      const session = h.getSession("user-1", "topic-science");
+      const sc3 = session.stepResultsJson.find((r: any) => r.stepId === "sc3");
+      sc3.strategy = "NUMBER_LINE";
+      sc3.strategyHistory = [{ strategy: "NUMBER_LINE", reason: "stale_pre_hotfix_data", atStepId: "sc3", switchedAt: new Date().toISOString() }];
+
+      const result = await h.service.respond("user-1", "topic-science", "no"); // attempt 1: wrong
+      expect(result.content).toBe("Not quite, try again.");
+      const evaluatePrompt = h.generateSpy.mock.calls[h.generateSpy.mock.calls.length - 1][0].systemPrompt as string;
+      expect(evaluatePrompt).not.toMatch(/number.line/i);
+      expect(evaluatePrompt).not.toContain("NUMBER_LINE");
+
+      const updatedSession = h.getSession("user-1", "topic-science");
+      const updatedSc3 = updatedSession.stepResultsJson.find((r: any) => r.stepId === "sc3");
+      // Self-healed: the stale value was overwritten with undefined on this
+      // step's next write — no manual DB cleanup was needed.
+      expect(updatedSc3.strategy).toBeUndefined();
+    });
+
+    it("4. remains on normal curriculum/topic remediation — the generic hint-then-force-resolve path, never the Math strategy-switch branch", async () => {
+      const h = makeHarness({ generateImpl: scienceGenerateImpl(), extraTopics: scienceExtraTopics() });
+      await h.service.advance("user-1", "topic-science");
+      await h.service.advance("user-1", "topic-science");
+      await h.service.advance("user-1", "topic-science");
+      await h.service.respond("user-1", "topic-science", "no"); // attempt 1: wrong -> hint given
+      const sc3AfterFirst = h.getSession("user-1", "topic-science").stepResultsJson.find((r: any) => r.stepId === "sc3");
+      expect(sc3AfterFirst.correct).toBe(false);
+      expect(sc3AfterFirst.hintGiven).toBe(true);
+
+      // For Math, this exact second wrong attempt triggers a strategy
+      // switch instead of force-resolving (see "H:" test above). For
+      // Science there is no switch to fall back on, so the EXISTING
+      // generic "no infinite retry — force-resolve after one hint" rule
+      // applies untouched: the check simply resolves.
+      await h.service.respond("user-1", "topic-science", "no"); // attempt 2: wrong, force-resolved
+      const session = h.getSession("user-1", "topic-science");
+      const sc3 = session.stepResultsJson.find((r: any) => r.stepId === "sc3");
+      expect(sc3.correct).toBe(true); // force-resolved — normal remediation, no switch ever happened
+      expect(sc3.strategyHistory ?? []).toHaveLength(0);
+    });
+  });
+
+  /**
+   * 2026-09-26 factual-provenance fix regression tests: proves the
+   * already-selected Topic-scoped GroundingSlice (grounding-selector.util.ts)
+   * is threaded into the runtime teaching prompt with ZERO extra Prisma
+   * queries and ZERO extra provider/model calls, and that Topic.teachingStepsJson
+   * is never touched by this fix.
+   */
+  describe("2026-09-26 factual-provenance fix", () => {
+  const GROUNDED_STEPS = [
+    { id: "g1", type: "INTRO", order: 1, objective: "greet and frame" },
+    { id: "g2", type: "EXAMPLE", order: 2, objective: "Give an example of an author who has written more than one story." },
+    { id: "g3", type: "COMPLETE", order: 3, objective: "acknowledge completion" },
+  ];
+
+  const GROUNDING_NOTES_JSON = {
+    unitTitle: "Fiction: Different stories by the same author",
+    gradeLevel: "Year 3",
+    subject: "English Language",
+    learningObjectives: ["Recognise that different stories can share the same author, style, or themes."],
+    concepts: [
+      { name: "Author style", description: "Different stories by the same author often share a similar style, characters, or setting.", sourcePages: [5, 6], importance: "core" },
+    ],
+    facts: [{ fact: "Atinuke is an author who has written several different stories.", sourcePages: [6], importance: "core" }],
+    vocabulary: [],
+    skills: [],
+    topicHints: [],
+    scopeNotes: [],
+  };
+
+  function groundedExtraTopics() {
+    return {
+      "topic-grounded": {
+        id: "topic-grounded",
+        nameEn: "Fiction: Different stories by the same author",
+        teachingStepsJson: GROUNDED_STEPS,
+        // The persisted TopicGroundingAssignment this Topic already has —
+        // its identity matches the Unit's grounding below, so the runtime
+        // path reconstructs the slice from it rather than inferring live.
+        groundingAssignment: {
+          unitGroundingVersion: 1, unitSourceFingerprint: "fp-fiction", assignmentVersion: 1, status: "READY",
+          matchedConceptNames: ["Author style"], matchedHintTitles: [],
+        },
+        unit: {
+          subjectId: "subject-english", subject: { nameEn: "English Language" },
+          groundingVersion: 1, groundingSourceFingerprint: "fp-fiction",
+          groundingNotesJson: GROUNDING_NOTES_JSON,
+        },
+      },
+      "topic-ungrounded": {
+        id: "topic-ungrounded",
+        nameEn: "Fiction: Different stories by the same author",
+        teachingStepsJson: GROUNDED_STEPS,
+        groundingAssignment: null,
+        unit: { subjectId: "subject-english", subject: { nameEn: "English Language" }, groundingVersion: null, groundingSourceFingerprint: null }, // no groundingNotesJson at all
+      },
+    };
+  }
+
+  it("threads the Topic-scoped grounding into the runtime prompt for a grounded Unit — no unsupported named example is invited", async () => {
+    const h = makeHarness({
+      extraTopics: groundedExtraTopics(),
+      generateImpl: async () => ({ content: "teaching content", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }),
+    });
+    await h.service.advance("user-1", "topic-grounded");
+    const lastCallArgs = h.generateSpy.mock.calls[h.generateSpy.mock.calls.length - 1][0];
+    expect(lastCallArgs.systemPrompt).toContain("Atinuke");
+    expect(lastCallArgs.systemPrompt).toMatch(/FACTUAL PROVENANCE/i);
+  });
+
+  it("with no grounding available for the Unit, the prompt forbids any specific named real-world example", async () => {
+    const h = makeHarness({
+      extraTopics: groundedExtraTopics(),
+      generateImpl: async () => ({ content: "teaching content", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }),
+    });
+    await h.service.advance("user-1", "topic-ungrounded");
+    const lastCallArgs = h.generateSpy.mock.calls[h.generateSpy.mock.calls.length - 1][0];
+    expect(lastCallArgs.systemPrompt).not.toContain("Atinuke");
+    expect(lastCallArgs.systemPrompt).toMatch(/no REFERENCE NOTES are available/i);
+  });
+
+  it("adds zero extra Prisma queries — grounding selection reuses the Topic already fetched, never a new lookup", async () => {
+    const h = makeHarness({
+      extraTopics: groundedExtraTopics(),
+      generateImpl: async () => ({ content: "teaching content", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }),
+    });
+    (h.prisma.client.topic.findUnique as jest.Mock).mockClear();
+    await h.service.advance("user-1", "topic-grounded");
+    // Exactly one Topic lookup per advance() call (getTopicOrThrow) — the
+    // same count as every ungrounded topic in this file's other tests;
+    // selectRelevantGrounding is a pure in-memory function over data that
+    // single fetch already returned.
+    expect((h.prisma.client.topic.findUnique as jest.Mock).mock.calls.length).toBe(1);
+  });
+
+  it("adds zero extra provider/model calls — exactly one generate() call for a single INTRO delivery", async () => {
+    const h = makeHarness({
+      extraTopics: groundedExtraTopics(),
+      generateImpl: async () => ({ content: "teaching content", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }),
+    });
+    await h.service.advance("user-1", "topic-grounded");
+    expect(h.generateSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("never mutates Topic.teachingStepsJson — the same object reference/content persists through delivery", async () => {
+    const extraTopics = groundedExtraTopics();
+    const before = JSON.stringify(extraTopics["topic-grounded"].teachingStepsJson);
+    const h = makeHarness({
+      extraTopics,
+      generateImpl: async () => ({ content: "teaching content", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }),
+    });
+    await h.service.advance("user-1", "topic-grounded");
+    expect(JSON.stringify(h.state.topics["topic-grounded"].teachingStepsJson)).toBe(before);
+  });
   });
 });

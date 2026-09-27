@@ -36,6 +36,9 @@ export interface ResolvedTopicContext {
   groundingNotesJson: GroundingNotes | null;
   groundingVersion: number | null;
   lessonObjectives: string[];
+  /** Total Topics under this Topic's own Unit — see
+   * grounding-selector.util.ts's single-Topic fallback doc comment. */
+  unitTopicCount: number;
 }
 
 /**

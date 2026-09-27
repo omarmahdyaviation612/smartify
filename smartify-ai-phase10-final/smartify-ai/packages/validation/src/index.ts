@@ -18,20 +18,87 @@ export const updateUserRoleSchema = z.object({
 });
 export type UpdateUserRoleInput = z.infer<typeof updateUserRoleSchema>;
 
-// Placeholder for Phase 4 onboarding — defined now so the shape is agreed
-// on before the onboarding UI/API are built.
-export const studentOnboardingSchema = z.object({
-  fullName: z.string().min(2).max(100),
-  age: z.number().int().min(4).max(25),
-  country: z.string().min(2),
-  preferredLang: z.enum(["ar", "en"]),
-  curriculumCode: z.enum(["LOCAL", "EG_NATIONAL", "BRITISH_INTL", "AMERICAN_INTL"]),
-  gradeId: z.string().cuid(),
-  subjectIds: z.array(z.string().cuid()).min(1),
-  weeklyStudyHours: z.number().int().min(0).max(60).optional(),
-  goals: z.string().max(500).optional(),
-});
+// The 27 Egyptian governorates — a fixed, deterministic list (never
+// sourced from Google or any external provider) shared between frontend
+// display and backend validation. Codes are stable, ASCII, uppercase
+// snake_case; display names live in the frontend's i18n content, not here.
+export const EGYPT_GOVERNORATE_CODES = [
+  "CAIRO",
+  "ALEXANDRIA",
+  "GIZA",
+  "QALYUBIA",
+  "PORT_SAID",
+  "SUEZ",
+  "DAKAHLIA",
+  "SHARQIA",
+  "GHARBIA",
+  "MONUFIA",
+  "BEHEIRA",
+  "KAFR_EL_SHEIKH",
+  "DAMIETTA",
+  "ISMAILIA",
+  "FAYOUM",
+  "BENI_SUEF",
+  "MINYA",
+  "ASYUT",
+  "SOHAG",
+  "QENA",
+  "LUXOR",
+  "ASWAN",
+  "RED_SEA",
+  "NEW_VALLEY",
+  "MATROUH",
+  "NORTH_SINAI",
+  "SOUTH_SINAI",
+] as const;
+export type EgyptGovernorateCode = (typeof EGYPT_GOVERNORATE_CODES)[number];
+
+// Student school info V1 (2026-09-25) — an extension of the existing
+// onboarding profile step (governorate/area/school), never a new signup
+// flow. All four fields are optional here (matching the nullable
+// StudentProfile columns) so existing callers/tests that don't send them
+// keep working unchanged. `.refine` enforces the one invariant the
+// backend must never trust the frontend alone for: a submission can never
+// claim BOTH a real School (schoolId) AND a manually-typed name
+// (schoolNameManual) at once — see OnboardingService.saveProfile, which
+// re-derives the actual School row server-side rather than trusting this
+// shape alone.
+export const studentOnboardingSchema = z
+  .object({
+    fullName: z.string().min(2).max(100),
+    age: z.number().int().min(4).max(25),
+    country: z.string().min(2),
+    preferredLang: z.enum(["ar", "en"]),
+    curriculumCode: z.enum(["LOCAL", "EG_NATIONAL", "BRITISH_INTL", "AMERICAN_INTL"]),
+    gradeId: z.string().cuid(),
+    subjectIds: z.array(z.string().cuid()).min(1),
+    weeklyStudyHours: z.number().int().min(0).max(60).optional(),
+    goals: z.string().max(500).optional(),
+    governorate: z.enum(EGYPT_GOVERNORATE_CODES).optional(),
+    area: z.string().trim().min(1).max(200).optional(),
+    schoolId: z.string().cuid().optional(),
+    schoolNameManual: z.string().trim().min(1).max(200).optional(),
+  })
+  .strict()
+  .refine((value) => !(value.schoolId && value.schoolNameManual), {
+    message: "Provide either schoolId or schoolNameManual, not both.",
+    path: ["schoolId"],
+  });
 export type StudentOnboardingInput = z.infer<typeof studentOnboardingSchema>;
+
+// Backend-only bounds for GET /schools?governorate=&area=&q= — shared here
+// so the controller's query validation and the service's take/limit stay
+// in lockstep. `q` has no minimum length at the schema level (the
+// frontend enforces a minimum-useful-length before it even calls the
+// endpoint); the backend still bounds result count regardless of query
+// length so an empty/short `q` can never return an unbounded scan.
+export const schoolSearchQuerySchema = z.object({
+  governorate: z.enum(EGYPT_GOVERNORATE_CODES),
+  area: z.string().trim().min(1).max(200).optional(),
+  q: z.string().trim().max(200).optional(),
+});
+export type SchoolSearchQuery = z.infer<typeof schoolSearchQuerySchema>;
+export const SCHOOL_SEARCH_RESULT_LIMIT = 20;
 
 export const updatePaymentProviderSchema = z.object({
   isActive: z.boolean().optional(),
@@ -76,6 +143,10 @@ export const updateAISpendingControlsSchema = z
   .object({
     globalDailyBudgetUsd: z.number().positive().finite().optional(),
     perUserDailyBudgetUsd: z.number().positive().finite().optional(),
+    // Independent platform content-authoring circuit breaker (2026-09-25)
+    // — a separate cap from perUserDailyBudgetUsd, never reused. See
+    // AIUsageService.assertWithinBudget/reserveBudget.
+    platformContentAuthoringDailyBudgetUsd: z.number().positive().finite().optional(),
     dailyQuestionsPerSubject: z.number().int().positive().optional(),
   })
   .strict()

@@ -336,14 +336,25 @@ describe("TutorService", () => {
     it("passes only the selected Topic's grounded curriculum slice to the Tutor prompt", async () => {
       const topic = {
         nameEn: "Subtraction within 10",
+        groundingAssignment: {
+          unitGroundingVersion: 1,
+          unitSourceFingerprint: "fp-1",
+          assignmentVersion: 1,
+          status: "READY",
+          matchedConceptNames: ["Subtraction within 10"],
+          matchedHintTitles: ["Subtraction within 10"],
+        },
         unit: {
           subjectId: "subject-1",
+          groundingVersion: 1,
+          groundingSourceFingerprint: "fp-1",
           groundingNotesJson: {
             learningObjectives: ["Subtract within 10."],
             concepts: [{ name: "Subtraction within 10", description: "Take away.", sourcePages: [5], importance: "core" }],
             facts: [], vocabulary: [], skills: [], scopeNotes: [],
             topicHints: [{ topicTitle: "Subtraction within 10", relevantConcepts: ["Subtraction within 10"], sourcePages: [5] }],
           },
+          _count: { topics: 1 },
         },
       };
       const { service, contextBuilder } = makeService({ topic });

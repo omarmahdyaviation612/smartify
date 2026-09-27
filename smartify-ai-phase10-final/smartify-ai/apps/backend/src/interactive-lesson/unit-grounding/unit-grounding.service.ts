@@ -4,27 +4,54 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as crypto from "crypto";
-import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AIProviderFactory } from "../../ai/ai-provider.factory";
 import { AIContextBuilderService } from "../../ai/context/ai-context-builder.service";
 import { AIUsageService } from "../../ai/usage/ai-usage.service";
 import { validateGroundingNotes } from "./unit-grounding-validator";
+import { remapSourceImageIndexToPages } from "./unit-grounding-page-remap.util";
 import type { GroundingNotes } from "./unit-grounding.types";
 import { CurriculumSourceStorageFactory } from "./storage/curriculum-source-storage.factory";
 import { resolveEffectiveSourceFile } from "./unit-effective-source.util";
 import { UnitGroundingTpmPacer, type TokenRateLimitMetadata } from "./tpm-pacing.util";
 import { isQuotaError, tokenRateLimitMetadata } from "../../ai/providers/openai-request-diagnostics";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
+import { UnitGroundingProgressService } from "./unit-grounding-progress.service";
+import type { GroundingChunkResult } from "./unit-grounding-progress.service";
 
 
 const MAX_ATTEMPTS = 2; // one initial attempt + one corrective retry — same bound as every other AI-generation loop in this codebase
+
+// Production hotfix (2026-09-25): a Unit whose source PDF object is
+// missing from R2 (or any other deterministic chunk-extraction failure)
+// used to retry forever — RETRYABLE_FAILURE with no ceiling, masked back
+// to a plain "PREPARING" by the nextEligibleAt short-circuit below, so a
+// student polling /advance never saw an error at all (see the
+// "cmucxcubj00eh2qd5kfwohz11" incident: retryCount reached 237 with
+// lastErrorCode "NoSuchKey"). A conservative bound: real transient
+// failures (a momentary network blip, a non-quota 5xx) are expected to
+// clear within a handful of attempts; anything past this many consecutive
+// failures is treated as terminal rather than polled forever.
+const MAX_RETRYABLE_ATTEMPTS = 5;
 const MAX_PAGES_PER_RENDER = 10; // caps vision-token cost per call; a larger Unit range runs multiple sequential calls, merged into one GroundingNotes
 const MAX_TPM_TRANSPORT_ATTEMPTS = 2;
 const MAX_UNIT_PAGE_COUNT = 40; // a sane ceiling on a single Unit's total page range — protects against an accidentally huge manifest range being silently rendered/processed in full
 
 const CURRENT_GROUNDING_VERSION = 1; // bump only when the extraction schema/methodology changes in a way that makes old groundingNotesJson stale
-const GROUNDING_PROMPT_VERSION = "grounding-extraction-v1";
+// Page-provenance hotfix (2026-09-25): bumped v1 -> v2 because the
+// extraction contract genuinely changed (model-generated absolute
+// sourcePages -> model-generated sourceImageIndex + deterministic backend
+// remapping — see unit-grounding-page-remap.util.ts). This bump is also
+// the ZERO-MANUAL-INTERVENTION production recovery mechanism for any
+// UnitGroundingProgress row stuck in CONFIGURATION_ERROR under the old
+// contract (e.g. unitId cmucxcubj00eh2qd5kfwohz11): since promptVersion is
+// part of UnitGroundingProgressService.sameIdentity()'s comparison, the
+// next real student /advance request will find sameIdentity() false for
+// that stale row and initialize() will delete-and-recreate a fresh
+// IN_PROGRESS row automatically — no manual DB reset/delete, no
+// grounding:extract, ever required.
+const GROUNDING_PROMPT_VERSION = "grounding-extraction-v2";
 
 // Production lazy-grounding lock tuning (ensureUnitGrounded). A stale lock
 // (crashed worker) is reclaimed after this long — long enough to cover a
@@ -38,6 +65,30 @@ const LOCK_STALE_AFTER_MS = 5 * 60 * 1000;
 // loser's own request to hang past what infra will tolerate.
 const GROUNDING_WAIT_TIMEOUT_MS = 45 * 1000;
 const GROUNDING_WAIT_POLL_INTERVAL_MS = 2 * 1000;
+
+type BoundedGroundingResult =
+  | { status: "READY" }
+  | { status: "PREPARING"; retryAfterMs?: number; nextEligibleAt?: Date }
+  | { status: "RETRYABLE_FAILURE"; retryAfterMs: number; nextEligibleAt: Date; reason: string }
+  | { status: "CONFIGURATION_ERROR"; reason: string }
+  // 2026-09-26 provider-outage incident: an OpenAI account-level billing/
+  // quota exhaustion (isQuotaError — a stable SDK error code, e.g.
+  // "insufficient_quota", never fragile string matching) is NOT this
+  // Unit's fault and is NOT expected to resolve by retrying THIS Unit — it
+  // resolves only when the account's credits are restored. Distinct from
+  // CONFIGURATION_ERROR on purpose: nothing is persisted to this Unit's
+  // progress row (no retryCount increment, no status change, no
+  // lastErrorCode) — the exact same Unit is fully retryable, unmarked and
+  // unharmed, the moment the provider is healthy again. A caller (the bulk
+  // warm-up script; a real student's lazy-generation request) must stop
+  // immediately on seeing this rather than treating it like any other
+  // transient failure and burning through more Units/retries against the
+  // same outage.
+  | { status: "PROVIDER_OUTAGE"; reason: string };
+
+class BoundedGroundingRetryError extends Error {
+  constructor(readonly metadata: TokenRateLimitMetadata) { super("Grounding provider retry deferred"); }
+}
 
 export class UnitGroundingExtractionError extends Error {
   constructor(
@@ -112,10 +163,158 @@ export class UnitGroundingService {
     private readonly contextBuilder: AIContextBuilderService,
     private readonly usageService: AIUsageService,
     private readonly storageFactory: CurriculumSourceStorageFactory,
+    @Optional() private readonly progressService?: UnitGroundingProgressService,
   ) {}
 
   private createTpmPacer() {
     return new UnitGroundingTpmPacer({ log: entry => this.logger.log(JSON.stringify(entry)) });
+  }
+
+  async getPreparationStatus(unitId: string) {
+    const unit = await this.prisma.client.unit.findUnique({ where: { id: unitId }, select: { groundingNotesJson: true } });
+    if (!unit) return { status: "CONFIGURATION_ERROR" as const };
+    if (unit.groundingNotesJson) return { status: "READY" as const };
+    const progress = this.progressService ? await this.progressService.get(unitId) : null;
+    if (progress?.status === "CONFIGURATION_ERROR") return { status: "CONFIGURATION_ERROR" as const };
+    return { status: "PREPARING" as const, retryAfterMs: progress?.nextEligibleAt ? Math.max(0, progress.nextEligibleAt.getTime() - Date.now()) : 1500 };
+  }
+
+  /**
+   * Internal Phase 2 primitive. It deliberately processes one deterministic
+   * page chunk only; public lesson orchestration is wired in a later phase.
+   */
+  async prepareNextGroundingChunk(unitId: string, requestingActorId: string): Promise<BoundedGroundingResult> {
+    const progress = this.progressService;
+    if (!progress) throw new Error("UnitGroundingProgressService is not configured");
+    const unit = await this.prisma.client.unit.findUnique({ where: { id: unitId }, include: { subject: { include: { grade: { include: { curriculum: true } } } } } });
+    if (!unit) return { status: "CONFIGURATION_ERROR", reason: "unit_not_found" };
+    if (unit.groundingNotesJson) return { status: "READY" };
+    const sourceKey = resolveEffectiveSourceFile(unit, unit.subject);
+    if (!sourceKey || unit.sourcePageStart == null || unit.sourcePageEnd == null || unit.sourcePageEnd < unit.sourcePageStart) {
+      return { status: "CONFIGURATION_ERROR", reason: "source_or_page_range_invalid" };
+    }
+    const active = await this.providerFactory.getActiveProvider();
+    const identity = {
+      sourceKey,
+      sourceFingerprint: crypto.createHash("sha256").update(`${sourceKey}|${unit.sourcePageStart}-${unit.sourcePageEnd}`).digest("hex"),
+      sourcePageStart: unit.sourcePageStart,
+      sourcePageEnd: unit.sourcePageEnd,
+      promptVersion: GROUNDING_PROMPT_VERSION,
+      providerModel: active.model,
+      rendererVersion: "pdf-renderer-v1",
+    };
+    const chunkPlan = [];
+    for (let page = unit.sourcePageStart; page <= unit.sourcePageEnd; page += 2) chunkPlan.push({ chunkId: `${page}-${Math.min(page + 1, unit.sourcePageEnd)}`, pageStart: page, pageEnd: Math.min(page + 1, unit.sourcePageEnd) });
+    const current = await progress.initialize(unitId, identity, chunkPlan);
+    // Production hotfix (2026-09-25): once a Unit has been marked
+    // terminally unrecoverable (missing source object, or the retry
+    // ceiling below), every later call must keep reporting that — never
+    // fall through to claimNextChunk(), whose WHERE clause only matches
+    // status "IN_PROGRESS" and would otherwise return null (masked back
+    // to a plain, misleading "PREPARING" at the `!chunk` branch below).
+    if (current.status === "CONFIGURATION_ERROR") {
+      return { status: "CONFIGURATION_ERROR", reason: current.lastErrorCode ?? "grounding_configuration_error" };
+    }
+    if (current.nextEligibleAt && current.nextEligibleAt > new Date()) return { status: "PREPARING", nextEligibleAt: current.nextEligibleAt, retryAfterMs: current.nextEligibleAt.getTime() - Date.now() };
+    const leaseOwner = `${requestingActorId}:${crypto.randomUUID()}`;
+    const chunk = await progress.claimNextChunk(unitId, leaseOwner, 120000);
+    if (!chunk) return { status: "PREPARING", retryAfterMs: 1500 };
+    try {
+      const fetched = await this.storageFactory.get().fetchToTempFile(sourceKey, { curriculumCode: unit.subject.grade.curriculum.code, gradeLevel: unit.subject.grade.level });
+      const tmpDir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "smartify-grounding-chunk-"));
+      try {
+        const { stdout } = await invokePdfRenderer([fetched.localPath, String(chunk.pageStart), String(chunk.pageEnd), tmpDir]);
+        const imagePaths = stdout.split("\n").map(p => p.trim()).filter(Boolean);
+        const pages: SizedPage[] = imagePaths.map((imagePath, index) => { const d = pngDimensions(fs.readFileSync(imagePath)); return { page: chunk.pageStart + index, imagePath, imageTokens: estimateImageTokens(active.model, d.width, d.height, groundingSizingConfig().detail) }; });
+        const textTokens = estimateTextTokens(this.contextBuilder.buildUnitGroundingExtractionPrompt({ curriculumNameEn: unit.subject.grade.curriculum.nameEn, gradeNameEn: unit.subject.grade.nameEn, subjectNameEn: unit.subject.nameEn, unitNameEn: unit.nameEn, pageRangeStart: chunk.pageStart, pageRangeEnd: chunk.pageEnd }) + "Extract the curriculum grounding now.");
+        const notes = await this.extractChunk(pages, { curriculumNameEn: unit.subject.grade.curriculum.nameEn, gradeNameEn: unit.subject.grade.nameEn, subjectNameEn: unit.subject.nameEn, unitNameEn: unit.nameEn }, requestingActorId, unitId, groundingSizingConfig().detail, active, textTokens, this.createTpmPacer(), true);
+        await progress.persistChunk(unitId, leaseOwner, { chunkId: chunk.chunkId, pageStart: chunk.pageStart, pageEnd: chunk.pageEnd, notes } as GroundingChunkResult, false);
+        const after = await progress.get(unitId);
+        const done = Array.isArray(after?.completedChunksJson) ? after.completedChunksJson : [];
+        if (after && done.length === chunkPlan.length) {
+          const merged = mergeGroundingNotes(done.sort((a: any, b: any) => a.pageStart - b.pageStart).map((x: any) => x.notes));
+          await progress.finalize(unitId, leaseOwner, { groundingNotesJson: merged as any, groundingVersion: CURRENT_GROUNDING_VERSION, groundingModel: active.model, groundingPromptVersion: GROUNDING_PROMPT_VERSION, groundingSourceFingerprint: identity.sourceFingerprint });
+          return { status: "READY" };
+        }
+        await progress.releaseLease(unitId, leaseOwner);
+        return { status: "PREPARING", retryAfterMs: 0 };
+      } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); if (fetched.isTemporary) fs.rmSync(path.dirname(fetched.localPath), { recursive: true, force: true }); }
+    } catch (err) {
+      // Production hotfix (2026-09-25): a missing R2 object (AWS SDK
+      // throws an error named exactly "NoSuchKey" — see
+      // S3CurriculumSourceStorage.fetchToTempFile) is deterministic: it
+      // will never resolve itself by retrying. Narrow, exact name check —
+      // never a broad/guessed match — routes it straight to the existing
+      // terminal CONFIGURATION_ERROR status instead of RETRYABLE_FAILURE.
+      // No storage key, bucket, or exception detail is included in the
+      // reason string — ensureTopicHasSteps() already maps
+      // CONFIGURATION_ERROR to a single generic, student-safe message
+      // (ServiceUnavailableException("This lesson is not available yet.")),
+      // so nothing further is needed on the response side.
+      if (err instanceof Error && err.name === "NoSuchKey") {
+        await progress.markConfigurationError(unitId, leaseOwner, "source_object_not_found");
+        return { status: "CONFIGURATION_ERROR", reason: "source_object_not_found" };
+      }
+
+      // Provider-outage hotfix (2026-09-26): checked BEFORE the generic
+      // retryable/ceiling logic below, using the same isQuotaError() the
+      // TPM pacer already trusts (real OpenAI error code/type, e.g.
+      // "insufficient_quota" — never a fragile message-string match).
+      // Deliberately does NOT call markRetryable/markConfigurationError —
+      // this Unit's progress row (status, retryCount, lastErrorCode) is
+      // left completely untouched, only its lease is released, so the
+      // very next attempt (once the account has credits again) finds it
+      // exactly as it was, including every already-completed chunk.
+      if (isQuotaError(err)) {
+        this.logger.error(`UNIT_GROUNDING_PROVIDER_OUTAGE unitId=${unitId}: provider account has no usable quota/credits — halting without marking this Unit or consuming its retry ceiling: ${err instanceof Error ? err.message : String(err)}`);
+        await progress.releaseLease(unitId, leaseOwner);
+        return { status: "PROVIDER_OUTAGE", reason: "provider_quota_exhausted" };
+      }
+
+      const metadata = err instanceof BoundedGroundingRetryError ? err.metadata : undefined;
+      const retryAfterMs = Math.min(120000, Math.max(5000, metadata?.resetTokensMs ?? metadata?.retryAfterMs ?? 5000));
+      const nextEligibleAt = new Date(Date.now() + retryAfterMs);
+      const reason = metadata ? "provider_rate_limited" : (err instanceof Error ? err.name : "grounding_error");
+
+      // Observability hotfix (2026-09-25): `lastErrorCode` on the DB row
+      // only ever held `err.name` (a near-useless generic label like
+      // "UnitGroundingExtractionError") and, worse, got fully overwritten
+      // by the ceiling branch below — the real underlying cause was
+      // provably unrecoverable after the fact (see the
+      // cmucxcubj00eh2qd5kfwohz11 incident, 237 retries, no diagnosable
+      // log anywhere). Logging err.message/status here — safe: it comes
+      // from the SDK's own error object (API-response-derived, never an
+      // echo of the request), never prompts/images/textbook/student data.
+      const status = (err as { status?: number }).status;
+      this.logger.warn(
+        `UNIT_GROUNDING_CHUNK_FAILED unitId=${unitId} reason=${reason}: ${err instanceof Error ? err.message : String(err)}${status ? ` status=${status}` : ""}`,
+      );
+
+      // Bounded ceiling (2026-09-25): `current.retryCount` reflects
+      // consecutive retryable failures SINCE the last successful chunk
+      // (persistChunk resets it to 0 on real progress — see
+      // UnitGroundingProgressService.persistChunk). Past the ceiling, a
+      // failure that keeps recurring is treated as terminal rather than
+      // polled forever, exactly like the NoSuchKey case above — this
+      // covers any OTHER deterministic-but-unclassified failure mode, not
+      // just missing storage objects. A quota/rate-limit retry
+      // (BoundedGroundingRetryError) still counts toward this ceiling —
+      // it is not exempt — but its own retryAfterMs/resetTokensMs timing
+      // is preserved for every attempt up to the ceiling.
+      if (current.retryCount + 1 >= MAX_RETRYABLE_ATTEMPTS) {
+        // The terminal DB lastErrorCode becomes the generic
+        // "retryable_failure_limit_exceeded" (it must stay a single,
+        // stable, student-safe code) — but the LAST real reason/message
+        // is logged here, one line above the state transition, so it's
+        // never lost the way it was in the original incident.
+        this.logger.warn(`UNIT_GROUNDING_RETRY_CEILING_REACHED unitId=${unitId} lastRealReason=${reason} retryCount=${current.retryCount + 1}`);
+        await progress.markConfigurationError(unitId, leaseOwner, "retryable_failure_limit_exceeded");
+        return { status: "CONFIGURATION_ERROR", reason: "retryable_failure_limit_exceeded" };
+      }
+
+      await progress.markRetryable(unitId, leaseOwner, nextEligibleAt, reason);
+      return { status: "RETRYABLE_FAILURE", retryAfterMs, nextEligibleAt, reason };
+    }
   }
 
   async extractUnitGrounding(
@@ -311,15 +510,21 @@ export class UnitGroundingService {
     active: Awaited<ReturnType<AIProviderFactory["getActiveProvider"]>>,
     textTokens: number,
     pacer: UnitGroundingTpmPacer,
+    deferRateLimitWait = false,
   ): Promise<GroundingNotes> {
     const pageStart = pages[0].page, pageEnd = pages[pages.length - 1].page;
     const imagePaths = pages.map(p => p.imagePath);
     const estimatedInputTokens = textTokens + pages.reduce((sum, p) => sum + p.imageTokens, 0);
     const chunkTag = unitId;
-    const imageParts = imagePaths.map((p) => ({
-      type: "image_url" as const,
-      image_url: { url: `data:image/png;base64,${fs.readFileSync(p).toString("base64")}`, detail },
-    }));
+    // Page-provenance hotfix (2026-09-25): each image is preceded by its
+    // own "Image N" text label directly in the request — the model must
+    // never rely solely on the system prompt's description of ordering.
+    // This label, not any page number, is what a valid sourceImageIndex
+    // must refer back to (see unit-grounding-validator.ts).
+    const imageParts = imagePaths.flatMap((p, index) => [
+      { type: "text" as const, text: `Image ${index + 1}:` },
+      { type: "image_url" as const, image_url: { url: `data:image/png;base64,${fs.readFileSync(p).toString("base64")}`, detail } },
+    ]);
 
     const systemPrompt = this.contextBuilder.buildUnitGroundingExtractionPrompt({ ...ctx, pageRangeStart: pageStart, pageRangeEnd: pageEnd });
     let lastErrors: string[] = [];
@@ -360,11 +565,24 @@ export class UnitGroundingService {
             const rawHeaders = (err as { headers?: Headers | Record<string, string> }).headers;
             const headers = rawHeaders && typeof (rawHeaders as Headers).get === "function" ? rawHeaders as Headers : new Headers(rawHeaders);
             const metadata = tokenRateLimitMetadata(headers) as TokenRateLimitMetadata;
+            if (deferRateLimitWait) throw new BoundedGroundingRetryError(metadata);
             await pacer.waitAfterTpm429({ model, unitId, pageStart, pageEnd, estimatedTokens: estimatedInputTokens }, metadata, transportAttempt);
           }
         }
         if (!result) throw new Error("Grounding provider returned no result.");
       } catch (err) {
+        // Observability hotfix (2026-09-25): previously this raw provider
+        // failure was completely unlogged — only the generic, error-
+        // agnostic "budget released (provider call did not complete)"
+        // line existed (AIUsageService.releaseBudget). err.name/message/
+        // status come from the OpenAI SDK's own error object, derived
+        // from the API's response — never an echo of the request payload
+        // — so this is safe: no prompt text, no image/base64 data, no
+        // textbook or student content.
+        const status = (err as { status?: number }).status;
+        this.logger.warn(
+          `GROUNDING_PROVIDER_CALL_FAILED chunkTag=${chunkTag} pages=${pageStart}-${pageEnd} attempt=${attempt}: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}${status ? ` status=${status}` : ""}`,
+        );
         await this.usageService.releaseBudget(budgetReservationId).catch(() => undefined);
         throw err;
       }
@@ -402,14 +620,24 @@ export class UnitGroundingService {
       const validation = validateGroundingNotes(parsed, {
         unitNameEn: ctx.unitNameEn,
         subjectNameEn: ctx.subjectNameEn,
-        requestedPageRange: { start: pageStart, end: pageEnd },
+        imageCount: pages.length,
       });
-      if (validation.valid && validation.notes) return validation.notes;
+      // Page-provenance hotfix (2026-09-25): the model's sourceImageIndex
+      // ordinals are deterministically translated to REAL PDF page
+      // numbers here — never trusted from the model directly. See
+      // unit-grounding-page-remap.util.ts's doc comment.
+      if (validation.valid && validation.notes) return remapSourceImageIndexToPages(validation.notes, pages);
 
       lastErrors = validation.errors;
       this.logger.warn(`GROUNDING_VALIDATION_FAILED chunkTag=${chunkTag} pages=${pageStart}-${pageEnd} attempt=${attempt}: ${validation.errors.join("; ")}`);
     }
 
+    // Observability hotfix (2026-09-25): each attempt's validation errors
+    // were already logged individually above as they happened; this final
+    // summary line (with the SAME lastErrors the thrown error itself
+    // carries) is what a Railway-logs search for this chunkTag actually
+    // finds first, without needing to reconstruct the attempt sequence.
+    this.logger.warn(`GROUNDING_EXTRACTION_EXHAUSTED chunkTag=${chunkTag} pages=${pageStart}-${pageEnd} after ${MAX_ATTEMPTS} attempt(s): ${lastErrors.join("; ")}`);
     throw new UnitGroundingExtractionError(`Grounding extraction failed validation for pages ${pageStart}-${pageEnd} after ${MAX_ATTEMPTS} attempt(s).`, lastErrors);
   }
 
