@@ -14,6 +14,22 @@ import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.con
 
 const AUTO_BATCH_MAX_ATTEMPTS = 2;
 
+// The provider's default (600) is sized for a single question or lesson-
+// step-plan response. A bilingual question batch needs more room than that
+// no matter how small `count` is, so the FIRST attempt always uses this
+// fixed budget — never scaled by `count` (that "proactively size every
+// attempt" approach was tried and explicitly rejected: it grows unbounded
+// with `count` and masks the real signal, which is whether a *specific*
+// response was actually truncated). Only a detected truncation on attempt 1
+// escalates to AUTO_BATCH_TRUNCATION_RETRY_MAX_OUTPUT_TOKENS, exactly once.
+const AUTO_BATCH_MAX_OUTPUT_TOKENS = 4000;
+
+// Used for exactly one retry, only when attempt 1's failure looks like it
+// was caused by hitting the output-token ceiling (invalid/truncated JSON) —
+// never for a normal successful attempt and never for an unrelated
+// validation failure (e.g. valid JSON that fails a business-rule check).
+const AUTO_BATCH_TRUNCATION_RETRY_MAX_OUTPUT_TOKENS = 6000;
+
 // Practice serves 8 per session, Mock Exam up to 20 (see PracticeService/
 // QuizzesService's own requestedCount constants) — 8 gives Practice a full
 // pool immediately and Quiz/Mock Exam a real (if partial) one, without a
@@ -50,6 +66,22 @@ export class QuestionDraftGenerationError extends Error {
  * validateQuestionDraft's requireReviewedContent: false) QuestionDraft row
  * -> (separately, later) human bilingual review -> approve -> publish.
  */
+/**
+ * True when `content` looks like it was cut off mid-response rather than
+ * being deliberately malformed — the signature of hitting maxOutputTokens:
+ * a non-empty string that JSON.parse already rejected, and which doesn't
+ * even end with a closing `}` or `]`. Used ONLY to decide whether to spend
+ * the single bounded retry with a higher maxOutputTokens; never used to
+ * accept the JSON (validation stays exactly as strict as before).
+ */
+function looksLikeTruncatedJson(content: string | null | undefined): boolean {
+  if (!content) return true;
+  const trimmed = content.trim();
+  if (!trimmed) return true;
+  const lastChar = trimmed[trimmed.length - 1];
+  return lastChar !== "}" && lastChar !== "]";
+}
+
 @Injectable()
 export class QuestionDraftGeneratorService {
   private readonly logger = new Logger(QuestionDraftGeneratorService.name);
@@ -264,8 +296,20 @@ export class QuestionDraftGeneratorService {
 
     let lastErrors: string[] = [];
     let callsMade = 0;
+    // Fixed budget for every normal attempt. Only bumped, and only for the
+    // single next attempt, when the previous attempt's failure was
+    // specifically a truncation/invalid-JSON signature — see
+    // looksLikeTruncatedJson(). Never scaled by `count` and never bumped
+    // for a normal success or for an unrelated validation failure.
+    let nextMaxOutputTokens = AUTO_BATCH_MAX_OUTPUT_TOKENS;
+    let truncationRetryUsed = false;
 
     for (let attempt = 1; attempt <= AUTO_BATCH_MAX_ATTEMPTS; attempt++) {
+      const maxOutputTokensForThisAttempt = nextMaxOutputTokens;
+      // Reset back to the fixed default unless this attempt's own failure
+      // re-arms the truncation retry below — prevents the bump from ever
+      // silently carrying forward into an unrelated later attempt.
+      nextMaxOutputTokens = AUTO_BATCH_MAX_OUTPUT_TOKENS;
       const systemPrompt = this.contextBuilder.buildAutoQuestionBatchGenerationPrompt(
         {
           curriculumNameEn: topicContext.curriculumNameEn,
@@ -308,7 +352,9 @@ export class QuestionDraftGeneratorService {
           // much more room, or the JSON gets truncated mid-object and
           // every attempt fails as "invalid JSON" (found by hand: an
           // 8-question batch silently truncates at the 600-token default).
-          maxOutputTokens: Math.min(4000, 350 * count + 400),
+          // Fixed per attempt (never scaled by `count`) — only bumped for a
+          // single retry when the previous attempt was actually truncated.
+          maxOutputTokens: maxOutputTokensForThisAttempt,
         });
       } catch (err) {
         await this.usageService.releaseBudget(budgetReservationId).catch(() => undefined);
@@ -324,7 +370,19 @@ export class QuestionDraftGeneratorService {
         parsed = JSON.parse(result.content);
       } catch {
         lastErrors = ["Response was not valid JSON."];
-        this.logger.warn(`Auto question batch generation attempt ${attempt} produced invalid JSON.`);
+        // Only escalate maxOutputTokens for the NEXT attempt when this
+        // failure looks like a truncation (not just malformed JSON for some
+        // other reason), and only once per call — never a third attempt,
+        // never for an already-bumped attempt that truncates again.
+        if (!truncationRetryUsed && looksLikeTruncatedJson(result.content)) {
+          truncationRetryUsed = true;
+          nextMaxOutputTokens = AUTO_BATCH_TRUNCATION_RETRY_MAX_OUTPUT_TOKENS;
+          this.logger.warn(
+            `Auto question batch generation attempt ${attempt} produced truncated/invalid JSON — retrying once with a higher maxOutputTokens.`,
+          );
+        } else {
+          this.logger.warn(`Auto question batch generation attempt ${attempt} produced invalid JSON.`);
+        }
         continue;
       }
 
