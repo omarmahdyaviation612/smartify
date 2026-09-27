@@ -156,6 +156,50 @@ describe("repair-unit-source-page-end preflight/apply", () => {
     expect(updateSourcePageEnd).not.toHaveBeenCalled();
   });
 
+  it("correctFromSourcePageEnd: a row already at its exact expected wrong value is PENDING and gets corrected on apply", async () => {
+    const db = seedDb();
+    const target = ALLOWLIST.find((r) => r.correctFromSourcePageEnd !== undefined)!;
+    expect(target).toBeDefined();
+    db.get(target.unitId)!.sourcePageEnd = target.correctFromSourcePageEnd!;
+    const { deps, updateSourcePageEnd } = makeDeps(db);
+    const result = await preflightAndApply(deps, { apply: true });
+    expect(result.status).toBe("READY_TO_APPLY");
+    expect(updateSourcePageEnd).toHaveBeenCalledTimes(1);
+    expect(db.get(target.unitId)!.sourcePageEnd).toBe(target.override);
+  });
+
+  it("correctFromSourcePageEnd: a value that is neither null nor the exact expected wrong value still fails closed", async () => {
+    const db = seedDb();
+    const target = ALLOWLIST.find((r) => r.correctFromSourcePageEnd !== undefined)!;
+    db.get(target.unitId)!.sourcePageEnd = target.correctFromSourcePageEnd! + 1; // anything other than the exact confirmed wrong value
+    const { deps, updateSourcePageEnd } = makeDeps(db);
+    const result = await preflightAndApply(deps, { apply: true });
+    expect(result.status).toBe("FAIL_CLOSED");
+    expect(result.errors.some((e) => e.includes(target.unitId) && e.includes("UNEXPECTED"))).toBe(true);
+    expect(updateSourcePageEnd).not.toHaveBeenCalled();
+  });
+
+  it("correctFromSourcePageEnd: real-world shape — all 42 original rows already applied, only the correction row pending — applies just that one row", async () => {
+    const db = seedDb();
+    const target = ALLOWLIST.find((r) => r.correctFromSourcePageEnd !== undefined)!;
+    for (const row of ALLOWLIST) {
+      if (row.unitId === target.unitId) {
+        db.get(row.unitId)!.sourcePageEnd = row.correctFromSourcePageEnd!;
+      } else {
+        db.get(row.unitId)!.sourcePageEnd = row.override ?? physicalPageCountFor(row.unitId);
+      }
+    }
+    const { deps, updateSourcePageEnd } = makeDeps(db);
+    const result = await preflightAndApply(deps, { apply: true });
+    expect(result.status).toBe("READY_TO_APPLY");
+    expect(updateSourcePageEnd).toHaveBeenCalledTimes(1);
+    expect(updateSourcePageEnd.mock.calls[0][0]).toEqual([{ unitId: target.unitId, sourcePageEnd: target.override }]);
+    for (const row of ALLOWLIST) {
+      if (row.unitId === target.unitId) continue;
+      expect(db.get(row.unitId)!.sourcePageEnd).toBe(row.override ?? physicalPageCountFor(row.unitId));
+    }
+  });
+
   it("preflight alone (no apply flag) never calls updateSourcePageEnd", async () => {
     const { deps, updateSourcePageEnd } = makeDeps(seedDb());
     await preflight(deps);

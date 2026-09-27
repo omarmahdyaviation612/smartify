@@ -72,6 +72,17 @@ export interface RepairAllowlistRow {
    * inspection (trailing blank/print-spec/shared-appendix pages excluded).
    * Absent means "use the live physical PDF page count". */
   override?: number;
+  /**
+   * 2026-09-27: set ONLY for a row correcting an ALREADY-non-null
+   * `sourcePageEnd` (every other row here only ever fills a null one). Must
+   * equal the exact currently-persisted value being corrected — preflight
+   * re-verifies this live and FAILs closed if the live value has since
+   * changed to anything else, so this can never silently overwrite an
+   * unexpected/already-different value. Requires `override` to also be set
+   * (the corrected target must be an explicit, evidence-based value, never
+   * a re-derived physical page count).
+   */
+  correctFromSourcePageEnd?: number;
 }
 
 // Real production IDs, sourced mechanically from the 2026-09-26
@@ -96,7 +107,17 @@ export const ALLOWLIST: RepairAllowlistRow[] = [
   { subjectId: "cmucxcurp00n12qd52mwjl05c", unitId: "cmucxcut900nz2qd5um6phtrp", label: "EG_NATIONAL Grade 2 Arabic", expectedSourcePageStart: 82 },
   { subjectId: "cmucxcuvs00pf2qd5a5zrr74g", unitId: "cmucxcuws00q12qd58wsy4zoi", label: "EG_NATIONAL Grade 2 English", expectedSourcePageStart: 82 },
   { subjectId: "cmucxcuwy00q52qd554pikgig", unitId: "cmucxcuyc00r72qd55pu23dd1", label: "EG_NATIONAL Grade 2 Islamic", expectedSourcePageStart: 63 },
-  { subjectId: "cmucxcuu000od2qd5sbgih0ln", unitId: "cmucxcuvl00pb2qd5ptpa04qr", label: "EG_NATIONAL Grade 2 Mathematics", expectedSourcePageStart: 120 },
+  {
+    subjectId: "cmucxcuu000od2qd5sbgih0ln",
+    unitId: "cmucxcuvl00pb2qd5ptpa04qr",
+    label: "EG_NATIONAL Grade 2 Mathematics",
+    expectedSourcePageStart: 120,
+    // 2026-09-27 visual audit: physical page 125 is the genuine final
+    // instructional page; 126-127 are blank Notes pages and 128 is the
+    // back-cover/colophon — excluded from grounding's page range.
+    override: 125,
+    correctFromSourcePageEnd: 128,
+  },
   { subjectId: "cmucxcuzf00rt2qd5mokbdrcr", unitId: "cmucxcv0y00sf2qd5cw5lwohq", label: "EG_NATIONAL Grade 3 Arabic", expectedSourcePageStart: 84, override: 126 },
   { subjectId: "cmucxcv3500tv2qd57rywrgoh", unitId: "cmucxcv5500v92qd58n4d6a7n", label: "EG_NATIONAL Grade 3 English", expectedSourcePageStart: 99 },
   { subjectId: "cmucxcv5l00vj2qd5164wippr", unitId: "cmucxcv6v00wd2qd5clg0qkyd", label: "EG_NATIONAL Grade 3 Islamic", expectedSourcePageStart: 59 },
@@ -132,6 +153,9 @@ if (ALLOWLIST.some((r) => r.unitId === EXCLUDED_SOURCE_FILE_MISMATCH.unitId)) {
 }
 if (new Set(ALLOWLIST.map((r) => r.unitId)).size !== ALLOWLIST.length) {
   throw new Error("ALLOWLIST contains a duplicate unitId.");
+}
+if (ALLOWLIST.some((r) => r.correctFromSourcePageEnd !== undefined && r.override === undefined)) {
+  throw new Error("A row with correctFromSourcePageEnd must also set an explicit override — a correction target can never be a re-derived physical page count.");
 }
 
 export type UnitLookup = (unitId: string) => Promise<{
@@ -198,21 +222,48 @@ async function preflightRow(deps: RepairDeps, row: RepairAllowlistRow): Promise<
 
   if (unit.sourcePageEnd === null) return { row, state: "PENDING", proposedSourcePageEnd, physicalPdfPageCount, resolvedSourceKey };
   if (unit.sourcePageEnd === proposedSourcePageEnd) return { row, state: "ALREADY_APPLIED", proposedSourcePageEnd, physicalPdfPageCount, resolvedSourceKey };
-  return { row, state: "FAIL", reason: `sourcePageEnd is already set to an UNEXPECTED value (${unit.sourcePageEnd}, expected null or ${proposedSourcePageEnd}) — refusing to overwrite.` };
+  if (row.correctFromSourcePageEnd !== undefined && unit.sourcePageEnd === row.correctFromSourcePageEnd) {
+    return { row, state: "PENDING", proposedSourcePageEnd, physicalPdfPageCount, resolvedSourceKey };
+  }
+  return { row, state: "FAIL", reason: `sourcePageEnd is already set to an UNEXPECTED value (${unit.sourcePageEnd}, expected null${row.correctFromSourcePageEnd !== undefined ? ` or ${row.correctFromSourcePageEnd}` : ""} or ${proposedSourcePageEnd}) — refusing to overwrite.` };
 }
 
-/** Runs preflight for all 43 rows. Never writes. */
+/**
+ * Runs preflight for all 43 rows. Never writes.
+ *
+ * The "every row in the same state" check below exists to catch an
+ * UNINTENDED mixed state among the original null-filling rows (e.g. a
+ * previous partial/interrupted run) — it was never meant to block a
+ * deliberate, individually-verified `correctFromSourcePageEnd` row, whose
+ * safety comes entirely from its own exact-value precondition in
+ * `preflightRow`, not from every other row agreeing with it. Correction
+ * rows are therefore excluded from the uniformity check and always allowed
+ * to apply on their own PENDING/ALREADY_APPLIED outcome.
+ */
 export async function preflight(deps: RepairDeps): Promise<PreflightResult> {
   const rows = await Promise.all(ALLOWLIST.map((row) => preflightRow(deps, row)));
   const errors = rows.filter((r): r is Extract<RowOutcome, { state: "FAIL" }> => r.state === "FAIL").map((r) => `${r.row.label} (${r.row.unitId}): ${r.reason}`);
 
   if (errors.length > 0) return { status: "FAIL_CLOSED", rows, errors };
-  if (rows.every((r) => r.state === "PENDING")) return { status: "READY_TO_APPLY", rows, errors: [] };
-  if (rows.every((r) => r.state === "ALREADY_APPLIED")) return { status: "ALREADY_APPLIED", rows, errors: [] };
+
+  const originalRows = rows.filter((r) => r.row.correctFromSourcePageEnd === undefined);
+  const correctionRows = rows.filter((r) => r.row.correctFromSourcePageEnd !== undefined);
+  const originalUniform = originalRows.every((r) => r.state === "PENDING") || originalRows.every((r) => r.state === "ALREADY_APPLIED");
+  if (!originalUniform) {
+    return {
+      status: "FAIL_CLOSED",
+      rows,
+      errors: ["Mixed state: some original (null-filling) rows are PENDING and some are ALREADY_APPLIED. Refusing to partially apply — investigate before retrying."],
+    };
+  }
+  const anyPending = rows.some((r) => r.state === "PENDING");
+  const allApplied = originalRows.every((r) => r.state === "ALREADY_APPLIED") && correctionRows.every((r) => r.state === "ALREADY_APPLIED");
+  if (allApplied) return { status: "ALREADY_APPLIED", rows, errors: [] };
+  if (anyPending) return { status: "READY_TO_APPLY", rows, errors: [] };
   return {
     status: "FAIL_CLOSED",
     rows,
-    errors: ["Mixed state: some rows are PENDING and some are ALREADY_APPLIED. Refusing to partially apply — investigate before retrying."],
+    errors: ["Unreachable preflight state — investigate before retrying."],
   };
 }
 
@@ -231,11 +282,15 @@ export async function preflightAndApply(deps: RepairDeps, opts: { apply: boolean
   const pending = result.rows.filter((r): r is Extract<RowOutcome, { state: "PENDING" }> => r.state === "PENDING");
   await deps.updateSourcePageEnd(pending.map((r) => ({ unitId: r.row.unitId, sourcePageEnd: r.proposedSourcePageEnd })));
 
-  // Post-write verification: re-fetch every row and confirm it matches exactly.
+  // Post-write verification: re-fetch every row and confirm it matches exactly
+  // — both the rows this run just wrote AND every already-applied row that
+  // was correctly left untouched (its expected value is its own
+  // proposedSourcePageEnd from preflight, not just the just-written subset).
   const verification = await Promise.all(
     ALLOWLIST.map(async (row) => {
       const unit = await deps.findUnit(row.unitId);
-      const expected = pending.find((p) => p.row.unitId === row.unitId)?.proposedSourcePageEnd;
+      const outcome = result.rows.find((r) => r.row.unitId === row.unitId);
+      const expected = outcome && outcome.state !== "FAIL" ? outcome.proposedSourcePageEnd : undefined;
       return { unitId: row.unitId, ok: !!unit && unit.sourcePageEnd === expected };
     }),
   );
