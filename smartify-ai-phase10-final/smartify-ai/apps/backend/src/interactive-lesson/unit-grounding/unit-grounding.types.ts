@@ -59,6 +59,19 @@ export interface GroundingSlice {
   facts: GroundingFact[];
   vocabulary: GroundingVocabularyTerm[];
   matchedViaHint: boolean;
+  /**
+   * 2026-09-27 (persisted Topic->grounding assignment): an OPTIONAL, purely
+   * additive discriminant naming WHICH internal branch of
+   * selectRelevantGrounding() produced this slice. `matchedViaHint` alone
+   * cannot distinguish the keyword-overlap branch from the single-Topic-Unit
+   * fallback (both report `false`), and TopicGroundingAssignmentService needs
+   * that distinction to persist the right `method` enum value. Optional and
+   * ignored by every pre-existing consumer — it never changes generation
+   * behavior, exactly like `matchedViaHint`.
+   */
+  matchedVia?: "HINT" | "KEYWORD" | "SINGLE_TOPIC_UNIT";
+  /** The verbatim `topicHints[].topicTitle` that matched, when matchedVia === "HINT". */
+  matchedHintTitle?: string;
 }
 
 /**

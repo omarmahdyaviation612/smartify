@@ -13,10 +13,28 @@ import type { GroundingNotes, GroundingSlice } from "../../interactive-lesson/un
  * with, via the Topic's own `unit` relation).
  */
 
-function normalizeTitle(title: string): string {
+/**
+ * Unicode-safe, language-agnostic title normalization. Deliberately NOT a
+ * synonym table (2026-09-27): the ONLY thing widened here is orthographic
+ * noise that two spellings of the SAME string differ by — case, Unicode
+ * combining marks (Arabic harakat/tanwin, Latin accents, any script's
+ * diacritics), punctuation/symbol characters, and whitespace runs. It
+ * behaves identically for Arabic, English or any other script, and can
+ * never map two genuinely different titles onto each other.
+ */
+export function normalizeTitle(title: string): string {
   return title
+    .normalize("NFD")
+    // Strip Unicode combining marks (diacritics): U+0300-U+036F covers the
+    // Latin set, the U+06xx ranges the Arabic harakat/tanwin/sukun marks.
+    .replace(/[̀-ͯؐ-ًؚ-ٰٟۖ-ۜ۟-۪ۨ-ۭ]/g, "")
     .toLowerCase()
-    .replace(/[.,!?;:()'"]/g, "")
+    // Any punctuation/symbol character (Unicode-aware), not just the ASCII
+    // set the original list covered — Arabic comma/semicolon/question mark,
+    // typographic quotes, en/em dashes, brackets and slashes all collapse to
+    // a space, so "Unit 3 — Plants (Reading)" and "Unit 3: Plants, reading"
+    // normalize identically.
+    .replace(/[\p{P}\p{S}]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -71,6 +89,8 @@ export function selectRelevantGrounding(
     const relevantNames = new Set(exactHint.relevantConcepts.map((c) => c.toLowerCase()));
     return {
       matchedViaHint: true,
+      matchedVia: "HINT",
+      matchedHintTitle: exactHint.topicTitle,
       learningObjectives: groundingNotesJson.learningObjectives,
       concepts: groundingNotesJson.concepts.filter((c) => relevantNames.has(c.name.toLowerCase()) || exactHint.sourcePages.some((p) => c.sourcePages.includes(p))),
       facts: groundingNotesJson.facts.filter((f) => exactHint.sourcePages.some((p) => f.sourcePages.includes(p))),
@@ -93,6 +113,7 @@ export function selectRelevantGrounding(
       // 2+ Topics (see doc comment above).
       return {
         matchedViaHint: false,
+        matchedVia: "SINGLE_TOPIC_UNIT",
         learningObjectives: groundingNotesJson.learningObjectives,
         concepts: groundingNotesJson.concepts,
         facts: groundingNotesJson.facts,
@@ -112,6 +133,7 @@ export function selectRelevantGrounding(
 
   return {
     matchedViaHint: false,
+    matchedVia: "KEYWORD",
     learningObjectives: groundingNotesJson.learningObjectives,
     concepts: relevantConcepts,
     facts: groundingNotesJson.facts.filter((f) => f.sourcePages.some((p) => relevantPages.has(p))),

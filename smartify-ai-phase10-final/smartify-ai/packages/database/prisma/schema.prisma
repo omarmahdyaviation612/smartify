@@ -30,10 +30,10 @@ model User {
   updatedAt     DateTime  @updatedAt
   deletedAt     DateTime?
 
-  studentProfile StudentProfile?
-  parentProfile  ParentProfile?
-  teacherProfile TeacherProfile?
-  auditLogs      AuditLog[]
+  studentProfile  StudentProfile?
+  parentProfile   ParentProfile?
+  teacherProfile  TeacherProfile?
+  auditLogs       AuditLog[]
   linkInvitations ParentLinkInvitation[]
 
   @@index([role])
@@ -69,36 +69,36 @@ model StudentProfile {
   governorate      String?
   area             String?
   schoolId         String?
-  school           School?    @relation(fields: [schoolId], references: [id])
+  school           School? @relation(fields: [schoolId], references: [id])
   schoolNameManual String?
 
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  subjects         StudentSubject[]
-  progress         StudentProgress[]
-  learningPlans    LearningPlan[]
-  quizResults      QuizResult[]
-  questionAttempts QuestionAttempt[]
-  achievements     StudentAchievement[]
-  aiConversations  AIConversation[]
-  lessonSessions   LessonSession[]
-  aiCredits        AICredits?
-  subscription     Subscription?
-  freeTutorTrial   FreeTutorTrial?
-  parentLinks      ParentStudentRelation[]
-  linkInvitations  ParentLinkInvitation[]
-  assessments      Assessment[]
+  subjects              StudentSubject[]
+  progress              StudentProgress[]
+  learningPlans         LearningPlan[]
+  quizResults           QuizResult[]
+  questionAttempts      QuestionAttempt[]
+  achievements          StudentAchievement[]
+  aiConversations       AIConversation[]
+  lessonSessions        LessonSession[]
+  aiCredits             AICredits?
+  subscription          Subscription?
+  freeTutorTrial        FreeTutorTrial?
+  parentLinks           ParentStudentRelation[]
+  linkInvitations       ParentLinkInvitation[]
+  assessments           Assessment[]
   questionPackPurchases TutorQuestionPackPurchase[]
-  extraQuestionCredits TutorExtraQuestionCredit[]
-  instapaySubmissions InstapayPaymentSubmission[]
+  extraQuestionCredits  TutorExtraQuestionCredit[]
+  instapaySubmissions   InstapayPaymentSubmission[]
 
   // Free Trial + Referral V1 (2026-09-20)
-  lessonTrial       LessonTrial?
+  lessonTrial             LessonTrial?
   lessonTrialConsumptions LessonTrialConsumption[]
-  referralCode      ReferralCode?
-  referralsMade     Referral[] @relation("ReferralsMade")
-  referredBy        Referral?  @relation("ReferredStudent")
+  referralCode            ReferralCode?
+  referralsMade           Referral[]               @relation("ReferralsMade")
+  referredBy              Referral?                @relation("ReferredStudent")
 }
 
 model ParentProfile {
@@ -131,15 +131,15 @@ model ParentStudentRelation {
 }
 
 model ParentLinkInvitation {
-  id            String         @id @default(cuid())
-  code          String         @unique
-  studentId     String
-  student       StudentProfile @relation(fields: [studentId], references: [id])
+  id              String         @id @default(cuid())
+  code            String         @unique
+  studentId       String
+  student         StudentProfile @relation(fields: [studentId], references: [id])
   createdByUserId String
-  createdByUser  User           @relation(fields: [createdByUserId], references: [id])
-  expiresAt     DateTime
-  usedAt        DateTime?
-  createdAt     DateTime       @default(now())
+  createdByUser   User           @relation(fields: [createdByUserId], references: [id])
+  expiresAt       DateTime
+  usedAt          DateTime?
+  createdAt       DateTime       @default(now())
 
   @@index([studentId, expiresAt])
 }
@@ -188,9 +188,9 @@ model Curriculum {
   country  String?
   isActive Boolean @default(true)
 
-  grades          Grade[]
-  studentProfiles StudentProfile[]
-  pricingPlans    PricingPlan[]
+  grades           Grade[]
+  studentProfiles  StudentProfile[]
+  pricingPlans     PricingPlan[]
   tutorAnswerCache TutorAnswerCache[]
 }
 
@@ -203,8 +203,8 @@ model Grade {
   level        Int // sort order / numeric grade
   isActive     Boolean    @default(true)
 
-  subjects        Subject[]
-  studentProfiles StudentProfile[]
+  subjects         Subject[]
+  studentProfiles  StudentProfile[]
   tutorAnswerCache TutorAnswerCache[]
 
   @@index([curriculumId])
@@ -236,16 +236,16 @@ model Subject {
   // created under the old model.
   priceEGP Decimal?
 
-  units           Unit[]
-  studentSubjects StudentSubject[]
-  assessments     Assessment[]
-  questionPackPurchases TutorQuestionPackPurchase[]
-  extraQuestionCredits TutorExtraQuestionCredit[]
-  tutorAnswerCache TutorAnswerCache[]
-  freeTutorTrials FreeTutorTrial[]
-  materials       LearningMaterial[]
+  units                   Unit[]
+  studentSubjects         StudentSubject[]
+  assessments             Assessment[]
+  questionPackPurchases   TutorQuestionPackPurchase[]
+  extraQuestionCredits    TutorExtraQuestionCredit[]
+  tutorAnswerCache        TutorAnswerCache[]
+  freeTutorTrials         FreeTutorTrial[]
+  materials               LearningMaterial[]
   lessonTrialConsumptions LessonTrialConsumption[]
-  referralRewards Referral[]
+  referralRewards         Referral[]
 
   @@index([gradeId])
 }
@@ -273,14 +273,14 @@ model StudentSubject {
 }
 
 model FreeTutorTrial {
-  id           String         @id @default(cuid())
-  studentId    String         @unique
-  student      StudentProfile @relation(fields: [studentId], references: [id])
-  subjectId    String
-  subject      Subject        @relation(fields: [subjectId], references: [id])
-  questionsUsed Int           @default(0)
-  createdAt    DateTime       @default(now())
-  completedAt  DateTime?
+  id            String         @id @default(cuid())
+  studentId     String         @unique
+  student       StudentProfile @relation(fields: [studentId], references: [id])
+  subjectId     String
+  subject       Subject        @relation(fields: [subjectId], references: [id])
+  questionsUsed Int            @default(0)
+  createdAt     DateTime       @default(now())
+  completedAt   DateTime?
 
   @@index([subjectId])
 }
@@ -332,17 +332,17 @@ model Unit {
   // Null means "not yet grounded" (or no source PDF mapped at all) —
   // generation gracefully falls back to today's title-only behavior, never
   // blocks a student.
-  groundingNotesJson Json?
-  groundingGeneratedAt DateTime?
+  groundingNotesJson         Json?
+  groundingGeneratedAt       DateTime?
   // Bumped only when the grounding EXTRACTION schema/methodology changes in
   // a way that would make old groundingNotesJson stale — never touched by
   // downstream lesson/question generation itself. Used (with
   // generationPromptVersion on Topic) to identify already-generated content
   // as eligible for a later, deliberate, admin-triggered regeneration —
   // never an automatic one during a student's request.
-  groundingVersion Int?
-  groundingModel String?
-  groundingPromptVersion String?
+  groundingVersion           Int?
+  groundingModel             String?
+  groundingPromptVersion     String?
   // sha256 of (PDF bytes + page range + extraction-prompt version) — lets
   // us detect that a source PDF or selected page range changed since this
   // Unit was last grounded, without storing any textbook content itself.
@@ -359,8 +359,8 @@ model Unit {
   groundingLockedAt DateTime?
   groundingLockedBy String?
 
-  topics Topic[]
-  lessonDrafts LessonDraft[]
+  topics            Topic[]
+  lessonDrafts      LessonDraft[]
   groundingProgress UnitGroundingProgress?
 
   @@index([subjectId])
@@ -374,26 +374,26 @@ enum UnitGroundingProgressStatus {
 }
 
 model UnitGroundingProgress {
-  id String @id @default(cuid())
-  unitId String @unique
-  unit Unit @relation(fields: [unitId], references: [id], onDelete: Cascade)
-  status UnitGroundingProgressStatus @default(IN_PROGRESS)
-  sourceKey String
-  sourceFingerprint String
-  sourcePageStart Int
-  sourcePageEnd Int
-  promptVersion String
-  providerModel String
-  rendererVersion String
-  chunkPlanJson Json
+  id                  String                      @id @default(cuid())
+  unitId              String                      @unique
+  unit                Unit                        @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  status              UnitGroundingProgressStatus @default(IN_PROGRESS)
+  sourceKey           String
+  sourceFingerprint   String
+  sourcePageStart     Int
+  sourcePageEnd       Int
+  promptVersion       String
+  providerModel       String
+  rendererVersion     String
+  chunkPlanJson       Json
   completedChunksJson Json
-  nextEligibleAt DateTime?
-  retryCount Int @default(0)
-  lastErrorCode String?
-  leaseOwner String?
-  leaseExpiresAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  nextEligibleAt      DateTime?
+  retryCount          Int                         @default(0)
+  lastErrorCode       String?
+  leaseOwner          String?
+  leaseExpiresAt      DateTime?
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
 
   @@index([status, nextEligibleAt])
   @@index([leaseExpiresAt])
@@ -425,10 +425,10 @@ model Topic {
   // changes it. Used to identify which already-live Topics could benefit
   // from a later, selective, admin-triggered regrounding — never to
   // trigger one on its own.
-  generationSource String?
-  groundingVersionUsed Int?
+  generationSource        String?
+  groundingVersionUsed    Int?
   generationPromptVersion String?
-  contentGeneratedAt DateTime?
+  contentGeneratedAt      DateTime?
 
   // Production lazy-generation single-flight lock (2026-09-19) — same
   // rationale/pattern as Unit.groundingLockedAt, one level down: two
@@ -438,18 +438,104 @@ model Topic {
   generationLockedAt DateTime?
   generationLockedBy String?
 
-  lessons   Lesson[]
-  questions Question[]
-  questionDrafts QuestionDraft[]
-  tutorAnswerCache TutorAnswerCache[]
-  materials LearningMaterial[]
-  lessonSessions LessonSession[]
-  visualAssets   LessonVisualAsset[]
-  publishedFromDraft LessonDraft?
-  quizResults    QuizResult[]
+  lessons                 Lesson[]
+  questions               Question[]
+  questionDrafts          QuestionDraft[]
+  tutorAnswerCache        TutorAnswerCache[]
+  materials               LearningMaterial[]
+  lessonSessions          LessonSession[]
+  visualAssets            LessonVisualAsset[]
+  publishedFromDraft      LessonDraft?
+  quizResults             QuizResult[]
   lessonTrialConsumptions LessonTrialConsumption[]
+  // Persisted Topic->grounding assignment (2026-09-27) — see
+  // TopicGroundingAssignment below.
+  groundingAssignment     TopicGroundingAssignment?
 
   @@index([unitId])
+}
+
+// HOW a Topic's slice of its Unit's grounding was decided. HINT_MATCH,
+// KEYWORD_OVERLAP and SINGLE_TOPIC_FALLBACK are the three existing
+// deterministic branches of selectRelevantGrounding() (grounding-selector.util.ts),
+// recorded rather than re-derived. REVIEW_FULL_UNIT and PAGE_ORDER_GAP are
+// the two additional deterministic steps added by
+// TopicGroundingAssignmentService. AI_MAPPER is the bounded, preparation-only
+// fallback (TopicGroundingMapperService) — never reachable from a
+// student-facing runtime request path.
+enum TopicGroundingAssignmentMethod {
+  HINT_MATCH
+  KEYWORD_OVERLAP
+  SINGLE_TOPIC_FALLBACK
+  REVIEW_FULL_UNIT
+  PAGE_ORDER_GAP
+  AI_MAPPER
+}
+
+enum TopicGroundingAssignmentConfidence {
+  HIGH
+  LOW
+}
+
+enum TopicGroundingAssignmentStatus {
+  READY
+  BLOCKED
+}
+
+// The one-time, PERSISTED decision of which items from a Unit's
+// groundingNotesJson belong to ONE Topic under it (2026-09-27).
+//
+// Before this model, relevance was inferred fresh from the Topic's title on
+// every single call — lesson authoring, question authoring, runtime teaching
+// and Tutor each ran selectRelevantGrounding() independently. A production
+// run found 118 Topics where that legitimately returns null even though the
+// Unit is correctly grounded, because curriculum Topic titles are routinely
+// creative/narrative ("(Reading)"/"(Listening)" labels, story names) or
+// paraphrase the extracted concept names differently. Assignment is now
+// decided ONCE, in an explicit preparation step, and read identically by all
+// four consumers thereafter.
+//
+// Only NAMES are stored, never copies of the concept/fact objects: readers
+// always re-filter the Unit's CURRENT groundingNotesJson by these names, so
+// a Unit's real content is always live even though which-names-to-select is
+// cached.
+model TopicGroundingAssignment {
+  id      String @id @default(cuid())
+  topicId String @unique
+  topic   Topic  @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  // Identity: BOTH the underlying Unit grounding's identity AND this
+  // assignment algorithm's own version must match for a persisted row to be
+  // trusted. Improving the assignment algorithm later (a smarter Step 5, a
+  // new mapper prompt) must be able to invalidate/recompute affected
+  // assignments WITHOUT fake-bumping the Unit's own groundingVersion/
+  // groundingSourceFingerprint, which describe the TEXTBOOK EXTRACTION, not
+  // the assignment logic.
+  unitGroundingVersion  Int
+  unitSourceFingerprint String
+  // Bumped when Steps 1-5 logic or the mapper prompt/behavior changes.
+  assignmentVersion     Int
+
+  method     TopicGroundingAssignmentMethod
+  confidence TopicGroundingAssignmentConfidence
+  status     TopicGroundingAssignmentStatus
+
+  // string[] — a verbatim subset of the Unit's groundingNotesJson.concepts[].name at write time.
+  matchedConceptNames Json
+  // string[] | null — a verbatim subset of groundingNotesJson.topicHints[].topicTitle.
+  matchedHintTitles   Json?
+
+  // Only populated when method == AI_MAPPER.
+  mapperModel         String?
+  mapperPromptVersion Int?
+
+  // Short audit note (the mapper's own `reason` string, when method == AI_MAPPER).
+  reason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([unitGroundingVersion, unitSourceFingerprint, assignmentVersion])
 }
 
 // Phase 4: the actual generated bytes for ONE teachingStepsJson step's
@@ -624,7 +710,7 @@ model Question {
   needsReview       Boolean      @default(false)
   createdAt         DateTime     @default(now())
 
-  attempts QuestionAttempt[]
+  attempts           QuestionAttempt[]
   publishedFromDraft QuestionDraft?
 
   @@index([topicId, difficulty])
@@ -738,16 +824,16 @@ model QuizResult {
 // numbers), which is what a real subscription should reference.
 
 model Subscription {
-  id                      String         @id @default(cuid())
-  studentId               String         @unique // one active subscription per student for MVP simplicity
-  student                 StudentProfile @relation(fields: [studentId], references: [id])
+  id                             String         @id @default(cuid())
+  studentId                      String         @unique // one active subscription per student for MVP simplicity
+  student                        StudentProfile @relation(fields: [studentId], references: [id])
   // Subject-based pricing (2026-09-20): nullable now — a NEW subscription
   // is no longer tied to a curriculum-bundle PricingPlan at all; this stays
   // set (and readable) only on historical rows created under the old
   // model, preserved as-is for those existing payment records.
-  pricingPlanId           String?
-  pricingPlan             PricingPlan?   @relation(fields: [pricingPlanId], references: [id])
-  additionalSubjectsCount Int            @default(0) // legacy (old bundle model) — always 0 on a subject-priced subscription, kept only so historical rows keep their original value
+  pricingPlanId                  String?
+  pricingPlan                    PricingPlan?   @relation(fields: [pricingPlanId], references: [id])
+  additionalSubjectsCount        Int            @default(0) // legacy (old bundle model) — always 0 on a subject-priced subscription, kept only so historical rows keep their original value
   // Subject-based pricing (2026-09-20): the exact Subject ids this
   // subscription's price/entitlement covers, snapshotted at checkout time
   // — a plain JSON string array rather than a new junction table, mirroring
@@ -756,53 +842,53 @@ model Subscription {
   // StudentSubject rows — see BillingService. Null on historical
   // plan-based rows (nothing to backfill: those subjects were already
   // granted through the old flow).
-  selectedSubjectIds      Json?
-  monthlyTotalEGP         Decimal // sum of the selected Subjects' own priceEGP (subject-based pricing) — or, on a historical row, pricingPlan.monthlyPriceEGP + (additionalSubjectsCount * pricingPlan.additionalSubjectPriceEGP) as originally snapshotted
-  status                  String // "pending" | "active" | "canceled" | "past_due"
-  currentPeriodStart      DateTime?
-  currentPeriodEnd        DateTime?
-  paymentProvider         String? // "stripe" | "paymob" | "paypal"
-  externalSubscriptionId  String? // the CHECKOUT SESSION id (e.g. Stripe "cs_...") — set at checkout-creation time, before the provider has assigned a real subscription; used to correlate "checkout.session.completed" and for payment-status verification.
+  selectedSubjectIds             Json?
+  monthlyTotalEGP                Decimal // sum of the selected Subjects' own priceEGP (subject-based pricing) — or, on a historical row, pricingPlan.monthlyPriceEGP + (additionalSubjectsCount * pricingPlan.additionalSubjectPriceEGP) as originally snapshotted
+  status                         String // "pending" | "active" | "canceled" | "past_due"
+  currentPeriodStart             DateTime?
+  currentPeriodEnd               DateTime?
+  paymentProvider                String? // "stripe" | "paymob" | "paypal"
+  externalSubscriptionId         String? // the CHECKOUT SESSION id (e.g. Stripe "cs_...") — set at checkout-creation time, before the provider has assigned a real subscription; used to correlate "checkout.session.completed" and for payment-status verification.
   externalProviderSubscriptionId String? // the provider's own SUBSCRIPTION id (e.g. Stripe "sub_...") — a DIFFERENT identifier than the checkout session, only known once the provider assigns one. Captured from a verified webhook at activation time; used to correlate subscription-level lifecycle events ("customer.subscription.deleted", "invoice.payment_failed") that never carry a checkout session id. Nullable/historical: subscriptions created before this field existed simply never have it set.
-  createdAt               DateTime       @default(now())
-  updatedAt               DateTime       @updatedAt
+  createdAt                      DateTime       @default(now())
+  updatedAt                      DateTime       @updatedAt
 
   @@index([externalProviderSubscriptionId])
 }
 
 model TutorQuestionPackPurchase {
-  id                    String   @id @default(cuid())
-  studentId             String
-  student               StudentProfile @relation(fields: [studentId], references: [id])
-  subjectId             String
-  subject               Subject @relation(fields: [subjectId], references: [id])
-  quantity              Int      @default(10)
-  amountEGP             Decimal
-  status                String   // "pending" | "paid" | "failed" | "canceled"
-  paymentProvider       String?
-  externalSessionId     String?
-  externalEventId       String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  credits               TutorExtraQuestionCredit[]
+  id                String                     @id @default(cuid())
+  studentId         String
+  student           StudentProfile             @relation(fields: [studentId], references: [id])
+  subjectId         String
+  subject           Subject                    @relation(fields: [subjectId], references: [id])
+  quantity          Int                        @default(10)
+  amountEGP         Decimal
+  status            String // "pending" | "paid" | "failed" | "canceled"
+  paymentProvider   String?
+  externalSessionId String?
+  externalEventId   String?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+  credits           TutorExtraQuestionCredit[]
 
+  @@unique([paymentProvider, externalEventId])
   @@index([studentId, status])
   @@index([externalSessionId])
-  @@unique([paymentProvider, externalEventId])
 }
 
 model TutorExtraQuestionCredit {
-  id          String   @id @default(cuid())
-  studentId   String
-  student     StudentProfile @relation(fields: [studentId], references: [id])
-  subjectId   String
-  subject     Subject @relation(fields: [subjectId], references: [id])
-  usageDate   DateTime
-  remaining   Int      @default(0)
-  purchaseId  String
-  purchase    TutorQuestionPackPurchase @relation(fields: [purchaseId], references: [id])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String                    @id @default(cuid())
+  studentId  String
+  student    StudentProfile            @relation(fields: [studentId], references: [id])
+  subjectId  String
+  subject    Subject                   @relation(fields: [subjectId], references: [id])
+  usageDate  DateTime
+  remaining  Int                       @default(0)
+  purchaseId String
+  purchase   TutorQuestionPackPurchase @relation(fields: [purchaseId], references: [id])
+  createdAt  DateTime                  @default(now())
+  updatedAt  DateTime                  @updatedAt
 
   @@unique([studentId, subjectId, usageDate])
   @@index([studentId, subjectId, usageDate])
@@ -852,22 +938,22 @@ model InstapayPaymentSubmission {
 }
 
 model TutorAnswerCache {
-  id             String   @id @default(cuid())
-  curriculumId   String
-  gradeId        String
-  subjectId      String
-  topicId        String?
-  language       String
-  normalizedPrompt String @db.Text
-  answer         String @db.Text
-  provider       String
-  model          String
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  curriculum     Curriculum @relation(fields: [curriculumId], references: [id])
-  grade          Grade @relation(fields: [gradeId], references: [id])
-  subject        Subject @relation(fields: [subjectId], references: [id])
-  topic          Topic? @relation(fields: [topicId], references: [id])
+  id               String     @id @default(cuid())
+  curriculumId     String
+  gradeId          String
+  subjectId        String
+  topicId          String?
+  language         String
+  normalizedPrompt String     @db.Text
+  answer           String     @db.Text
+  provider         String
+  model            String
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  curriculum       Curriculum @relation(fields: [curriculumId], references: [id])
+  grade            Grade      @relation(fields: [gradeId], references: [id])
+  subject          Subject    @relation(fields: [subjectId], references: [id])
+  topic            Topic?     @relation(fields: [topicId], references: [id])
 
   @@unique([curriculumId, gradeId, subjectId, topicId, language, normalizedPrompt])
   @@index([subjectId, language])
@@ -943,12 +1029,12 @@ model AIDailyUsageCounter {
 // request X already reconcile" and is never queried directly by request
 // code, only atomically incremented/decremented by AIUsageService.
 model AIDailyBudgetCounter {
-  id          String   @id @default(cuid())
-  scope       String // "global" | "user"
-  scopeKey    String // "global" for the single global row; StudentProfile-independent userId for a per-user row
-  usageDate   DateTime // truncated to the day (00:00) — one row per scope+scopeKey+day
-  committedUsd Decimal @default(0)
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(cuid())
+  scope        String // "global" | "user"
+  scopeKey     String // "global" for the single global row; StudentProfile-independent userId for a per-user row
+  usageDate    DateTime // truncated to the day (00:00) — one row per scope+scopeKey+day
+  committedUsd Decimal  @default(0)
+  updatedAt    DateTime @updatedAt
 
   @@unique([scope, scopeKey, usageDate])
 }
@@ -970,14 +1056,14 @@ enum AIBudgetReservationStatus {
 // reserve time (what was actually deducted from both accumulator rows);
 // reconciledUsd is filled in only on a successful RECONCILED transition.
 model AIBudgetReservation {
-  id            String                     @id @default(cuid())
+  id            String                    @id @default(cuid())
   userId        String
   usageDate     DateTime // truncated to the day (00:00) — must match the AIDailyBudgetCounter rows this reservation touched
   estimatedUsd  Decimal
   reconciledUsd Decimal?
-  status        AIBudgetReservationStatus  @default(RESERVED)
-  createdAt     DateTime                   @default(now())
-  updatedAt     DateTime                   @updatedAt
+  status        AIBudgetReservationStatus @default(RESERVED)
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
 
   @@index([userId, createdAt])
   @@index([status])
@@ -1015,7 +1101,7 @@ model AIConversation {
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
-  messages AIMessage[]
+  messages      AIMessage[]
   lessonSession LessonSession?
 
   @@index([studentId])
@@ -1124,17 +1210,17 @@ model AIProviderConfig {
 // business rule, not a schema shortcut, so they can diverge freely later.
 
 model PricingPlan {
-  id                       String     @id @default(cuid())
-  curriculumId             String
-  curriculum               Curriculum @relation(fields: [curriculumId], references: [id])
-  levelCodeEn              String // e.g. "Primary", "Preparatory", "Secondary Year 1-2", "Grade 6-8"
-  levelCodeAr              String
-  monthlyPriceEGP          Decimal
-  includedSubjects         Int        @default(3)
+  id                        String     @id @default(cuid())
+  curriculumId              String
+  curriculum                Curriculum @relation(fields: [curriculumId], references: [id])
+  levelCodeEn               String // e.g. "Primary", "Preparatory", "Secondary Year 1-2", "Grade 6-8"
+  levelCodeAr               String
+  monthlyPriceEGP           Decimal
+  includedSubjects          Int        @default(3)
   additionalSubjectPriceEGP Decimal
-  isActive                 Boolean    @default(true)
-  createdAt                DateTime   @default(now())
-  updatedAt                DateTime   @updatedAt
+  isActive                  Boolean    @default(true)
+  createdAt                 DateTime   @default(now())
+  updatedAt                 DateTime   @updatedAt
 
   subscriptions Subscription[]
 
@@ -1212,16 +1298,16 @@ model LessonTrial {
 // exist per trial, which is also what caps the account-wide total at
 // two, with no separate counter to keep in sync.
 model LessonTrialConsumption {
-  id        String      @id @default(cuid())
+  id        String         @id @default(cuid())
   trialId   String
-  trial     LessonTrial @relation(fields: [trialId], references: [id])
+  trial     LessonTrial    @relation(fields: [trialId], references: [id])
   studentId String
   student   StudentProfile @relation(fields: [studentId], references: [id])
   subjectId String
-  subject   Subject     @relation(fields: [subjectId], references: [id])
+  subject   Subject        @relation(fields: [subjectId], references: [id])
   topicId   String
-  topic     Topic       @relation(fields: [topicId], references: [id])
-  createdAt DateTime    @default(now())
+  topic     Topic          @relation(fields: [topicId], references: [id])
+  createdAt DateTime       @default(now())
 
   @@unique([trialId, subjectId])
   @@index([studentId])
@@ -1264,11 +1350,11 @@ model Referral {
   code              String // the code actually redeemed, snapshotted for audit even if the referrer later regenerated/changed anything
   createdAt         DateTime       @default(now())
 
-  earnedAt          DateTime? // set once, at the referred student's first successful paid activation
-  appliedAt         DateTime? // set once, when the referrer applies the earned reward to a Subject
-  appliedSubjectId  String?
-  appliedSubject    Subject?  @relation(fields: [appliedSubjectId], references: [id])
-  appliedExpiresAt  DateTime? // the resulting StudentSubject.expiresAt after applying — kept here too, purely for audit display
+  earnedAt         DateTime? // set once, at the referred student's first successful paid activation
+  appliedAt        DateTime? // set once, when the referrer applies the earned reward to a Subject
+  appliedSubjectId String?
+  appliedSubject   Subject?  @relation(fields: [appliedSubjectId], references: [id])
+  appliedExpiresAt DateTime? // the resulting StudentSubject.expiresAt after applying — kept here too, purely for audit display
 
   @@index([referrerStudentId])
 }
