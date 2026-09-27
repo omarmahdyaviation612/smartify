@@ -1,6 +1,7 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { AIContextBuilderService } from "../ai/context/ai-context-builder.service";
 import { InteractiveLessonService } from "./interactive-lesson.service";
+import { TOPIC_GROUNDING_ASSIGNMENT_VERSION } from "../ai/context/topic-grounding-assignment.util";
 
 /**
  * Covers the Interactive Lesson engine's core control flow: step
@@ -1184,7 +1185,7 @@ describe("InteractiveLessonService", () => {
         // its identity matches the Unit's grounding below, so the runtime
         // path reconstructs the slice from it rather than inferring live.
         groundingAssignment: {
-          unitGroundingVersion: 1, unitSourceFingerprint: "fp-fiction", assignmentVersion: 1, status: "READY",
+          unitGroundingVersion: 1, unitSourceFingerprint: "fp-fiction", assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION, status: "READY",
           matchedConceptNames: ["Author style"], matchedHintTitles: [],
         },
         unit: {

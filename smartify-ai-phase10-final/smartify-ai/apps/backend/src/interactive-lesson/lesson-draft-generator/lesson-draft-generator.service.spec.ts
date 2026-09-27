@@ -1,5 +1,6 @@
 import { LessonDraftGeneratorService } from "./lesson-draft-generator.service";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
+import { TOPIC_GROUNDING_ASSIGNMENT_VERSION } from "../../ai/context/topic-grounding-assignment.util";
 
 /**
  * Budget-attribution regression suite (2026-09-20) — the Student
@@ -224,7 +225,7 @@ describe("LessonDraftGeneratorService.ensureTopicHasLesson — budget attributio
     h.prisma.client.topic.findUnique.mockResolvedValue({
       ...priorTopic,
       groundingAssignment: {
-        unitGroundingVersion: 1, unitSourceFingerprint: "fp-1", assignmentVersion: 1, status: "READY",
+        unitGroundingVersion: 1, unitSourceFingerprint: "fp-1", assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION, status: "READY",
         matchedConceptNames: ["Introduce Test Topic"], matchedHintTitles: [],
       },
       unit: { groundingVersion: 1, groundingSourceFingerprint: "fp-1", groundingNotesJson: { concepts: [{ name: "Introduce Test Topic", description: "Textbook scope", sourcePages: [1], importance: "core" }], facts: [], vocabulary: [], learningObjectives: [], topicHints: [] } },
@@ -268,7 +269,7 @@ describe("LessonDraftGeneratorService.ensureTopicHasLesson — budget attributio
     h.prisma.client.topic.findUnique.mockResolvedValue({
       ...priorTopic,
       groundingAssignment: {
-        unitGroundingVersion: 1, unitSourceFingerprint: "fp-1", assignmentVersion: 1, status: "READY",
+        unitGroundingVersion: 1, unitSourceFingerprint: "fp-1", assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION, status: "READY",
         matchedConceptNames: ["Explain the real textbook content"], matchedHintTitles: [],
       },
       unit: { groundingVersion: 1, groundingSourceFingerprint: "fp-1", groundingNotesJson },

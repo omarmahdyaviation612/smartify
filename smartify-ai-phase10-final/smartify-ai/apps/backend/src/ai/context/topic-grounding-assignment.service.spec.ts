@@ -136,6 +136,40 @@ describe("computeDeterministicAssignment — Step 4 (REVIEW_FULL_UNIT)", () => {
     const topics = [...reviewTopics.slice(0, 2), { id: "tX", nameEn: "A Quiet Afternoon", order: 3 }];
     expect(computeDeterministicAssignment(isolatedGapUnit, topics[2], topics)?.method).not.toBe("REVIEW_FULL_UNIT");
   });
+
+  it("also matches assessment-shell Topic titles (v2 extension) as REVIEW_FULL_UNIT, with ALL of the Unit's concepts", () => {
+    for (const title of [
+      "Unit One Assessment",
+      "Final Assessment of the First Term",
+      "First Term Assessments",
+      "Unit Two Assessment",
+      "Final Assessment of the Second Term",
+    ]) {
+      const topics = [...reviewTopics.slice(0, 2), { id: "tX", nameEn: title, order: 3 }];
+      const result = computeDeterministicAssignment(isolatedGapUnit, topics[2], topics);
+      expect(result!.method).toBe("REVIEW_FULL_UNIT");
+      expect(result!.confidence).toBe("HIGH");
+      expect(result!.matchedConceptNames).toEqual(pageOrderConcepts.map((c) => c.name));
+    }
+  });
+
+  it("does NOT match a title that merely mentions assessment in passing, without a structural Unit/Term/Final marker", () => {
+    for (const title of ["How Teachers Assess Progress", "Self-Assessment Journal"]) {
+      const topics = [...reviewTopics.slice(0, 2), { id: "tX", nameEn: title, order: 3 }];
+      expect(computeDeterministicAssignment(isolatedGapUnit, topics[2], topics)?.method).not.toBe("REVIEW_FULL_UNIT");
+    }
+  });
+
+  it("Steps 1-3 still take precedence over the assessment-shell pattern when they'd otherwise resolve first", () => {
+    // "Addition Facts" resolves at Step 2 (KEYWORD_OVERLAP) even though its
+    // title contains none of the assessment markers — this proves the tier
+    // ordering, mirroring the existing review-pattern precedence test above.
+    expect(computeDeterministicAssignment(isolatedGapUnit, reviewTopics[0], reviewTopics)!.method).toBe("KEYWORD_OVERLAP");
+  });
+
+  it("TOPIC_GROUNDING_ASSIGNMENT_VERSION is bumped to 2 for this semantics change", () => {
+    expect(TOPIC_GROUNDING_ASSIGNMENT_VERSION).toBe(2);
+  });
 });
 
 describe("computeDeterministicAssignment — Step 5 (PAGE_ORDER_GAP)", () => {

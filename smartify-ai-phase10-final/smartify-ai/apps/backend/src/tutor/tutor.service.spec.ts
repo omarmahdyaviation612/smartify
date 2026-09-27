@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { TutorService } from "./tutor.service";
+import { TOPIC_GROUNDING_ASSIGNMENT_VERSION } from "../ai/context/topic-grounding-assignment.util";
 
 /**
  * Covers the Phase 10 hardening added to the AI Tutor: input-length
@@ -339,7 +340,7 @@ describe("TutorService", () => {
         groundingAssignment: {
           unitGroundingVersion: 1,
           unitSourceFingerprint: "fp-1",
-          assignmentVersion: 1,
+          assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION,
           status: "READY",
           matchedConceptNames: ["Subtraction within 10"],
           matchedHintTitles: ["Subtraction within 10"],

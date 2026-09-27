@@ -67,12 +67,37 @@ export interface DeterministicAssignment {
  */
 const REVIEW_TITLE_PATTERN = /\b(review|revision|recap|summary)\b/i;
 
+/**
+ * Step 4's sibling structural pattern (2026-09-27, assignmentVersion bump
+ * 1->2): an "assessment shell" Topic — e.g. "Unit One Assessment", "Final
+ * Assessment of the First Term", "First Term Assessments" — is structurally
+ * identical to a Review/Revision Topic: it has no content of its own and its
+ * correct, unambiguous scope is the whole Unit, exactly like
+ * REVIEW_TITLE_PATTERN above. Tested ONLY against `Topic.nameEn`, same as
+ * REVIEW_TITLE_PATTERN, never Arabic title or textbook content.
+ *
+ * Deliberately NOT a bare `/assessment/i`: a bare match on the word
+ * "Assessment" alone risks a false positive on a real content Topic whose
+ * title genuinely mentions assessment as its subject matter (e.g. a Topic
+ * titled "Assessment Types in Science" that actually teaches assessment
+ * concepts, or "Self-Assessment Journal" as a genuine writing-skill Topic).
+ * The whole-word "assessment(s)" must therefore co-occur with a structural
+ * marker — "Unit"/"Term" (the shell's scope noun) or "Final" (as in "Final
+ * Assessment of the ... Term") — which is exactly the shape every real
+ * assessment-shell title in production takes and is not the shape an
+ * ordinary content Topic's title takes. "Assess" alone (e.g. "How Teachers
+ * Assess Progress") never matches — \b word boundaries require the whole
+ * word "assessment"/"assessments".
+ */
+const ASSESSMENT_SHELL_TITLE_PATTERN =
+  /\b(unit|term)\b[^]*\bassessments?\b|\bassessments?\b[^]*\b(unit|term)\b|\bfinal\b[^]*\bassessments?\b/i;
+
 function conceptNamesOf(names: Iterable<string>): string[] {
   return Array.from(new Set(names));
 }
 
 /** Steps 1-3 only — delegates entirely to the existing selector. */
-function stepsOneToThree(notes: GroundingNotes, topic: AssignmentTopic, unitTopicCount: number): DeterministicAssignment | null {
+export function stepsOneToThree(notes: GroundingNotes, topic: AssignmentTopic, unitTopicCount: number): DeterministicAssignment | null {
   const slice = selectRelevantGrounding(notes, topic.nameEn, unitTopicCount);
   if (!slice) return null;
 
@@ -96,15 +121,24 @@ function stepsOneToThree(notes: GroundingNotes, topic: AssignmentTopic, unitTopi
   };
 }
 
-/** Step 4 — a Review/Revision/Recap/Summary Topic legitimately spans its whole Unit. */
-function stepFour(notes: GroundingNotes, topic: AssignmentTopic): DeterministicAssignment | null {
-  if (!REVIEW_TITLE_PATTERN.test(topic.nameEn)) return null;
+/**
+ * Step 4 — a Review/Revision/Recap/Summary Topic, OR an assessment-shell
+ * Topic (see ASSESSMENT_SHELL_TITLE_PATTERN above), legitimately spans its
+ * whole Unit. Same priority tier for both: only reached when Steps 1-3 found
+ * nothing, and takes effect before Step 5.
+ */
+export function stepFour(notes: GroundingNotes, topic: AssignmentTopic): DeterministicAssignment | null {
+  const isReview = REVIEW_TITLE_PATTERN.test(topic.nameEn);
+  const isAssessmentShell = !isReview && ASSESSMENT_SHELL_TITLE_PATTERN.test(topic.nameEn);
+  if (!isReview && !isAssessmentShell) return null;
   return {
     method: "REVIEW_FULL_UNIT",
     confidence: "HIGH",
     matchedConceptNames: conceptNamesOf(notes.concepts.map((c) => c.name)),
     matchedHintTitles: null,
-    reason: `Topic title "${topic.nameEn}" is a structural review/revision/recap/summary Topic — its scope is the whole Unit.`,
+    reason: isReview
+      ? `Topic title "${topic.nameEn}" is a structural review/revision/recap/summary Topic — its scope is the whole Unit.`
+      : `Topic title "${topic.nameEn}" is a structural assessment-shell Topic — its scope is the whole Unit.`,
   };
 }
 

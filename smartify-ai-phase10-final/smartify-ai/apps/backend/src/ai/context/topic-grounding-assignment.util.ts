@@ -18,8 +18,16 @@ import type { GroundingNotes, GroundingSlice } from "../../interactive-lesson/un
  * TEXTBOOK EXTRACTION — improving the assignment algorithm must never require
  * fake-bumping an extraction identity (and vice versa: a re-extracted Unit
  * invalidates its Topics' assignments without any code change here).
+ *
+ * 1 -> 2 (2026-09-27): Step 4 extended to also recognise assessment-shell
+ * Topics ("Unit One Assessment", "Final Assessment of the First Term", ...)
+ * as a REVIEW_FULL_UNIT-equivalent structural match — see
+ * ASSESSMENT_SHELL_TITLE_PATTERN in topic-grounding-assignment.service.ts.
+ * This changes deterministic-assignment semantics (a new class of Topic now
+ * resolves where it previously did not), so every previously-persisted
+ * READY/BLOCKED row is correctly invalidated and recomputed on the next run.
  */
-export const TOPIC_GROUNDING_ASSIGNMENT_VERSION = 1;
+export const TOPIC_GROUNDING_ASSIGNMENT_VERSION = 2;
 
 /** The minimal persisted-row shape the read path needs (a structural subset of Prisma's TopicGroundingAssignment). */
 export interface PersistedTopicGroundingAssignment {

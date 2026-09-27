@@ -1,4 +1,5 @@
 import { applyOne, dryRunOne, loadScopedTopics, EXCLUDED_SUBJECT_ID, ProviderOutageError, type BackfillReport } from "./prepare-topic-grounding-assignments";
+import { TOPIC_GROUNDING_ASSIGNMENT_VERSION } from "../ai/context/topic-grounding-assignment.util";
 
 function emptyReport(): BackfillReport {
   return {
@@ -60,7 +61,7 @@ describe("dryRunOne — pure classification, zero writes/provider calls by const
 
   it("an existing valid READY row is counted under alreadyReady by its method, not reprocessed", () => {
     const report = emptyReport();
-    dryRunOne(makeTopic({ groundingAssignment: { unitGroundingVersion: 1, unitSourceFingerprint: "fp-1", assignmentVersion: 1, method: "HINT_MATCH", status: "READY" } }), report);
+    dryRunOne(makeTopic({ groundingAssignment: { unitGroundingVersion: 1, unitSourceFingerprint: "fp-1", assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION, method: "HINT_MATCH", status: "READY" } }), report);
     expect(report.alreadyReady["HINT_MATCH"]).toBe(1);
     expect(Object.keys(report.deterministicAssigned)).toHaveLength(0);
   });
