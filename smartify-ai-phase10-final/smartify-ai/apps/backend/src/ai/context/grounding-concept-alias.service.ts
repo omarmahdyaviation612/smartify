@@ -114,10 +114,27 @@ export type AliasValidationResult =
 const MAX_ALIAS_LENGTH_MULTIPLIER = 6;
 const MAX_ALIAS_LENGTH_FLOOR = 40;
 
+/**
+ * Strips a single leading/trailing Markdown code fence (```json ... ``` or
+ * plain ``` ... ```) if present, otherwise returns the input unchanged. This
+ * service's response is a JSON ARRAY, which OpenAI's `json_object` response
+ * mode cannot represent (that mode requires a top-level object) — the mapper
+ * and refinement services avoid this exact issue by using `json_object`
+ * mode, which isn't available here. Stripping fences defensively at the
+ * parse boundary is the general fix: it only ever removes wrapping
+ * whitespace/backticks, never touches the JSON content itself, so a
+ * genuinely malformed payload still fails JSON.parse and is still rejected.
+ */
+function stripMarkdownCodeFence(raw: string): string {
+  const trimmed = raw.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i);
+  return fenced ? fenced[1].trim() : trimmed;
+}
+
 export function validateAliasResponse(raw: string, notes: GroundingNotes): AliasValidationResult {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(stripMarkdownCodeFence(raw));
   } catch {
     return { ok: false, code: "UNPARSEABLE_JSON", detail: `Could not parse JSON: ${raw.slice(0, 200)}` };
   }

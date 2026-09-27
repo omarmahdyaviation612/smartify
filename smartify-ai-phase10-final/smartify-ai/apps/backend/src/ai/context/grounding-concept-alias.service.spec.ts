@@ -54,6 +54,28 @@ describe("validateAliasResponse", () => {
     expect(validateAliasResponse('{"not":"an array"}', BASE_NOTES).ok).toBe(false);
   });
 
+  it("accepts a valid array wrapped in a ```json Markdown code fence (a real production failure: OpenAI's json_object response mode can't be used here since this response is an array, so the model sometimes wraps it in prose/fences instead)", () => {
+    const inner = JSON.stringify([{ itemKind: "CONCEPT", itemName: "النبوة", canonicalLabel: "prophethood", aliasEn: "Prophethood", aliasAr: null }]);
+    const raw = "```json\n" + inner + "\n```";
+    const result = validateAliasResponse(raw, BASE_NOTES);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.accepted).toHaveLength(1);
+  });
+
+  it("accepts a valid array wrapped in a plain ``` code fence (no language tag)", () => {
+    const inner = JSON.stringify([{ itemKind: "CONCEPT", itemName: "الرسالة", canonicalLabel: "messengership", aliasEn: "Messengership", aliasAr: null }]);
+    const raw = "```\n" + inner + "\n```";
+    const result = validateAliasResponse(raw, BASE_NOTES);
+    expect(result.ok).toBe(true);
+  });
+
+  it("still rejects genuinely malformed content even inside a code fence — fence-stripping never masks a real parse failure", () => {
+    const raw = "```json\nnot actually json\n```";
+    const result = validateAliasResponse(raw, BASE_NOTES);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("UNPARSEABLE_JSON");
+  });
+
   it("rejects an alias implausibly long relative to the source item's own name (fabricated-elaboration guard)", () => {
     const raw = JSON.stringify([
       {
