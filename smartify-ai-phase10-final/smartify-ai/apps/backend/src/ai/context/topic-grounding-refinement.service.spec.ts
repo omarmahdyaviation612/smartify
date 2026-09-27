@@ -92,6 +92,39 @@ describe("validateRefinementResponse", () => {
     if (result.ok && result.supported) expect(result.selectedItems).toHaveLength(3);
   });
 
+  it("accepts a minimal {supported: false} as a complete, valid negative response (no confidence/reason/selectedItems required)", () => {
+    const result = validateRefinementResponse(JSON.stringify({ supported: false }), COARSE_NOTES);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.supported).toBe(false);
+      if (!result.supported) {
+        expect(result.confidence).toBe("LOW"); // safe default, never fabricated as HIGH
+        expect(typeof result.reason).toBe("string");
+      }
+    }
+  });
+
+  it("a supported:false response with irrelevant/malformed positive-only fields is still a valid negative — those fields are ignored, never used to promote", () => {
+    const raw = JSON.stringify({ supported: false, selectedItems: "not even an array", confidence: 12345, reason: { not: "a string" } });
+    const result = validateRefinementResponse(raw, COARSE_NOTES);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.supported).toBe(false);
+  });
+
+  it("supported:true still requires confidence/reason — the positive path is NOT weakened by the negative-path fix", () => {
+    const raw = JSON.stringify({ supported: true, selectedItems: [{ kind: "FACT", name: "Evaporation turns liquid water into vapor." }] });
+    const result = validateRefinementResponse(raw, COARSE_NOTES);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("MISSING_FIELDS");
+  });
+
+  it("supported:true with hallucinated evidence is still rejected — the positive path is NOT weakened", () => {
+    const raw = JSON.stringify({ supported: true, selectedItems: [{ kind: "FACT", name: "An invented fact." }], confidence: "HIGH", reason: "x" });
+    const result = validateRefinementResponse(raw, COARSE_NOTES);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("HALLUCINATED_ITEM");
+  });
+
   it("rejects the whole response when any selected item is invented (not verbatim present)", () => {
     const raw = JSON.stringify({
       supported: true,
@@ -191,7 +224,7 @@ describe("TopicGroundingRefinementService.refineCoarseGrounding", () => {
   it("persists BLOCKED (never READY) on NOT_SUPPORTED", async () => {
     const { service, upsert } = build(JSON.stringify({ supported: false, confidence: "HIGH", reason: "No evidence found." }));
     const outcome = await service.refineCoarseGrounding("t1");
-    expect(outcome.outcome).toBe("BLOCKED");
+    expect(outcome.outcome).toBe("VALID_NOT_SUPPORTED");
     expect(upsert.mock.calls[0][0].create.status).toBe("BLOCKED");
   });
 
@@ -200,7 +233,7 @@ describe("TopicGroundingRefinementService.refineCoarseGrounding", () => {
       JSON.stringify({ supported: true, selectedItems: [{ kind: "FACT", name: "Evaporation turns liquid water into vapor." }], confidence: "LOW", reason: "weak" }),
     );
     const outcome = await service.refineCoarseGrounding("t1");
-    expect(outcome.outcome).toBe("BLOCKED");
+    expect(outcome.outcome).toBe("VALID_NOT_SUPPORTED");
     expect(upsert.mock.calls[0][0].create.status).toBe("BLOCKED");
   });
 
@@ -224,7 +257,7 @@ describe("TopicGroundingRefinementService.refineCoarseGrounding", () => {
       },
     });
     const outcome = await service.refineCoarseGrounding("t9");
-    expect(outcome.outcome).toBe("BLOCKED");
+    expect(outcome.outcome).toBe("VALID_NOT_SUPPORTED");
     expect(upsert.mock.calls[0][0].create.status).toBe("BLOCKED");
   });
 
@@ -254,6 +287,59 @@ describe("TopicGroundingRefinementService.refineCoarseGrounding", () => {
     const outcome = await service.refineCoarseGrounding("t1");
     expect(outcome.outcome).toBe("SKIPPED_ALREADY_READY");
     expect(generate).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("SKIPPED_ALREADY_VALID_NOT_SUPPORTED — no provider call — when a prior run already persisted a genuinely-decided verdict under the current REFINEMENT_PROMPT_VERSION", async () => {
+    const { service, generate, prisma, upsert } = build("{}");
+    prisma.client.topic.findUnique.mockResolvedValue({
+      ...TOPIC,
+      groundingAssignment: {
+        status: "BLOCKED",
+        method: "AI_MAPPER",
+        unitGroundingVersion: 1,
+        unitSourceFingerprint: "fp",
+        mapperPromptVersion: REFINEMENT_PROMPT_VERSION,
+        reason: "[REFINEMENT:DECIDED] Nothing in this Unit covers this Topic.",
+      },
+      unit: { id: "u1", groundingNotesJson: COARSE_NOTES, groundingVersion: 1, groundingSourceFingerprint: "fp", topics: SIBLINGS },
+    });
+    const outcome = await service.refineCoarseGrounding("t1");
+    expect(outcome.outcome).toBe("SKIPPED_ALREADY_VALID_NOT_SUPPORTED");
+    expect(generate).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("a persisted row from a TECHNICAL failure (no DECIDED_PREFIX — e.g. a stale row from before this fix) is NOT skipped — it always falls through to a real retry", async () => {
+    const { service, generate, prisma } = build(JSON.stringify({ supported: false, confidence: "HIGH", reason: "x" }));
+    prisma.client.topic.findUnique.mockResolvedValue({
+      ...TOPIC,
+      groundingAssignment: {
+        status: "BLOCKED",
+        method: "AI_MAPPER",
+        unitGroundingVersion: 1,
+        unitSourceFingerprint: "fp",
+        mapperPromptVersion: REFINEMENT_PROMPT_VERSION,
+        reason: "[REFINEMENT] MISSING_FIELDS: a stale technical-failure row from before this fix.",
+      },
+      unit: { id: "u1", groundingNotesJson: COARSE_NOTES, groundingVersion: 1, groundingSourceFingerprint: "fp", topics: SIBLINGS },
+    });
+    const outcome = await service.refineCoarseGrounding("t1");
+    expect(generate).toHaveBeenCalledTimes(1); // a real attempt was made, not skipped
+    expect(outcome.outcome).toBe("VALID_NOT_SUPPORTED");
+  });
+
+  it("a TECHNICAL_FAILURE (malformed JSON) is never persisted — so a rerun always retries it for real, never treating it as decided", async () => {
+    const { service, upsert } = build("not valid json at all");
+    const outcome = await service.refineCoarseGrounding("t1");
+    expect(outcome.outcome).toBe("TECHNICAL_FAILURE");
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("a TECHNICAL_FAILURE (hallucinated item on a supported:true response) is never persisted either", async () => {
+    const { service, upsert } = build(JSON.stringify({ supported: true, selectedItems: [{ kind: "FACT", name: "An invented fact." }], confidence: "HIGH", reason: "x" }));
+    const outcome = await service.refineCoarseGrounding("t1");
+    expect(outcome.outcome).toBe("TECHNICAL_FAILURE");
     expect(upsert).not.toHaveBeenCalled();
   });
 

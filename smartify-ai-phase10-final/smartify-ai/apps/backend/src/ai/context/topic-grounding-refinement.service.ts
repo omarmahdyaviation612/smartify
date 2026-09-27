@@ -36,6 +36,18 @@ import { TopicGroundingAssignmentService, computeDeterministicAssignment, type A
 /** Own independent prompt-version axis — never confused with DETERMINISTIC_ASSIGNMENT_VERSION/MAPPER_PROMPT_VERSION/VALIDATOR_PROMPT_VERSION. */
 export const REFINEMENT_PROMPT_VERSION = 1;
 
+/**
+ * Marks a persisted BLOCKED row as a genuinely-decided verdict (real
+ * NOT_SUPPORTED, or supported:true at LOW confidence) rather than a
+ * technical failure — see the "no row vs BLOCKED" persistence rule at the
+ * `persist` call site below and the skip-guard in `refineCoarseGrounding`.
+ * A BLOCKED row whose reason does NOT start with this exact prefix (e.g. an
+ * older row persisted before this fix, or one this service never wrote) is
+ * never treated as a decided verdict — it always falls through to a real
+ * retry attempt.
+ */
+export const DECIDED_PREFIX = "[REFINEMENT:DECIDED] ";
+
 const REFINEMENT_SYSTEM_PROMPT_HEADER = `You are a curriculum librarian determining whether the EXISTING verified grounding already contains sufficient evidence for one lesson Topic.
 
 You may ONLY reference/select existing items already shown below — you must NOT create facts, invent source pages, add an unsupported concept, use general knowledge to fill a gap, or select anything from another Unit. If the evidence is insufficient, respond with supported: false — do not force a weak match.
@@ -124,12 +136,29 @@ export function validateRefinementResponse(raw: string, notes: GroundingNotes): 
     return { ok: false, code: "NOT_AN_OBJECT", detail: "Response was not a JSON object." };
   }
   const obj = parsed as Record<string, unknown>;
-  if (typeof obj.supported !== "boolean" || (obj.confidence !== "HIGH" && obj.confidence !== "LOW") || typeof obj.reason !== "string") {
-    return { ok: false, code: "MISSING_FIELDS", detail: `Missing/invalid required fields: ${JSON.stringify(obj)}` };
+  if (typeof obj.supported !== "boolean") {
+    return { ok: false, code: "MISSING_FIELDS", detail: `Missing/invalid required field "supported": ${JSON.stringify(obj)}` };
   }
 
+  // NEGATIVE path: {"supported": false} is a complete, valid response on its
+  // own — confidence/reason/selectedItems are optional extras, never
+  // required. A model that correctly determined "no evidence here" must
+  // never be penalized for omitting fields that only matter on the positive
+  // path; requiring them here previously caused genuine NOT_SUPPORTED
+  // verdicts to be wrongly rejected as MISSING_FIELDS (2026-09-28 production
+  // incident — 12 of 17 remaining-BLOCKED Category B topics were exactly
+  // this). Malformed/irrelevant extra fields alongside supported:false are
+  // ignored, never used to promote or alter the verdict.
   if (obj.supported === false) {
-    return { ok: true, supported: false, confidence: obj.confidence, reason: obj.reason };
+    const confidence = obj.confidence === "HIGH" || obj.confidence === "LOW" ? obj.confidence : "LOW";
+    const reason = typeof obj.reason === "string" ? obj.reason : "Model reported supported:false.";
+    return { ok: true, supported: false, confidence, reason };
+  }
+
+  // POSITIVE path: every existing strict field requirement remains mandatory
+  // and unweakened.
+  if ((obj.confidence !== "HIGH" && obj.confidence !== "LOW") || typeof obj.reason !== "string") {
+    return { ok: false, code: "MISSING_FIELDS", detail: `Missing/invalid required fields for supported:true: ${JSON.stringify(obj)}` };
   }
 
   const rawItems = obj.selectedItems;
@@ -180,8 +209,20 @@ export type RefinementOutcome =
   | { outcome: "SKIPPED_DETERMINISTIC"; reason: string }
   | { outcome: "NOT_GROUNDED"; reason: string }
   | { outcome: "SKIPPED_ALREADY_READY"; reason: string }
+  /**
+   * A prior run already reached a genuine, well-formed NOT_SUPPORTED (or
+   * supported:true/LOW-confidence) verdict for this exact refinement
+   * identity — re-asking the same question is pointless until
+   * REFINEMENT_PROMPT_VERSION or the Unit's factual identity changes. This
+   * is distinct from a technical failure (malformed/hallucinated/provider
+   * error), which is NEVER persisted and therefore always eligible for
+   * retry on the next run — see the "no row vs BLOCKED" persistence rule
+   * below.
+   */
+  | { outcome: "SKIPPED_ALREADY_VALID_NOT_SUPPORTED"; reason: string }
   | { outcome: "READY"; matchedConceptNames: string[]; matchedHintTitles: string[] | null; model: string }
-  | { outcome: "BLOCKED"; reason: string };
+  | { outcome: "VALID_NOT_SUPPORTED"; reason: string }
+  | { outcome: "TECHNICAL_FAILURE"; code: string; detail: string };
 
 @Injectable()
 export class TopicGroundingRefinementService {
@@ -218,13 +259,32 @@ export class TopicGroundingRefinementService {
     }
 
     const existing = topic.groundingAssignment;
+    const existingFactualIdentityMatches =
+      !!existing && existing.unitGroundingVersion === unit.groundingVersion && existing.unitSourceFingerprint === unit.groundingSourceFingerprint;
+
+    if (existing && existingFactualIdentityMatches && existing.status === "READY") {
+      return { outcome: "SKIPPED_ALREADY_READY", reason: `Topic ${topicId} already has a valid READY assignment.` };
+    }
+
+    // A genuinely-decided verdict (real NOT_SUPPORTED, or supported:true at
+    // LOW confidence) is tagged with the DECIDED_PREFIX below and is only
+    // ever retried if REFINEMENT_PROMPT_VERSION or the Unit's factual
+    // identity changes — re-asking the identical question is pointless
+    // otherwise. A TECHNICAL failure (malformed/hallucinated/provider
+    // error) is NEVER persisted (see the persist-site below), so it has no
+    // row here at all and always falls through to a real retry — this
+    // check can never accidentally skip one, by construction: only a row
+    // whose reason literally starts with DECIDED_PREFIX can match.
     if (
       existing &&
-      existing.status === "READY" &&
-      existing.unitGroundingVersion === unit.groundingVersion &&
-      existing.unitSourceFingerprint === unit.groundingSourceFingerprint
+      existingFactualIdentityMatches &&
+      existing.status === "BLOCKED" &&
+      existing.method === "AI_MAPPER" &&
+      existing.mapperPromptVersion === REFINEMENT_PROMPT_VERSION &&
+      typeof existing.reason === "string" &&
+      existing.reason.startsWith(DECIDED_PREFIX)
     ) {
-      return { outcome: "SKIPPED_ALREADY_READY", reason: `Topic ${topicId} already has a valid READY assignment.` };
+      return { outcome: "SKIPPED_ALREADY_VALID_NOT_SUPPORTED", reason: `Topic ${topicId} already has a decided, current NOT_SUPPORTED/LOW-confidence verdict.` };
     }
 
     const notes = unit.groundingNotesJson as unknown as GroundingNotes;
@@ -255,7 +315,7 @@ export class TopicGroundingRefinementService {
     const estimatedUsd = await this.usageService.estimateMaxChatCostUsd({ providerKey, inputText: systemPrompt + userMessage });
     const reserveResult = await this.usageService.reserveBudget(CONTENT_AUTHORING_ACTOR_ID, estimatedUsd);
     if (!reserveResult.ok) {
-      return { outcome: "BLOCKED", reason: `Budget unavailable (${reserveResult.reason}) — nothing persisted, safe to retry later.` };
+      return { outcome: "TECHNICAL_FAILURE", code: "BUDGET_UNAVAILABLE", detail: `Budget unavailable (${reserveResult.reason}) — nothing persisted, safe to retry later.` };
     }
 
     let result: Awaited<ReturnType<typeof provider.generate>>;
@@ -300,19 +360,28 @@ export class TopicGroundingRefinementService {
         matchedHintTitles: titles,
         mapperModel: model,
         mapperPromptVersion: REFINEMENT_PROMPT_VERSION,
-        reason: `[REFINEMENT] ${reason}`,
+        reason: `${DECIDED_PREFIX}${reason}`,
       });
 
     if (!validated.ok) {
+      // TECHNICAL failure — never persisted. No row means this Topic is
+      // always eligible for a real retry on the next run (the existing
+      // "no row vs BLOCKED" convention already used elsewhere in this
+      // codebase), rather than being wrongly frozen as a decided verdict.
       this.logger.warn(JSON.stringify({ event: "TOPIC_GROUNDING_REFINEMENT_REJECTED", topicId, unitId: unit.id, code: validated.code, detail: validated.detail }));
-      await persist("BLOCKED", [], null, `${validated.code}: ${validated.detail}`);
-      return { outcome: "BLOCKED", reason: `${validated.code}: ${validated.detail}` };
+      return { outcome: "TECHNICAL_FAILURE", code: validated.code, detail: validated.detail };
     }
 
-    if (!validated.supported || validated.confidence === "LOW") {
-      const reason = validated.reason || "NOT_SUPPORTED or LOW confidence.";
+    if (!validated.supported) {
+      const reason = validated.reason || "NOT_SUPPORTED.";
       await persist("BLOCKED", [], null, reason);
-      return { outcome: "BLOCKED", reason };
+      return { outcome: "VALID_NOT_SUPPORTED", reason };
+    }
+
+    if (validated.confidence === "LOW") {
+      const reason = validated.reason || "supported:true at LOW confidence — never treated as usable grounding.";
+      await persist("BLOCKED", [], null, reason);
+      return { outcome: "VALID_NOT_SUPPORTED", reason };
     }
 
     // Persist concept/hint names normally; fact/vocabulary/objective
