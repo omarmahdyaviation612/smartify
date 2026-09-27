@@ -182,14 +182,44 @@ export function sliceFromAssignment(notes: GroundingNotes | null | undefined, as
   const directVocabMatches = notes.vocabulary.filter((v) => conceptNames.has(v.term.toLowerCase()));
   const vocabPages = new Set(directVocabMatches.flatMap((v) => v.sourcePages));
 
+  // 2026-09-28 (Category-B coarse-grounding refinement, Part 2): the
+  // refinement mechanism (topic-grounding-refinement.service.ts) can select
+  // evidence from FACTS and LEARNING OBJECTIVES too, neither of which has a
+  // dedicated persisted field — `matchedConceptNames`/`matchedHintTitles` are
+  // the only two persisted selection fields (see the Prisma schema).
+  // DESIGN DECISION: rather than add new schema fields, the refinement
+  // service persists a selected fact's/objective's own verbatim TEXT as an
+  // opaque identifier string directly into `matchedConceptNames` (the same
+  // convention Phase 1 already established for vocabulary terms above) and
+  // this read path resolves such a string back to real content by also
+  // matching it, verbatim, against `notes.facts[].fact` and
+  // `notes.learningObjectives[]` directly. This is safe because: (1) fact
+  // text and objective text are themselves drawn from the Unit's real,
+  // already-extracted grounding — an opaque string here can only ever
+  // resolve to REAL existing content, never invent any; (2) a fact/objective
+  // string is very unlikely to collide with a real concept name or voconce
+  // term (both pools are checked independently and a name is simply
+  // added to whichever pool(s) it verbatim matches — a coincidental cross-
+  // pool match only ever ADDS more real, already-verified Unit content, it
+  // can never inject anything false); (3) exactly mirrors the vocabulary
+  // fix's own convention and its safety argument.
+  const directFactMatches = notes.facts.filter((f) => conceptNames.has(f.fact.toLowerCase()));
+  const factTextPages = new Set(directFactMatches.flatMap((f) => f.sourcePages));
+  // Note: `learningObjectives` is, and always has been, the Unit's FULL
+  // objectives list regardless of assignment content (see the field's
+  // original, unchanged behavior below) — so an objective-text selection by
+  // the refinement service never needs special resolution here: the full
+  // list was already always non-empty and already always included. No
+  // "empty slice" risk exists for objectives the way it did for vocabulary.
+
   const selectedNames = new Set(concepts.map((c) => c.name.toLowerCase()));
-  const pages = new Set<number>([...hintPages, ...vocabPages, ...concepts.flatMap((c) => c.sourcePages)]);
+  const pages = new Set<number>([...hintPages, ...vocabPages, ...factTextPages, ...concepts.flatMap((c) => c.sourcePages)]);
 
   return {
     matchedViaHint: matchedHints.length > 0,
     learningObjectives: notes.learningObjectives,
     concepts,
-    facts: notes.facts.filter((f) => f.sourcePages.some((p) => pages.has(p))),
+    facts: notes.facts.filter((f) => f.sourcePages.some((p) => pages.has(p)) || conceptNames.has(f.fact.toLowerCase())),
     vocabulary: notes.vocabulary.filter(
       (v) => v.sourcePages.some((p) => pages.has(p)) || selectedNames.has(v.term.toLowerCase()) || conceptNames.has(v.term.toLowerCase()),
     ),

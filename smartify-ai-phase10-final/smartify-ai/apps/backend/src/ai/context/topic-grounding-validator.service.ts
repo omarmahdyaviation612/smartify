@@ -5,7 +5,7 @@ import { AIUsageService } from "../usage/ai-usage.service";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../content-authoring-actor.const";
 import type { GroundingNotes } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
 import { TopicGroundingAssignmentService, computeDeterministicAssignment } from "./topic-grounding-assignment.service";
-import { identifySingleCandidate, type SingleCandidate } from "./topic-grounding-validator-candidate.util";
+import { identifySingleCandidateWithAliases, type SingleCandidate, type ConceptAliasBridge } from "./topic-grounding-validator-candidate.util";
 
 /**
  * The bounded SECOND-STAGE validator (2026-09-27) — for the narrow set of
@@ -142,7 +142,7 @@ export class TopicGroundingValidatorService {
    * outcome when a provider call is made: READY on SUPPORTED, BLOCKED
    * otherwise.
    */
-  async validateCandidate(topicId: string): Promise<ValidatorOutcome> {
+  async validateCandidate(topicId: string, aliases: ConceptAliasBridge[] = []): Promise<ValidatorOutcome> {
     const topic = await this.prisma.client.topic.findUnique({
       where: { id: topicId },
       include: {
@@ -184,7 +184,7 @@ export class TopicGroundingValidatorService {
       return { outcome: "SKIPPED_DETERMINISTIC", reason: `Deterministic Step resolved this Topic as ${deterministic.method} — the validator must not override it.` };
     }
 
-    const candidate = identifySingleCandidate(notes, thisTopic, siblings);
+    const candidate = identifySingleCandidateWithAliases(notes, thisTopic, siblings, aliases);
     if (!candidate) {
       return { outcome: "SKIPPED_NO_SINGLE_CANDIDATE", reason: "No single unambiguous unclaimed candidate — the validator never guesses among several." };
     }

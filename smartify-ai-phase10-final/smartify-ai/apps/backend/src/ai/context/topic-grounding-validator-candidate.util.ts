@@ -123,15 +123,71 @@ export function identifySingleCandidate(
   siblings: AssignmentTopic[],
   priorAssignments?: Map<string, string[]>,
 ): SingleCandidate | null {
+  return identifySingleCandidateWithAliases(notes, topic, siblings, [], priorAssignments);
+}
+
+/**
+ * Minimal structural shape of a persisted GroundingConceptAlias row needed
+ * by the alias-bridge matcher below — deliberately NOT importing the Prisma
+ * model type here to keep this util dependency-free, mirroring the rest of
+ * this file's style.
+ */
+export interface ConceptAliasBridge {
+  itemKind: "CONCEPT" | "HINT";
+  itemName: string;
+  canonicalLabel: string;
+  aliasEn: string | null;
+  aliasAr: string | null;
+}
+
+/**
+ * Bilingual alias-bridge extension (2026-09-28) of `identifySingleCandidate`.
+ * In addition to matching the Topic's title directly against unclaimed
+ * `concepts[].name`/`topicHints[].topicTitle` (exactly as before), this ALSO
+ * checks any persisted `GroundingConceptAlias` row for that Unit/item,
+ * scoring the Topic's title against `aliasEn`/`aliasAr`/`canonicalLabel` with
+ * the SAME token-overlap scoring and the SAME ambiguity/threshold rules —
+ * still never guesses on a zero/ambiguous pool.
+ *
+ * CRITICAL: an alias is purely a LOOKUP BRIDGE. When the winning score comes
+ * from an alias match, the returned `SingleCandidate` is still built from the
+ * ORIGINAL concept/hint object (same `sourcePages`, same provenance) — the
+ * alias string itself is never returned as, or persisted as, matched
+ * evidence. `aliases` not being re-verified against the Unit's CURRENT
+ * concepts/hints here is intentional and safe: `unclaimedPool` above already
+ * filters to only currently-real, currently-unclaimed concepts/hints, and an
+ * alias row is only ever consulted for an item that is ALSO present in that
+ * live, re-verified pool (a stale alias row referencing a since-removed
+ * concept simply finds no matching pool entry and is inert).
+ */
+export function identifySingleCandidateWithAliases(
+  notes: GroundingNotes | null | undefined,
+  topic: AssignmentTopic,
+  siblings: AssignmentTopic[],
+  aliases: ConceptAliasBridge[],
+  priorAssignments?: Map<string, string[]>,
+): SingleCandidate | null {
   if (!notes) return null;
 
   const { unclaimedConcepts, unclaimedHints } = unclaimedPool(notes, topic, siblings, priorAssignments);
   const topicTokens = tokenSet(topic.nameEn);
   if (topicTokens.size === 0) return null;
 
+  const aliasByItem = new Map<string, ConceptAliasBridge>();
+  for (const a of aliases) aliasByItem.set(`${a.itemKind}::${a.itemName}`, a);
+
+  const scoreOf = (kind: "CONCEPT" | "HINT", name: string): number => {
+    const direct = jaccard(topicTokens, tokenSet(name));
+    const alias = aliasByItem.get(`${kind}::${name}`);
+    if (!alias) return direct;
+    const candidateStrings = [alias.aliasEn, alias.aliasAr, alias.canonicalLabel].filter((s): s is string => !!s);
+    const aliasScore = candidateStrings.length === 0 ? 0 : Math.max(...candidateStrings.map((s) => jaccard(topicTokens, tokenSet(s))));
+    return Math.max(direct, aliasScore);
+  };
+
   const scored: SingleCandidate[] = [
-    ...unclaimedConcepts.map((c) => ({ kind: "CONCEPT" as const, name: c.name, score: jaccard(topicTokens, tokenSet(c.name)), concept: c })),
-    ...unclaimedHints.map((h) => ({ kind: "HINT" as const, name: h.topicTitle, score: jaccard(topicTokens, tokenSet(h.topicTitle)), hint: h })),
+    ...unclaimedConcepts.map((c) => ({ kind: "CONCEPT" as const, name: c.name, score: scoreOf("CONCEPT", c.name), concept: c })),
+    ...unclaimedHints.map((h) => ({ kind: "HINT" as const, name: h.topicTitle, score: scoreOf("HINT", h.topicTitle), hint: h })),
   ].filter((s) => s.score > 0);
 
   if (scored.length === 0) return null;
