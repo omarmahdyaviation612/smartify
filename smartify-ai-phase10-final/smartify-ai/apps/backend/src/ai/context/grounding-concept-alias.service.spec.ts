@@ -157,6 +157,34 @@ describe("GroundingConceptAliasService", () => {
     expect(upsert).not.toHaveBeenCalled();
   });
 
+  it("retries exactly once at 1200 tokens when a 600-token response is unparseable", async () => {
+    const valid = JSON.stringify([{ itemKind: "CONCEPT", itemName: BASE_NOTES.concepts[0].name, canonicalLabel: "prophethood", aliasEn: "Prophethood", aliasAr: null }]);
+    const { service, generate } = build("not complete");
+    generate.mockReset();
+    generate.mockResolvedValueOnce({ content: "```json\\n[", inputTokens: 20, outputTokens: 600 });
+    generate.mockResolvedValueOnce({ content: valid, inputTokens: 20, outputTokens: 10 });
+    const result = await service.generateAliasesForUnit("u1");
+    expect(result.outcome).toBe("GENERATED");
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate.mock.calls.map((c: any[]) => c[0].maxOutputTokens)).toEqual([600, 1200]);
+  });
+
+  it("does not make a third call when the 1200-token retry is also truncated", async () => {
+    const { service, generate } = build("not complete");
+    generate.mockReset();
+    generate.mockResolvedValueOnce({ content: "```json\\n[", inputTokens: 20, outputTokens: 600 });
+    generate.mockResolvedValueOnce({ content: "```json\\n[", inputTokens: 20, outputTokens: 1200 });
+    const result = await service.generateAliasesForUnit("u1");
+    expect(result.outcome).toBe("REJECTED");
+    expect(generate).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry malformed non-truncated output", async () => {
+    const { service, generate } = build("garbage, not JSON");
+    expect((await service.generateAliasesForUnit("u1")).outcome).toBe("REJECTED");
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+
   it("hasCurrentAliases reflects generationVersion-scoped count", async () => {
     const { service, count } = build("[]");
     count.mockResolvedValue(2);

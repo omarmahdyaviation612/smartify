@@ -113,6 +113,8 @@ export type AliasValidationResult =
  */
 const MAX_ALIAS_LENGTH_MULTIPLIER = 6;
 const MAX_ALIAS_LENGTH_FLOOR = 40;
+const ALIAS_MAX_OUTPUT_TOKENS = 600;
+const ALIAS_TRUNCATION_RETRY_MAX_OUTPUT_TOKENS = 1200;
 
 /**
  * Strips a single leading/trailing Markdown code fence (```json ... ``` or
@@ -224,7 +226,7 @@ export class GroundingConceptAliasService {
     const userMessage = "Produce the bilingual alias JSON array now.";
 
     const { provider, providerKey, model } = await this.providerFactory.getActiveProvider();
-    const estimatedUsd = await this.usageService.estimateMaxChatCostUsd({ providerKey, inputText: systemPrompt + userMessage });
+    const estimatedUsd = await this.usageService.estimateMaxChatCostUsd({ providerKey, inputText: systemPrompt + userMessage, maxOutputTokens: ALIAS_TRUNCATION_RETRY_MAX_OUTPUT_TOKENS });
     const reserveResult = await this.usageService.reserveBudget(CONTENT_AUTHORING_ACTOR_ID, estimatedUsd);
     if (!reserveResult.ok) {
       return { outcome: "BUDGET_UNAVAILABLE", reason: `Budget unavailable (${reserveResult.reason}).` };
@@ -232,10 +234,18 @@ export class GroundingConceptAliasService {
 
     let result: Awaited<ReturnType<typeof provider.generate>>;
     try {
-      result = await provider.generate({ systemPrompt, messages: [{ role: "user", content: userMessage }] });
+      result = await provider.generate({ systemPrompt, messages: [{ role: "user", content: userMessage }], maxOutputTokens: ALIAS_MAX_OUTPUT_TOKENS });
     } catch (err) {
       await this.usageService.releaseBudget(reserveResult.reservationId).catch(() => undefined);
       throw err;
+    }
+
+    let validated = validateAliasResponse(result.content, notes);
+    if (!validated.ok && validated.code === "UNPARSEABLE_JSON" && result.outputTokens >= ALIAS_MAX_OUTPUT_TOKENS) {
+      this.logger.warn(JSON.stringify({ event: "GROUNDING_CONCEPT_ALIAS_TRUNCATION_RETRY", unitId, firstOutputTokens: result.outputTokens, retryMaxOutputTokens: ALIAS_TRUNCATION_RETRY_MAX_OUTPUT_TOKENS }));
+      const retry = await provider.generate({ systemPrompt, messages: [{ role: "user", content: userMessage }], maxOutputTokens: ALIAS_TRUNCATION_RETRY_MAX_OUTPUT_TOKENS });
+      result = { ...retry, inputTokens: result.inputTokens + retry.inputTokens, outputTokens: result.outputTokens + retry.outputTokens };
+      validated = validateAliasResponse(retry.content, notes);
     }
 
     const rates = await this.providerFactory.getCostRates(providerKey);
@@ -258,7 +268,6 @@ export class GroundingConceptAliasService {
       .catch((err) => this.logger.warn(`Usage log failed (alias generation still completed): ${err instanceof Error ? err.message : String(err)}`));
     await this.usageService.reconcileBudget(reserveResult.reservationId, actualCostUsd).catch(() => undefined);
 
-    const validated = validateAliasResponse(result.content, notes);
     if (!validated.ok) {
       this.logger.warn(JSON.stringify({ event: "GROUNDING_CONCEPT_ALIAS_REJECTED", unitId, code: validated.code, detail: validated.detail }));
       return { outcome: "REJECTED", reason: `${validated.code}: ${validated.detail}` };
