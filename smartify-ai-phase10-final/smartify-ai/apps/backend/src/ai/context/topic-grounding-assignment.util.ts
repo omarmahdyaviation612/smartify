@@ -107,6 +107,7 @@ export interface PersistedTopicGroundingAssignment {
 
 /** The minimal Unit shape the read path needs. */
 export interface AssignmentUnitIdentity {
+  id?: string;
   groundingVersion: number | null;
   groundingSourceFingerprint: string | null;
 }
@@ -237,12 +238,14 @@ export function sliceFromAssignment(notes: GroundingNotes | null | undefined, as
 export function resolveAssignedGroundingSlice(
   assignment: PersistedTopicGroundingAssignment | null | undefined,
   unit: AssignmentUnitIdentity & { groundingNotesJson: GroundingNotes | null | undefined },
+  topicSourceEvidence?: Array<{status:string;unitId:string;sourceFingerprint:string;evidenceJson:unknown}>,
 ): AssignmentReadOutcome {
   if (!assignment) return { state: "MISSING" };
   if (!assignmentIdentityMatches(assignment, unit)) return { state: "STALE" };
   if (assignment.status !== "READY") return { state: "BLOCKED" };
 
-  const slice = sliceFromAssignment(unit.groundingNotesJson, assignment);
+  const notes=mergeSourceEvidenceForRead(unit.groundingNotesJson,topicSourceEvidence,unit.groundingSourceFingerprint,unit.id);
+  const slice = sliceFromAssignment(notes, assignment);
   if (!slice) return { state: "MISSING" };
   if (slice.concepts.length === 0 && slice.facts.length === 0 && slice.vocabulary.length === 0) return { state: "EMPTY" };
   return { state: "READY", slice };
@@ -257,7 +260,14 @@ export function resolveAssignedGroundingSlice(
 export function assignedGroundingSliceOrNull(
   assignment: PersistedTopicGroundingAssignment | null | undefined,
   unit: AssignmentUnitIdentity & { groundingNotesJson: GroundingNotes | null | undefined },
+  topicSourceEvidence?: Array<{status:string;unitId:string;sourceFingerprint:string;evidenceJson:unknown}>,
 ): GroundingSlice | null {
-  const outcome = resolveAssignedGroundingSlice(assignment, unit);
+  const outcome = resolveAssignedGroundingSlice(assignment, unit, topicSourceEvidence);
   return outcome.state === "READY" ? outcome.slice : null;
+}
+
+function mergeSourceEvidenceForRead(notes:GroundingNotes|null|undefined,rows:Array<{status:string;unitId:string;sourceFingerprint:string;evidenceJson:unknown}>|undefined,fingerprint:string|null,unitId?:string):GroundingNotes|null|undefined{
+  if(!notes)return notes;const merged:GroundingNotes={...notes,concepts:[...notes.concepts],facts:[...notes.facts],vocabulary:[...notes.vocabulary],learningObjectives:[...notes.learningObjectives],topicHints:[...notes.topicHints]};
+  for(const row of rows??[]){if(row.status!=="READY"||row.sourceFingerprint!==fingerprint||(unitId!==undefined&&row.unitId!==unitId)||!Array.isArray(row.evidenceJson))continue;for(const item of row.evidenceJson as any[]){if(!item||typeof item.label!=="string"||!Array.isArray(item.sourcePages))continue;if(item.type==="concept")merged.concepts.push({name:item.label,description:item.label,sourcePages:item.sourcePages,importance:"core"});else if(item.type==="fact")merged.facts.push({fact:item.label,sourcePages:item.sourcePages,importance:"core"});else if(item.type==="vocabulary")merged.vocabulary.push({term:item.label,meaning:item.label,sourcePages:item.sourcePages});else if(item.type==="objective")merged.learningObjectives.push(item.label);else if(item.type==="hint")merged.topicHints.push({topicTitle:item.label,relevantConcepts:[item.label],sourcePages:item.sourcePages});}}
+  return merged;
 }

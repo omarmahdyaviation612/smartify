@@ -1,0 +1,13 @@
+import { Injectable } from "@nestjs/common";
+import { PrismaService } from "../../prisma/prisma.service";
+import { AIProviderFactory } from "../../ai/ai-provider.factory";
+import { AIUsageService } from "../../ai/usage/ai-usage.service";
+import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
+@Injectable()
+export class GroundingVisionExecutionService {
+ constructor(private readonly prisma:PrismaService,private readonly providers:AIProviderFactory,private readonly usage:AIUsageService){}
+ async createAccountingContext(input:{inputText:string;estimatedInputTokens?:number;maxOutputTokens?:number}){const {providerKey}=await this.providers.getActiveProvider();const estimated=await this.usage.estimateMaxChatCostUsd({providerKey,inputText:input.inputText,estimatedInputTokens:input.estimatedInputTokens,maxOutputTokens:input.maxOutputTokens});const r=await this.usage.reserveBudget(CONTENT_AUTHORING_ACTOR_ID,estimated);if(!r.ok)throw new Error(`Grounding extraction budget reservation refused (${r.reason}).`);return {reservationId:r.reservationId,cost:0,finalized:false};}
+ async finalizeFailure(c:any){if(!c.finalized){c.finalized=true;await this.usage.releaseBudget(c.reservationId).catch(()=>undefined);}}
+ async finalizeSuccess(c:any){if(!c.finalized){c.finalized=true;await this.usage.reconcileBudget(c.reservationId,c.cost).catch(()=>undefined);}}
+ async execute(input:{systemPrompt:string;messages:any[];feature:string;estimatedInputTokens?:number;maxOutputTokens?:number;diagnostics?:Record<string,unknown>;accountingContext?:any}){const {provider,providerKey,model}=await this.providers.getActiveProvider();const c=input.accountingContext??await this.createAccountingContext({inputText:input.systemPrompt,estimatedInputTokens:input.estimatedInputTokens,maxOutputTokens:input.maxOutputTokens});try{const result=await provider.generate({systemPrompt:input.systemPrompt,messages:input.messages,diagnostics:input.diagnostics as any,responseFormat:"json_object",maxOutputTokens:input.maxOutputTokens,transportRetryMode:"none"});const rates=await this.providers.getCostRates(providerKey);const cost=result.inputTokens*rates.costPerInputToken+result.outputTokens*rates.costPerOutputToken;c.cost+=cost;await this.prisma.client.aIUsage.create({data:{userId:CONTENT_AUTHORING_ACTOR_ID,studentId:null,subjectId:null,feature:input.feature,provider:providerKey,model,inputTokens:result.inputTokens,outputTokens:result.outputTokens,creditsUsed:0,costUsd:cost}}).catch(()=>undefined);return {result,model,providerKey,cost,accountingContext:c};}catch(e){if(!input.accountingContext)await this.finalizeFailure(c);throw e;}}
+}

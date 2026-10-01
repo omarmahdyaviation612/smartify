@@ -1,0 +1,8 @@
+import { GroundingVisionExecutionService } from "./grounding-vision-execution.service";
+import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
+describe("GroundingVisionExecutionService",()=>{function h(generate:any){const provider={generate:jest.fn(generate)};const prisma:any={client:{aIUsage:{create:jest.fn().mockResolvedValue(undefined)}}};const providers:any={getActiveProvider:jest.fn().mockResolvedValue({provider,providerKey:"openai",model:"gpt"}),getCostRates:jest.fn().mockResolvedValue({costPerInputToken:1,costPerOutputToken:1})};const usage:any={estimateMaxChatCostUsd:jest.fn().mockResolvedValue(1),reserveBudget:jest.fn().mockResolvedValue({ok:true,reservationId:"r"}),reconcileBudget:jest.fn().mockResolvedValue(undefined),releaseBudget:jest.fn().mockResolvedValue(undefined)};return {s:new GroundingVisionExecutionService(prisma,providers,usage),provider,prisma,providers,usage};}
+it("executes once and accounts",async()=>{const x=h(async()=>({content:'{}',inputTokens:1,outputTokens:2}));await x.s.execute({systemPrompt:"p",messages:[],feature:"f"});expect(x.provider.generate).toHaveBeenCalledTimes(1);expect(x.usage.reserveBudget).toHaveBeenCalledWith(CONTENT_AUTHORING_ACTOR_ID,1);expect(x.prisma.client.aIUsage.create).toHaveBeenCalledTimes(1);});
+it("shared context reserves once and releases once on terminal failure",async()=>{const x=h(async()=>{throw new Error("fail")});const c=await x.s.createAccountingContext({inputText:"p"});await expect(x.s.execute({systemPrompt:"p",messages:[],feature:"f",accountingContext:c})).rejects.toThrow();await x.s.finalizeFailure(c);await x.s.finalizeFailure(c);expect(x.usage.reserveBudget).toHaveBeenCalledTimes(1);expect(x.usage.releaseBudget).toHaveBeenCalledTimes(1);});
+});
+
+

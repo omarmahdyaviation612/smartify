@@ -363,6 +363,7 @@ model Unit {
   lessonDrafts      LessonDraft[]
   groundingProgress UnitGroundingProgress?
   groundingConceptAliases GroundingConceptAlias[]
+  topicSourceEvidence TopicSourceEvidence[]
 
   @@index([subjectId])
 }
@@ -452,9 +453,42 @@ model Topic {
   // Persisted Topic->grounding assignment (2026-09-27) — see
   // TopicGroundingAssignment below.
   groundingAssignment     TopicGroundingAssignment?
+  topicSourceEvidence TopicSourceEvidence[]
 
   @@index([unitId])
 }
+
+enum TopicSourceEvidenceStatus {
+  PREPARING
+  READY
+  NOT_FOUND
+  FAILED
+  STALE
+}
+model TopicSourceEvidence {
+  id String @id @default(cuid())
+  topicId String
+  unitId String
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  unit Unit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  sourceFingerprint String
+  sourcePageStart Int
+  sourcePageEnd Int
+  promptVersion String
+  extractorModel String
+  status TopicSourceEvidenceStatus @default(PREPARING)
+  evidenceJson Json?
+  failureCode String?
+  failureReason String?
+  inputTokens Int?
+  outputTokens Int?
+  costUsd Decimal? @db.Decimal(12, 6)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([topicId, sourceFingerprint, sourcePageStart, sourcePageEnd, promptVersion, extractorModel])
+  @@index([unitId, status])
+}
+
 
 // HOW a Topic's slice of its Unit's grounding was decided. HINT_MATCH,
 // KEYWORD_OVERLAP and SINGLE_TOPIC_FALLBACK are the three existing

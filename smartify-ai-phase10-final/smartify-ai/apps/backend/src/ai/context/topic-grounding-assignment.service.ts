@@ -56,6 +56,32 @@ export interface DeterministicAssignment {
   reason: string;
 }
 
+/** Adds only current, topic/unit-scoped READY evidence to the in-memory
+ * candidate pool. The persisted Unit grounding object is never changed. */
+function mergeReadyTopicEvidence(notes: GroundingNotes, rows: any[] | undefined, topicId: string, unitId: string, fingerprint: string, unitStart?: number | null, unitEnd?: number | null): GroundingNotes {
+  const hasWindow = Number.isInteger(unitStart) && Number.isInteger(unitEnd);
+  const extra = (rows ?? []).filter((row) => row.topicId === topicId && row.unitId === unitId && row.sourceFingerprint === fingerprint && row.status === "READY" && (!hasWindow || (row.sourcePageStart >= (unitStart as number) && row.sourcePageEnd <= (unitEnd as number))));
+  if (extra.length === 0) return notes;
+  const merged: GroundingNotes = {
+    ...notes,
+    concepts: [...notes.concepts], facts: [...notes.facts], vocabulary: [...notes.vocabulary], topicHints: [...notes.topicHints],
+  };
+  for (const row of extra) {
+    const payload = row.evidenceJson;
+    if (!Array.isArray(payload)) continue;
+    for (const item of payload) {
+      if (!item || typeof item.label !== "string" || !Array.isArray(item.sourcePages) || item.sourcePages.some((p: unknown) => !Number.isInteger(p))) continue;
+      const pages = item.sourcePages as number[];
+      if (item.type === "concept") merged.concepts.push({ name: item.label, description: item.label, sourcePages: pages, importance: "core" });
+      else if (item.type === "fact") merged.facts.push({ fact: item.label, sourcePages: pages, importance: "core" });
+      else if (item.type === "vocabulary") merged.vocabulary.push({ term: item.label, meaning: item.label, sourcePages: pages });
+      else if (item.type === "hint") merged.topicHints.push({ topicTitle: item.label, relevantConcepts: [item.label], sourcePages: pages });
+      else if (item.type === "objective") merged.learningObjectives.push(item.label);
+    }
+  }
+  return merged;
+}
+
 /**
  * Step 4's structural pattern. This is NOT a textbook-content synonym table:
  * it is tested ONLY against `Topic.nameEn` — curriculum METADATA, which is
@@ -323,9 +349,15 @@ export class TopicGroundingAssignmentService {
       where: { id: topicId },
       include: {
         groundingAssignment: true,
+        topicSourceEvidence: {
+          where: { status: "READY" },
+          select: { id: true, topicId: true, unitId: true, sourceFingerprint: true, evidenceJson: true, status: true, sourcePageStart: true, sourcePageEnd: true, promptVersion: true, extractorModel: true },
+        },
         unit: {
           select: {
             id: true,
+            sourcePageStart: true,
+            sourcePageEnd: true,
             groundingNotesJson: true,
             groundingVersion: true,
             groundingSourceFingerprint: true,
@@ -342,7 +374,7 @@ export class TopicGroundingAssignmentService {
     }
 
     const existing = topic.groundingAssignment;
-    const notes = unit.groundingNotesJson as unknown as GroundingNotes;
+    const notes = mergeReadyTopicEvidence(unit.groundingNotesJson as unknown as GroundingNotes, (topic as any).topicSourceEvidence, topic.id, unit.id, unit.groundingSourceFingerprint, (unit as any).sourcePageStart, (unit as any).sourcePageEnd);
     const siblings = unit.topics.map((t) => ({ id: t.id, nameEn: t.nameEn, order: t.order }));
 
     const factualIdentityMatches =

@@ -145,7 +145,7 @@ describe("TopicGroundingMapperService.mapTopic", () => {
         topic: {
           findUnique: jest.fn().mockResolvedValue({
             ...UNRESOLVED_TOPIC,
-            unit: { id: "u1", groundingNotesJson: notes, groundingVersion: 1, groundingSourceFingerprint: "fp", topics: SIBLINGS },
+            unit: { id: "u1", groundingNotesJson: { ...notes, vocabulary: [...notes.vocabulary, { term: "listening", meaning: "careful attention", sourcePages: [32] }] }, groundingVersion: 1, groundingSourceFingerprint: "fp", topics: SIBLINGS },
           }),
         },
         topicGroundingAssignment: { upsert },
@@ -167,7 +167,7 @@ describe("TopicGroundingMapperService.mapTopic", () => {
   }
 
   it("persists a valid HIGH-confidence selection as an AI_MAPPER / READY row", async () => {
-    const { service, upsert } = build(JSON.stringify({ matchedConceptNames: ["Sequencing Events"], matchedHintTitles: ["Retelling a Story"], confidence: "HIGH", reason: "It retells a story." }));
+    const { service, upsert } = build(JSON.stringify({ supported: true, matches: [{ type: "vocabulary", index: 1 }] }));
     const outcome = await service.mapTopic("t3");
     expect(outcome.outcome).toBe("READY");
     const written = upsert.mock.calls[0][0].create;
@@ -176,24 +176,24 @@ describe("TopicGroundingMapperService.mapTopic", () => {
     expect(written.confidence).toBe("HIGH");
     expect(written.mapperModel).toBe("gpt-test");
     expect(written.mapperPromptVersion).toBe(MAPPER_PROMPT_VERSION);
-    expect(written.reason).toBe("It retells a story.");
-    expect(written.matchedConceptNames).toEqual(["Sequencing Events"]);
+    expect(written.reason).toBe("Compact mapper selected persisted evidence.");
+    expect(written.matchedConceptNames).toEqual(["listening"]);
   });
 
   it("persists a vocabulary-only selection as an AI_MAPPER / READY row (previously wrongly BLOCKED as HALLUCINATED)", async () => {
-    const { service, upsert } = build(JSON.stringify({ matchedConceptNames: ["sequence"], matchedHintTitles: null, confidence: "HIGH", reason: "This Topic teaches the vocabulary term directly." }));
+    const { service, upsert } = build(JSON.stringify({ supported: true, matches: [{ type: "vocabulary", index: 1 }] }));
     const outcome = await service.mapTopic("t3");
     expect(outcome.outcome).toBe("READY");
     const written = upsert.mock.calls[0][0].create;
     expect(written.status).toBe("READY");
-    expect(written.matchedConceptNames).toEqual(["sequence"]);
+    expect(written.matchedConceptNames).toEqual(["listening"]);
   });
 
   it("persists a HALLUCINATED response as BLOCKED with NO selection kept", async () => {
-    const { service, upsert } = build(JSON.stringify({ matchedConceptNames: ["Kite Flying Safety"], matchedHintTitles: null, confidence: "HIGH", reason: "r" }));
+    const { service, upsert } = build(JSON.stringify({ supported: true, matches: [{ type: "vocabulary", index: 99 }] }));
     const outcome = await service.mapTopic("t3");
     expect(outcome.outcome).toBe("BLOCKED");
-    expect((outcome as any).code).toBe("HALLUCINATED_CONCEPT_NAME");
+    expect((outcome as any).reason).toBe("Compact mapper response rejected");
     expect(upsert.mock.calls[0][0].create.status).toBe("BLOCKED");
     expect(upsert.mock.calls[0][0].create.matchedConceptNames).toEqual([]);
   });
@@ -206,7 +206,7 @@ describe("TopicGroundingMapperService.mapTopic", () => {
   });
 
   it("persists a LOW-confidence result as BLOCKED — never usable grounding, even though names validated", async () => {
-    const { service, upsert } = build(JSON.stringify({ matchedConceptNames: ["Character Feelings"], matchedHintTitles: null, confidence: "LOW", reason: "Not sure." }));
+    const { service, upsert } = build(JSON.stringify({ supported: false }));
     expect((await service.mapTopic("t3")).outcome).toBe("BLOCKED");
     const written = upsert.mock.calls[0][0].create;
     expect(written.status).toBe("BLOCKED");
@@ -219,7 +219,7 @@ describe("TopicGroundingMapperService.mapTopic", () => {
       id: "t1",
       nameEn: "Sequencing Events",
       order: 1,
-      unit: { id: "u1", groundingNotesJson: notes, groundingVersion: 1, groundingSourceFingerprint: "fp", topics: SIBLINGS },
+      unit: { id: "u1", groundingNotesJson: { ...notes, vocabulary: [...notes.vocabulary, { term: "listening", meaning: "careful attention", sourcePages: [32] }] }, groundingVersion: 1, groundingSourceFingerprint: "fp", topics: SIBLINGS },
     });
     expect((await service.mapTopic("t1")).outcome).toBe("SKIPPED_DETERMINISTIC");
     expect(generate).not.toHaveBeenCalled();
@@ -237,8 +237,35 @@ describe("TopicGroundingMapperService.mapTopic", () => {
     expect(upsert).not.toHaveBeenCalled();
   });
 
+  it("includes matching READY TopicSourceEvidence but excludes non-ready, cross-scope, and stale rows", async () => {
+    const valid = { topicId: "t3", unitId: "u1", sourceFingerprint: "fp", status: "READY", evidenceJson: [{ type: "vocabulary", label: "listening", sourcePages: [88] }] };
+    const { service, prisma, generate } = build(JSON.stringify({ supported: true, matches: [{ type: "vocabulary", index: 0 }] }));
+    prisma.client.topic.findUnique.mockResolvedValue({ ...UNRESOLVED_TOPIC, topicSourceEvidence: [valid, { ...valid, status: "NOT_FOUND" }, { ...valid, status: "FAILED" }, { ...valid, status: "PREPARING" }, { ...valid, status: "STALE" }, { ...valid, topicId: "other" }, { ...valid, unitId: "other" }, { ...valid, sourceFingerprint: "old" }], unit: { id: "u1", groundingNotesJson: { ...notes, vocabulary: [] }, groundingVersion: 1, groundingSourceFingerprint: "fp", topics: SIBLINGS } });
+    const outcome = await service.mapTopic("t3");
+    expect(outcome).toMatchObject({ outcome: "READY", matchedConceptNames: ["listening"] });
+    expect(generate).toHaveBeenCalledTimes(1);
+    const request = JSON.stringify(generate.mock.calls[0][0]);
+    expect(request).not.toContain("88");
+    expect(request).not.toContain("999");
+  });
+
+  it("uses zero provider calls and zero budget for an empty compact pool", async () => {
+    const { service, prisma, generate, usageService } = build("{}");
+    prisma.client.topic.findUnique.mockResolvedValue({ ...UNRESOLVED_TOPIC, topicSourceEvidence: [], unit: { id: "u1", groundingNotesJson: { ...notes, vocabulary: [] }, groundingVersion: 1, groundingSourceFingerprint: "fp", topics: SIBLINGS } });
+    expect((await service.mapTopic("t3")).outcome).toBe("NOT_GROUNDED");
+    expect(generate).not.toHaveBeenCalled();
+    expect(usageService.reserveBudget).not.toHaveBeenCalled();
+  });
+
+  it("does not retry a provider failure", async () => {
+    const { service, generate, usageService } = build("{}");
+    generate.mockRejectedValueOnce(new Error("provider down"));
+    await expect(service.mapTopic("t3")).rejects.toThrow("provider down");
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(usageService.releaseBudget).toHaveBeenCalledTimes(1);
+  });
   it("bills the platform content-authoring actor, never a student", async () => {
-    const { service, usageService, prisma } = build(JSON.stringify({ matchedConceptNames: ["Sequencing Events"], matchedHintTitles: null, confidence: "HIGH", reason: "r" }));
+    const { service, usageService, prisma } = build(JSON.stringify({ supported: true, matches: [{ type: "vocabulary", index: 1 }] }));
     await service.mapTopic("t3");
     expect(usageService.reserveBudget.mock.calls[0][0]).toBe("cmtz6270z0000u9c5h6ua0y67");
     expect(prisma.client.aIUsage.create.mock.calls[0][0].data.userId).toBe("cmtz6270z0000u9c5h6ua0y67");

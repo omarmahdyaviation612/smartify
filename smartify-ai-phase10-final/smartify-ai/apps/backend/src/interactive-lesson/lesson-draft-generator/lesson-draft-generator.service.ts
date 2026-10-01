@@ -101,6 +101,7 @@ export class LessonDraftGeneratorService {
       where: { id: topicId },
       select: {
         groundingAssignment: true,
+        topicSourceEvidence: true,
         unit: { select: { groundingNotesJson: true, groundingVersion: true, groundingSourceFingerprint: true } },
       },
     });
@@ -109,7 +110,7 @@ export class LessonDraftGeneratorService {
       groundingVersion: row.unit.groundingVersion,
       groundingSourceFingerprint: row.unit.groundingSourceFingerprint,
       groundingNotesJson: row.unit.groundingNotesJson as unknown as GroundingNotes | null,
-    });
+    }, row.topicSourceEvidence);
   }
 
   async resolveUnitContext(unitId: string): Promise<ResolvedUnitContext & { unitId: string; subjectId: string; sourceFile: string | null }> {

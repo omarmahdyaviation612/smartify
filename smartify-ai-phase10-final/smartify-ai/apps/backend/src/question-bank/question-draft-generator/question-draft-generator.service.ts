@@ -109,6 +109,7 @@ export class QuestionDraftGeneratorService {
       where: { id: topicId },
       select: {
         groundingAssignment: true,
+        topicSourceEvidence: true,
         unit: { select: { groundingNotesJson: true, groundingVersion: true, groundingSourceFingerprint: true } },
       },
     });
@@ -117,7 +118,7 @@ export class QuestionDraftGeneratorService {
       groundingVersion: row.unit.groundingVersion,
       groundingSourceFingerprint: row.unit.groundingSourceFingerprint,
       groundingNotesJson: row.unit.groundingNotesJson as unknown as GroundingNotes | null,
-    });
+    }, row.topicSourceEvidence);
   }
 
   async resolveTopicContext(topicId: string): Promise<ResolvedTopicContext & { topicId: string; isPlaceholder: boolean }> {

@@ -1,5 +1,6 @@
 import { estimateImageTokens, estimateTextTokens, groundingSizingConfig, planGroundingChunks, pngDimensions, type ImageDetail, type SizedPage } from "../../ai/vision-request-sizing";
-import { invokePdfRenderer } from "./pdf-renderer-runtime";
+import { GroundingSourceExtractionService } from "./grounding-source-extraction.service";
+import { GroundingVisionExecutionService } from "./grounding-vision-execution.service";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -163,6 +164,8 @@ export class UnitGroundingService {
     private readonly contextBuilder: AIContextBuilderService,
     private readonly usageService: AIUsageService,
     private readonly storageFactory: CurriculumSourceStorageFactory,
+    @Optional() private readonly sharedExtraction?: GroundingSourceExtractionService,
+    @Optional() private readonly sharedVision?: GroundingVisionExecutionService,
     @Optional() private readonly progressService?: UnitGroundingProgressService,
   ) {}
 
@@ -223,9 +226,8 @@ export class UnitGroundingService {
       const fetched = await this.storageFactory.get().fetchToTempFile(sourceKey, { curriculumCode: unit.subject.grade.curriculum.code, gradeLevel: unit.subject.grade.level });
       const tmpDir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "smartify-grounding-chunk-"));
       try {
-        const { stdout } = await invokePdfRenderer([fetched.localPath, String(chunk.pageStart), String(chunk.pageEnd), tmpDir]);
-        const imagePaths = stdout.split("\n").map(p => p.trim()).filter(Boolean);
-        const pages: SizedPage[] = imagePaths.map((imagePath, index) => { const d = pngDimensions(fs.readFileSync(imagePath)); return { page: chunk.pageStart + index, imagePath, imageTokens: estimateImageTokens(active.model, d.width, d.height, groundingSizingConfig().detail) }; });
+        const rendered = await (this.sharedExtraction ?? new GroundingSourceExtractionService(this.storageFactory)).renderSourcePages(sourceKey, unit.subject.grade.curriculum.code, unit.subject.grade.level, chunk.pageStart, chunk.pageEnd);
+        const pages: SizedPage[] = rendered.imageDataUrls.map((image, index) => { const bytes=Buffer.from(image.dataUrl.slice(image.dataUrl.indexOf(",")+1),"base64");const d = pngDimensions(bytes); return { page: chunk.pageStart + index, imagePath: "", imageTokens: estimateImageTokens(active.model, d.width, d.height, groundingSizingConfig().detail), imageDataUrl:image.dataUrl } as SizedPage; });
         const textTokens = estimateTextTokens(this.contextBuilder.buildUnitGroundingExtractionPrompt({ curriculumNameEn: unit.subject.grade.curriculum.nameEn, gradeNameEn: unit.subject.grade.nameEn, subjectNameEn: unit.subject.nameEn, unitNameEn: unit.nameEn, pageRangeStart: chunk.pageStart, pageRangeEnd: chunk.pageEnd }) + "Extract the curriculum grounding now.");
         const notes = await this.extractChunk(pages, { curriculumNameEn: unit.subject.grade.curriculum.nameEn, gradeNameEn: unit.subject.grade.nameEn, subjectNameEn: unit.subject.nameEn, unitNameEn: unit.nameEn }, requestingActorId, unitId, groundingSizingConfig().detail, active, textTokens, this.createTpmPacer(), true);
         await progress.persistChunk(unitId, leaseOwner, { chunkId: chunk.chunkId, pageStart: chunk.pageStart, pageEnd: chunk.pageEnd, notes } as GroundingChunkResult, false);
@@ -372,12 +374,11 @@ export class UnitGroundingService {
       const pages: SizedPage[] = [];
       // Render in bounded batches, but plan ALL AI requests before sending any.
       for (const [start, end] of chunkPageRange(pageStart, pageEnd, MAX_PAGES_PER_RENDER)) {
-        const { stdout } = await invokePdfRenderer([pdfPath, String(start), String(end), tmpDir]);
-        const paths = stdout.split("\n").map(p => p.trim()).filter(Boolean);
-        if (paths.length !== end - start + 1) throw new Error("Renderer page count does not match requested range");
-        for (let index = 0; index < paths.length; index++) {
-          const dimensions = pngDimensions(fs.readFileSync(paths[index]));
-          pages.push({ page: start + index, imagePath: paths[index], imageTokens: estimateImageTokens(active.model, dimensions.width, dimensions.height, detail) });
+        const rendered = await (this.sharedExtraction ?? new GroundingSourceExtractionService(this.storageFactory)).renderSourcePages(sourceFile, unit.subject.grade.curriculum.code, unit.subject.grade.level, start, end);
+        if (rendered.imageDataUrls.length !== end - start + 1) throw new Error("Renderer page count does not match requested range");
+        for (let index = 0; index < rendered.imageDataUrls.length; index++) {
+          const image=rendered.imageDataUrls[index];const dimensions = pngDimensions(Buffer.from(image.dataUrl.slice(image.dataUrl.indexOf(",")+1),"base64"));
+          pages.push({ page: start + index, imagePath: "", imageTokens: estimateImageTokens(active.model, dimensions.width, dimensions.height, detail), imageDataUrl:image.dataUrl } as SizedPage);
         }
       }
       const textTokens = (start: number, end: number) => estimateTextTokens(this.contextBuilder.buildUnitGroundingExtractionPrompt({ ...ctx, pageRangeStart: start, pageRangeEnd: end }) + "Extract the curriculum grounding now.");
@@ -513,7 +514,6 @@ export class UnitGroundingService {
     deferRateLimitWait = false,
   ): Promise<GroundingNotes> {
     const pageStart = pages[0].page, pageEnd = pages[pages.length - 1].page;
-    const imagePaths = pages.map(p => p.imagePath);
     const estimatedInputTokens = textTokens + pages.reduce((sum, p) => sum + p.imageTokens, 0);
     const chunkTag = unitId;
     // Page-provenance hotfix (2026-09-25): each image is preceded by its
@@ -521,131 +521,49 @@ export class UnitGroundingService {
     // never rely solely on the system prompt's description of ordering.
     // This label, not any page number, is what a valid sourceImageIndex
     // must refer back to (see unit-grounding-validator.ts).
-    const imageParts = imagePaths.flatMap((p, index) => [
+    const imageParts = pages.flatMap((page:any, index) => [
       { type: "text" as const, text: `Image ${index + 1}:` },
-      { type: "image_url" as const, image_url: { url: `data:image/png;base64,${fs.readFileSync(p).toString("base64")}`, detail } },
+      { type: "image_url" as const, image_url: { url: page.imageDataUrl ?? `data:image/png;base64,${fs.readFileSync(page.imagePath).toString("base64")}`, detail } },
     ]);
 
     const systemPrompt = this.contextBuilder.buildUnitGroundingExtractionPrompt({ ...ctx, pageRangeStart: pageStart, pageRangeEnd: pageEnd });
     let lastErrors: string[] = [];
+    const vision = this.sharedVision ?? new GroundingVisionExecutionService(this.prisma, this.providerFactory, this.usageService);
+    const accountingContext = await vision.createAccountingContext({ inputText: systemPrompt, estimatedInputTokens, maxOutputTokens: 4000 });
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      const { provider, providerKey, model } = active;
+      const { model } = active;
 
-      const estimatedUsd = await this.usageService.estimateMaxChatCostUsd({
-        providerKey,
-        inputText: systemPrompt,
-        estimatedInputTokens,
-        maxOutputTokens: 4000,
-      });
-      // Grounding is platform-funded infrastructure. The triggering actor is
-      // retained for locking/diagnostics, but must never consume a student's
-      // per-user budget or be able to block extraction via that budget.
-      const reserveResult = await this.usageService.reserveBudget(CONTENT_AUTHORING_ACTOR_ID, estimatedUsd);
-      if (!reserveResult.ok) {
-        throw new Error(`Grounding extraction budget reservation refused (${reserveResult.reason}) for pages ${pageStart}-${pageEnd}.`);
-      }
-      const budgetReservationId = reserveResult.reservationId;
-
-      let result: Awaited<ReturnType<typeof provider.generate>> | undefined;
-      try {
-        for (let transportAttempt = 1; transportAttempt <= MAX_TPM_TRANSPORT_ATTEMPTS; transportAttempt++) {
-          try {
-            result = await provider.generate({
-              systemPrompt,
-              messages: [{ role: "user", content: [{ type: "text", text: "Extract the curriculum grounding now." }, ...imageParts] }],
-              diagnostics: { operation: "unit_grounding", unitId, pageStart, pageEnd, estimatedInputTokens },
-              responseFormat: "json_object",
-              maxOutputTokens: 4000,
-              transportRetryMode: "none",
-            });
-            break;
-          } catch (err) {
-            if (isQuotaError(err) || (err as { status?: number }).status !== 429 || transportAttempt === MAX_TPM_TRANSPORT_ATTEMPTS) throw err;
-            const rawHeaders = (err as { headers?: Headers | Record<string, string> }).headers;
-            const headers = rawHeaders && typeof (rawHeaders as Headers).get === "function" ? rawHeaders as Headers : new Headers(rawHeaders);
-            const metadata = tokenRateLimitMetadata(headers) as TokenRateLimitMetadata;
-            if (deferRateLimitWait) throw new BoundedGroundingRetryError(metadata);
-            await pacer.waitAfterTpm429({ model, unitId, pageStart, pageEnd, estimatedTokens: estimatedInputTokens }, metadata, transportAttempt);
-          }
+      let executed: Awaited<ReturnType<GroundingVisionExecutionService["execute"]>>;
+      for (let transportAttempt = 1; transportAttempt <= MAX_TPM_TRANSPORT_ATTEMPTS; transportAttempt++) {
+        try {
+          executed = await vision.execute({ systemPrompt, messages: [{ role: "user", content: [{ type: "text", text: "Extract the curriculum grounding now." }, ...imageParts] }], diagnostics: { operation: "unit_grounding", unitId, pageStart, pageEnd, estimatedInputTokens }, feature: "grounding_extraction", estimatedInputTokens, maxOutputTokens: 4000, accountingContext });
+          break;
+        } catch (err) {
+          if (isQuotaError(err) || (err as { status?: number }).status !== 429 || transportAttempt === MAX_TPM_TRANSPORT_ATTEMPTS) { await vision.finalizeFailure(accountingContext); throw err; }
+          const rawHeaders = (err as { headers?: Headers | Record<string, string> }).headers;
+          const headers = rawHeaders && typeof (rawHeaders as Headers).get === "function" ? rawHeaders as Headers : new Headers(rawHeaders);
+          const metadata = tokenRateLimitMetadata(headers) as TokenRateLimitMetadata;
+          if (deferRateLimitWait) { await vision.finalizeFailure(accountingContext); throw new BoundedGroundingRetryError(metadata); }
+          await pacer.waitAfterTpm429({ model, unitId, pageStart, pageEnd, estimatedTokens: estimatedInputTokens }, metadata, transportAttempt);
         }
-        if (!result) throw new Error("Grounding provider returned no result.");
-      } catch (err) {
-        // Observability hotfix (2026-09-25): previously this raw provider
-        // failure was completely unlogged — only the generic, error-
-        // agnostic "budget released (provider call did not complete)"
-        // line existed (AIUsageService.releaseBudget). err.name/message/
-        // status come from the OpenAI SDK's own error object, derived
-        // from the API's response — never an echo of the request payload
-        // — so this is safe: no prompt text, no image/base64 data, no
-        // textbook or student content.
-        const status = (err as { status?: number }).status;
-        this.logger.warn(
-          `GROUNDING_PROVIDER_CALL_FAILED chunkTag=${chunkTag} pages=${pageStart}-${pageEnd} attempt=${attempt}: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}${status ? ` status=${status}` : ""}`,
-        );
-        await this.usageService.releaseBudget(budgetReservationId).catch(() => undefined);
-        throw err;
       }
+      if (!executed!) throw new Error("Grounding provider returned no result.");
+      const result = executed.result;
       pacer.recordSuccessfulResponse(result.rateLimit);
-
-      const rates = await this.providerFactory.getCostRates(providerKey);
-      const actualCostUsd = result.inputTokens * rates.costPerInputToken + result.outputTokens * rates.costPerOutputToken;
-      await this.prisma.client.aIUsage
-        .create({
-          data: {
-            userId: CONTENT_AUTHORING_ACTOR_ID,
-            studentId: null,
-            subjectId: null,
-            feature: "grounding_extraction",
-            provider: providerKey,
-            model,
-            inputTokens: result.inputTokens,
-            outputTokens: result.outputTokens,
-            creditsUsed: 0,
-            costUsd: actualCostUsd,
-          },
-        })
-        .catch((err) => this.logger.warn(`Usage log failed (extraction still completed): ${err instanceof Error ? err.message : String(err)}`));
-      await this.usageService.reconcileBudget(budgetReservationId, actualCostUsd).catch(() => undefined);
-
       let parsed: unknown;
-      try {
-        parsed = JSON.parse(result.content);
-      } catch {
-        lastErrors = ["Response was not valid JSON."];
-        this.logger.warn(`Grounding extraction attempt ${attempt} for ${chunkTag} pages ${pageStart}-${pageEnd} produced invalid JSON.`);
-        continue;
-      }
-
-      const validation = validateGroundingNotes(parsed, {
-        unitNameEn: ctx.unitNameEn,
-        subjectNameEn: ctx.subjectNameEn,
-        imageCount: pages.length,
-      });
-      // Page-provenance hotfix (2026-09-25): the model's sourceImageIndex
-      // ordinals are deterministically translated to REAL PDF page
-      // numbers here — never trusted from the model directly. See
-      // unit-grounding-page-remap.util.ts's doc comment.
-      if (validation.valid && validation.notes) return remapSourceImageIndexToPages(validation.notes, pages);
-
+      try { parsed = JSON.parse(result.content); } catch { lastErrors=["Response was not valid JSON."]; continue; }
+      const validation = validateGroundingNotes(parsed, { unitNameEn: ctx.unitNameEn, subjectNameEn: ctx.subjectNameEn, imageCount: pages.length });
+      if (validation.valid && validation.notes) { await vision.finalizeSuccess(accountingContext); return remapSourceImageIndexToPages(validation.notes, pages); }
       lastErrors = validation.errors;
       this.logger.warn(`GROUNDING_VALIDATION_FAILED chunkTag=${chunkTag} pages=${pageStart}-${pageEnd} attempt=${attempt}: ${validation.errors.join("; ")}`);
     }
-
-    // Observability hotfix (2026-09-25): each attempt's validation errors
-    // were already logged individually above as they happened; this final
-    // summary line (with the SAME lastErrors the thrown error itself
-    // carries) is what a Railway-logs search for this chunkTag actually
-    // finds first, without needing to reconstruct the attempt sequence.
     this.logger.warn(`GROUNDING_EXTRACTION_EXHAUSTED chunkTag=${chunkTag} pages=${pageStart}-${pageEnd} after ${MAX_ATTEMPTS} attempt(s): ${lastErrors.join("; ")}`);
+    await vision.finalizeFailure(accountingContext);
     throw new UnitGroundingExtractionError(`Grounding extraction failed validation for pages ${pageStart}-${pageEnd} after ${MAX_ATTEMPTS} attempt(s).`, lastErrors);
   }
 
-  /** sha256 of (PDF bytes + page range + extraction-prompt version) — detects a changed source without storing any textbook content. */
   private computeFingerprint(pdfPath: string, pageStart: number, pageEnd: number): string {
-    const hash = crypto.createHash("sha256");
-    hash.update(fs.readFileSync(pdfPath));
-    hash.update(`|${pageStart}-${pageEnd}|${GROUNDING_PROMPT_VERSION}`);
-    return hash.digest("hex");
+    const hash = crypto.createHash("sha256"); hash.update(fs.readFileSync(pdfPath)); hash.update(`|${pageStart}-${pageEnd}|${GROUNDING_PROMPT_VERSION}`); return hash.digest("hex");
   }
 }

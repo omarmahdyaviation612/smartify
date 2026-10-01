@@ -72,6 +72,7 @@ export class InteractiveLessonService {
         // the SAME query the runtime teaching path already makes — no extra
         // round trip, and no live relevance inference.
         groundingAssignment: true,
+        topicSourceEvidence: true,
         unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } }, _count: { select: { topics: true } } } },
       },
     });
@@ -99,13 +100,14 @@ export class InteractiveLessonService {
    */
   private topicGroundingSlice(topic: {
     groundingAssignment?: unknown;
+    topicSourceEvidence?: any[];
     unit: { groundingNotesJson: unknown; groundingVersion?: number | null; groundingSourceFingerprint?: string | null };
   }) {
     return assignedGroundingSliceOrNull(topic.groundingAssignment as any, {
       groundingVersion: topic.unit.groundingVersion ?? null,
       groundingSourceFingerprint: topic.unit.groundingSourceFingerprint ?? null,
       groundingNotesJson: topic.unit.groundingNotesJson as any,
-    });
+    }, topic.topicSourceEvidence);
   }
 
   /**

@@ -256,6 +256,7 @@ export class TutorService {
             // the same query — the Tutor no longer re-infers relevance from the
             // Topic title on every turn.
             groundingAssignment: true,
+            topicSourceEvidence: true,
             unit: { select: { subjectId: true, groundingNotesJson: true, groundingVersion: true, groundingSourceFingerprint: true } },
           },
         });
@@ -268,7 +269,7 @@ export class TutorService {
             groundingVersion: topic.unit.groundingVersion,
             groundingSourceFingerprint: topic.unit.groundingSourceFingerprint,
             groundingNotesJson: topic.unit.groundingNotesJson as GroundingNotes | null,
-          });
+          }, topic.topicSourceEvidence);
         }
       }
 

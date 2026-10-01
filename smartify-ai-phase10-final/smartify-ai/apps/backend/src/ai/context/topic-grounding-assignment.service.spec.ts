@@ -380,8 +380,31 @@ describe("sliceFromAssignment / resolveAssignedGroundingSlice", () => {
   it("TOPIC_GROUNDING_ASSIGNMENT_VERSION is bumped to 3 for the vocabulary field-scope fix", () => {
     expect(TOPIC_GROUNDING_ASSIGNMENT_VERSION).toBe(3);
   });
-});
+  it("resolves READY TopicSourceEvidence-only and mixed slices with physical pages", () => {
+    const sourceOnlyRow = { ...row, matchedConceptNames: ["Extracted Evidence"], matchedHintTitles: [] };
+    const evidence = [{ status: "READY", unitId: "u1", sourceFingerprint: "fp", evidenceJson: [{ type: "concept", label: "Extracted Evidence", sourcePages: [88] }] }];
+    const emptyNotes = notes({ ...hintUnit, concepts: [], facts: [], vocabulary: [], topicHints: [] });
+    const sourceOnly = resolveAssignedGroundingSlice(sourceOnlyRow, { id: "u1", ...unit, groundingNotesJson: emptyNotes }, evidence);
+    expect(sourceOnly.state).toBe("READY");
+    expect(sourceOnly.state === "READY" && sourceOnly.slice.concepts[0].sourcePages).toEqual([88]);
+    const mixed = resolveAssignedGroundingSlice({ ...row, matchedConceptNames: ["Roots", "Extracted Evidence"] }, { id: "u1", ...unit }, evidence);
+    expect(mixed.state === "READY" && mixed.slice.concepts.map(c => c.name)).toEqual(["Roots", "Extracted Evidence"]);
+  });
 
+  it.each(["NOT_FOUND", "FAILED", "PREPARING", "STALE"])("does not let %s TopicSourceEvidence satisfy a slice", (status) => {
+    const selected = { ...row, matchedConceptNames: ["Extracted Evidence"], matchedHintTitles: [] };
+    const evidence = [{ status, unitId: "u1", sourceFingerprint: "fp", evidenceJson: [{ type: "concept", label: "Extracted Evidence", sourcePages: [88] }] }];
+    expect(resolveAssignedGroundingSlice(selected, { id: "u1", ...unit, groundingNotesJson: notes({ ...hintUnit, concepts: [], facts: [], vocabulary: [], topicHints: [] }) }, evidence).state).toBe("EMPTY");
+  });
+
+  it("excludes stale-fingerprint and cross-Unit evidence", () => {
+    const selected = { ...row, matchedConceptNames: ["Extracted Evidence"], matchedHintTitles: [] };
+    const base = { status: "READY", unitId: "u1", sourceFingerprint: "fp", evidenceJson: [{ type: "concept", label: "Extracted Evidence", sourcePages: [88] }] };
+    const emptyUnit = { id: "u1", ...unit, groundingNotesJson: notes({ ...hintUnit, concepts: [], facts: [], vocabulary: [], topicHints: [] }) };
+    expect(resolveAssignedGroundingSlice(selected, emptyUnit, [{ ...base, sourceFingerprint: "old" }]).state).toBe("EMPTY");
+    expect(resolveAssignedGroundingSlice(selected, emptyUnit, [{ ...base, unitId: "other" }]).state).toBe("EMPTY");
+  });
+});
 describe("TopicGroundingAssignmentService.assignGroundingForTopic", () => {
   function buildService(topicRow: any) {
     const upsert = jest.fn().mockResolvedValue({});
@@ -448,6 +471,38 @@ describe("TopicGroundingAssignmentService.assignGroundingForTopic", () => {
     const outcome = await service.assignGroundingForTopic("t3");
     expect(outcome.outcome).toBe("UNRESOLVED");
     expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("consumes matching READY TopicSourceEvidence when Unit grounding alone is unresolved, preserving physical pages", async () => {
+    const unit = { ...groundedUnit, groundingNotesJson: keywordUnit, topics: [{ id: "t2", nameEn: "Volcanoes", order: 2 }, { id: "t3", nameEn: "The Lost Kite (Reading)", order: 3 }] };
+    const evidence = { id: "e1", topicId: "t3", unitId: "u1", sourceFingerprint: "fp", status: "READY", sourcePageStart: 10, sourcePageEnd: 11, evidenceJson: [{ type: "concept", label: "Lost Kite", sourcePages: [10] }] };
+    const { service, upsert } = buildService({ id: "t3", nameEn: "The Lost Kite (Reading)", order: 3, groundingAssignment: null, topicSourceEvidence: [evidence], unit });
+    expect(await service.assignGroundingForTopic("t3")).toEqual({ outcome: "ASSIGNED", method: "KEYWORD_OVERLAP", status: "READY" });
+    expect(upsert.mock.calls[0][0].create.matchedConceptNames).toContain("Lost Kite");
+    expect(unit.groundingNotesJson).toBe(keywordUnit);
+    expect(evidence.evidenceJson).toEqual([{ type: "concept", label: "Lost Kite", sourcePages: [10] }]);
+  });
+
+  it("ignores non-READY, cross-Topic, cross-Unit, and stale-fingerprint evidence", async () => {
+    const unit = { ...groundedUnit, groundingNotesJson: keywordUnit, topics: [{ id: "t2", nameEn: "Volcanoes", order: 2 }, { id: "t3", nameEn: "The Lost Kite (Reading)", order: 3 }] };
+    const rows = [
+      { topicId: "t3", unitId: "u1", sourceFingerprint: "fp", status: "NOT_FOUND", evidenceJson: [{ type: "concept", label: "Lost Kite", sourcePages: [1] }] },
+      { topicId: "other", unitId: "u1", sourceFingerprint: "fp", status: "READY", evidenceJson: [{ type: "concept", label: "Lost Kite", sourcePages: [1] }] },
+      { topicId: "t3", unitId: "other", sourceFingerprint: "fp", status: "READY", evidenceJson: [{ type: "concept", label: "Lost Kite", sourcePages: [1] }] },
+      { topicId: "t3", unitId: "u1", sourceFingerprint: "stale", status: "READY", evidenceJson: [{ type: "concept", label: "Lost Kite", sourcePages: [1] }] },
+    ];
+    const { service, upsert } = buildService({ id: "t3", nameEn: "The Lost Kite (Reading)", order: 3, groundingAssignment: null, topicSourceEvidence: rows, unit });
+    expect((await service.assignGroundingForTopic("t3")).outcome).toBe("UNRESOLVED");
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("reuses an existing valid assignment even when new READY evidence is present", async () => {
+    const existing = { method: "HINT_MATCH", status: "READY", unitGroundingVersion: 1, unitSourceFingerprint: "fp", assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION };
+    const evidence = { topicId: "t1", unitId: "u1", sourceFingerprint: "fp", status: "READY", evidenceJson: [{ type: "concept", label: "New Evidence", sourcePages: [4] }] };
+    const { service, upsert, prisma } = buildService({ id: "t1", nameEn: "Parts of a Plant", order: 1, groundingAssignment: existing, topicSourceEvidence: [evidence], unit: groundedUnit });
+    expect(await service.assignGroundingForTopic("t1")).toEqual({ outcome: "UNCHANGED", method: "HINT_MATCH", status: "READY" });
+    expect(upsert).not.toHaveBeenCalled();
+    expect(prisma.client.topicGroundingAssignment.findMany).not.toHaveBeenCalled();
   });
 
   it("reports NOT_GROUNDED (and writes nothing) when the Unit has no completed grounding", async () => {

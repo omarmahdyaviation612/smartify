@@ -6,6 +6,7 @@ import { CONTENT_AUTHORING_ACTOR_ID } from "../content-authoring-actor.const";
 import type { GroundingNotes } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
 import { TopicGroundingAssignmentService, computeDeterministicAssignment } from "./topic-grounding-assignment.service";
 import { MAPPER_PROMPT_VERSION } from "./topic-grounding-assignment.util";
+import { prefilterCompactCandidates, validateCompactResponse } from "./compact-grounding-mapper.util";
 
 /**
  * The bounded AI mapper — the LAST resort for a Topic whose grounding
@@ -219,6 +220,7 @@ export class TopicGroundingMapperService {
     const topic = await this.prisma.client.topic.findUnique({
       where: { id: topicId },
       include: {
+        topicSourceEvidence: { where: { status: "READY" } },
         unit: {
           select: {
             id: true,
@@ -236,7 +238,7 @@ export class TopicGroundingMapperService {
     if (unit.groundingVersion === null || unit.groundingSourceFingerprint === null || !unit.groundingNotesJson) {
       return { outcome: "NOT_GROUNDED", reason: `Unit ${unit.id} has no completed grounding — nothing to map from.` };
     }
-    const notes = unit.groundingNotesJson as unknown as GroundingNotes;
+    const notes = appendReadyEvidence(unit.groundingNotesJson as unknown as GroundingNotes, (topic as any).topicSourceEvidence, topic.id, unit.id, unit.groundingSourceFingerprint);
     const siblings = unit.topics.map((t) => ({ id: t.id, nameEn: t.nameEn, order: t.order }));
 
     const deterministic = computeDeterministicAssignment(notes, { id: topic.id, nameEn: topic.nameEn, order: topic.order }, siblings);
@@ -244,79 +246,27 @@ export class TopicGroundingMapperService {
       return { outcome: "SKIPPED_DETERMINISTIC", reason: `Deterministic Step resolved this Topic as ${deterministic.method} — the mapper must not override it.` };
     }
 
-    const systemPrompt = buildMapperPrompt({ topicNameEn: topic.nameEn, topicOrder: topic.order, siblingTopics: siblings, notes });
-    const userMessage = "Select this Topic's items now.";
-
+    // Compact closed-set mapper: only request-local indexed candidates are sent.
+    const candidates = prefilterCompactCandidates(topic.nameEn, notes);
+    if (candidates.length === 0) return { outcome: "NOT_GROUNDED", reason: "No compact grounding candidates; provider call skipped." };
+    const compactPrompt = `Select evidence for Topic "${topic.nameEn}". Return ONLY {"supported":false} or {"supported":true,"matches":[{"type":"concept","index":0}]}. Candidates:\n${candidates.map(c => `${c.type}[${c.index}]: ${c.label}`).join("\n")}`;
     const { provider, providerKey, model } = await this.providerFactory.getActiveProvider();
-    const estimatedUsd = await this.usageService.estimateMaxChatCostUsd({ providerKey, inputText: systemPrompt + userMessage });
+    const estimatedUsd = await this.usageService.estimateMaxChatCostUsd({ providerKey, inputText: compactPrompt });
     const reserveResult = await this.usageService.reserveBudget(CONTENT_AUTHORING_ACTOR_ID, estimatedUsd);
-    if (!reserveResult.ok) {
-      return { outcome: "BLOCKED", reason: `Budget unavailable (${reserveResult.reason}) — nothing persisted, safe to retry later.`, code: "BUDGET_UNAVAILABLE" };
-    }
-
+    if (!reserveResult.ok) return { outcome: "BLOCKED", reason: `Budget unavailable (${reserveResult.reason})`, code: "BUDGET_UNAVAILABLE" };
     let result: Awaited<ReturnType<typeof provider.generate>>;
-    try {
-      result = await provider.generate({
-        systemPrompt,
-        messages: [{ role: "user", content: userMessage }],
-        responseFormat: "json_object",
-      });
-    } catch (err) {
-      await this.usageService.releaseBudget(reserveResult.reservationId).catch(() => undefined);
-      throw err;
-    }
-
+    try { result = await provider.generate({ systemPrompt: compactPrompt, messages: [{ role: "user", content: "Select now." }], responseFormat: "json_object" }); }
+    catch (err) { await this.usageService.releaseBudget(reserveResult.reservationId).catch(() => undefined); throw err; }
     const actualCostUsd = await this.logUsage(providerKey, model, result.inputTokens, result.outputTokens);
     await this.usageService.reconcileBudget(reserveResult.reservationId, actualCostUsd).catch(() => undefined);
-
-    const validation = validateMapperResponse(result.content, notes);
-
-    const persist = (status: "READY" | "BLOCKED", confidence: "HIGH" | "LOW", names: string[], titles: string[] | null, reason: string) =>
-      this.assignmentService.upsert({
-        topicId,
-        unitGroundingVersion: unit.groundingVersion!,
-        unitSourceFingerprint: unit.groundingSourceFingerprint!,
-        method: "AI_MAPPER",
-        confidence,
-        status,
-        matchedConceptNames: names,
-        matchedHintTitles: titles,
-        mapperModel: model,
-        mapperPromptVersion: MAPPER_PROMPT_VERSION,
-        reason,
-      });
-
-    if (!validation.ok) {
-      this.logger.warn(
-        JSON.stringify({ event: "TOPIC_GROUNDING_MAPPER_REJECTED", topicId, unitId: unit.id, code: validation.code, detail: validation.detail, model }),
-      );
-      // Malformed/hallucinated -> the whole response is discarded. Nothing the
-      // model said is persisted as a selection; only the audit reason is.
-      await persist("BLOCKED", "LOW", [], null, `Mapper response rejected (${validation.code}): ${validation.detail}`);
-      return { outcome: "BLOCKED", reason: validation.detail, code: validation.code };
-    }
-
-    if (validation.confidence === "LOW") {
-      this.logger.warn(JSON.stringify({ event: "TOPIC_GROUNDING_MAPPER_LOW_CONFIDENCE", topicId, unitId: unit.id, model }));
-      // LOW confidence is persisted as BLOCKED even when some names passed
-      // validation — a BLOCKED row is never treated as usable grounding, so no
-      // lesson/question content can be auto-published from it.
-      await persist("BLOCKED", "LOW", validation.matchedConceptNames, validation.matchedHintTitles, validation.reason);
-      return { outcome: "BLOCKED", reason: validation.reason };
-    }
-
-    await persist("READY", "HIGH", validation.matchedConceptNames, validation.matchedHintTitles, validation.reason);
-    this.logger.log(
-      JSON.stringify({
-        event: "TOPIC_GROUNDING_MAPPER_ASSIGNED",
-        topicId,
-        unitId: unit.id,
-        model,
-        mapperPromptVersion: MAPPER_PROMPT_VERSION,
-        conceptCount: validation.matchedConceptNames.length,
-      }),
-    );
-    return { outcome: "READY", matchedConceptNames: validation.matchedConceptNames, matchedHintTitles: validation.matchedHintTitles, model };
+    let compact: ReturnType<typeof validateCompactResponse>;
+    try { compact = validateCompactResponse(JSON.parse(result.content), candidates); }
+    catch (err) { await this.assignmentService.upsert({ topicId, unitGroundingVersion: unit.groundingVersion!, unitSourceFingerprint: unit.groundingSourceFingerprint!, method: "AI_MAPPER", confidence: "LOW", status: "BLOCKED", matchedConceptNames: [], matchedHintTitles: null, mapperModel: model, mapperPromptVersion: MAPPER_PROMPT_VERSION, reason: `Compact mapper rejected: ${err instanceof Error ? err.message : "invalid response"}` }); return { outcome: "BLOCKED", reason: "Compact mapper response rejected" }; }
+    if (!compact.supported) { await this.assignmentService.upsert({ topicId, unitGroundingVersion: unit.groundingVersion!, unitSourceFingerprint: unit.groundingSourceFingerprint!, method: "AI_MAPPER", confidence: "LOW", status: "BLOCKED", matchedConceptNames: [], matchedHintTitles: null, mapperModel: model, mapperPromptVersion: MAPPER_PROMPT_VERSION, reason: "[REFINEMENT:DECIDED] Model reported supported:false." }); return { outcome: "BLOCKED", reason: "Topic unsupported by existing grounding" }; }
+    const resolved = compact.matches.map(m => candidates.find(c => c.type === m.type && c.index === m.index)!);
+    const names = resolved.filter(x => x.type === "concept" || x.type === "vocabulary").map(x => x.label);
+    await this.assignmentService.upsert({ topicId, unitGroundingVersion: unit.groundingVersion!, unitSourceFingerprint: unit.groundingSourceFingerprint!, method: "AI_MAPPER", confidence: "HIGH", status: "READY", matchedConceptNames: names, matchedHintTitles: resolved.filter(x => x.type === "topicHint").map(x => x.label), mapperModel: model, mapperPromptVersion: MAPPER_PROMPT_VERSION, reason: "Compact mapper selected persisted evidence." });
+    return { outcome: "READY", matchedConceptNames: names, matchedHintTitles: resolved.filter(x => x.type === "topicHint").map(x => x.label), model };
   }
 
   private async logUsage(providerKey: string, model: string, inputTokens: number, outputTokens: number): Promise<number> {
@@ -341,3 +291,8 @@ export class TopicGroundingMapperService {
     return costUsd;
   }
 }
+
+function appendReadyEvidence(notes:GroundingNotes,rows:any[],topicId:string,unitId:string,fingerprint:string):GroundingNotes{const merged:GroundingNotes={...notes,concepts:[...notes.concepts],facts:[...notes.facts],vocabulary:[...notes.vocabulary],learningObjectives:[...notes.learningObjectives],topicHints:[...notes.topicHints]};for(const row of rows??[]){if(row.topicId!==topicId||row.unitId!==unitId||row.sourceFingerprint!==fingerprint||row.status!=="READY"||!Array.isArray(row.evidenceJson))continue;for(const item of row.evidenceJson){if(!item||typeof item.label!=="string"||!Array.isArray(item.sourcePages))continue;if(item.type==="concept")merged.concepts.push({name:item.label,description:item.label,sourcePages:item.sourcePages,importance:"core"});else if(item.type==="fact")merged.facts.push({fact:item.label,sourcePages:item.sourcePages,importance:"core"});else if(item.type==="vocabulary")merged.vocabulary.push({term:item.label,meaning:item.label,sourcePages:item.sourcePages});else if(item.type==="objective")merged.learningObjectives.push(item.label);else if(item.type==="hint")merged.topicHints.push({topicTitle:item.label,relevantConcepts:[item.label],sourcePages:item.sourcePages});}}return merged;}
+
+
+
