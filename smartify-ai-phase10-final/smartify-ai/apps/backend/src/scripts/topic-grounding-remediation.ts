@@ -12,7 +12,7 @@ import { TopicSourceEvidenceService } from "../ai/context/topic-source-evidence.
 import { resolveEffectiveSourceFile } from "../interactive-lesson/unit-grounding/unit-effective-source.util";
 import { DETERMINISTIC_ASSIGNMENT_VERSION, MAPPER_PROMPT_VERSION, resolveAssignedGroundingSlice } from "../ai/context/topic-grounding-assignment.util";
 
-export type RemediationPath="REUSE_READY"|"DETERMINISTIC"|"COMPACT_MAPPER"|"SOURCE_EXTRACTION"|"SOURCE_EXTRACTION_ONLY"|"NO_ACTION"|"BLOCKED_NO_AUTHORIZED_SOURCE_WINDOW";
+export type RemediationPath="REUSE_READY"|"DETERMINISTIC"|"COMPACT_MAPPER"|"SOURCE_EXTRACTION"|"SOURCE_EXTRACTION_ONLY"|"REUSE_READY_EVIDENCE"|"REUSE_NOT_FOUND_EVIDENCE"|"NO_ACTION"|"BLOCKED_NO_AUTHORIZED_SOURCE_WINDOW";
 export type SourceWindow={start:number;end:number};
 export type RemediationOptions={topicIds:string[];sourceWindows:Map<string,SourceWindow>;apply:boolean;sourceExtractionOnly?:boolean};
 
@@ -31,7 +31,7 @@ export function parseSourceWindows(argv:string[],allowlist:string[],strict=false
 export function parseRemediationArgs(argv:string[]=process.argv):RemediationOptions{const flags=argv.filter(x=>x==="--sourceExtractionOnly"||x.startsWith("--sourceExtractionOnly="));if(flags.some(x=>x!=="--sourceExtractionOnly")||flags.length>1)throw new Error("invalid --sourceExtractionOnly flag");const sourceExtractionOnly=flags.length===1;const topicIds=parseTopicAllowlist(argv,sourceExtractionOnly);const sourceWindows=parseSourceWindows(argv,topicIds,sourceExtractionOnly);if(sourceExtractionOnly&&sourceWindows.size!==topicIds.length)throw new Error("extraction-only mode requires one explicit source window per Topic");return{topicIds,sourceWindows,apply:argv.includes("--apply"),sourceExtractionOnly};}
 
 type Dependencies={prisma:any;assignment:{assignGroundingForTopic(id:string):Promise<any>;upsert(input:any):Promise<void>};mapper:{mapTopic(id:string):Promise<any>};sourceEvidence:{getReusable(identity:any):Promise<any>;prepareTopicEvidence(identity:any,input:any):Promise<any>};activeModel():Promise<string>};
-export type RemediationTopicReport={topicId:string;topicName:string;unitId:string;unitName:string;path:RemediationPath;before:string;after:string;sourceWindow?:SourceWindow;wouldPerformSideEffects:boolean;factualIdentity?:{groundingVersion:number|null;sourceFingerprint:string|null};reusableReady?:boolean;unitGroundingAvailable?:boolean;readySourceEvidence?:boolean;notFoundSourceEvidence?:boolean;candidateCount?:number;candidateTypes?:string[];deterministicMethod?:string|null;downstreamSliceVerified?:boolean;sourcePages?:number[]};
+export type RemediationTopicReport={topicId:string;topicName:string;unitId:string;unitName:string;path:RemediationPath;before:string;after:string;sourceWindow?:SourceWindow;wouldPerformSideEffects:boolean;factualIdentity?:{groundingVersion:number|null;sourceFingerprint:string|null};reusableReady?:boolean;unitGroundingAvailable?:boolean;readySourceEvidence?:boolean;notFoundSourceEvidence?:boolean;candidateCount?:number;candidateTypes?:string[];deterministicMethod?:string|null;downstreamSliceVerified?:boolean;sourcePages?:number[];existingEvidenceStatus?:string|null;wouldRunAssignmentPreparation?:boolean};
 export type RemediationSummary={mode:"DRY_RUN"|"APPLY";sourceExtractionOnly?:boolean;requestedTopics:number;processedTopics:number;readyBefore:number;readyAfter:number;reusedReady:number;deterministicRecovered:number;compactMapperAttempted:number;compactMapperRecovered:number;sourceExtractionAttempted:number;sourceEvidenceReady:number;sourceEvidenceNotFound:number;sourceEvidenceFailed:number;finalBlocked:number;topics:RemediationTopicReport[]};
 function reusable(topic:any){const a=topic.groundingAssignment,u=topic.unit;return!!a&&a.status==="READY"&&a.unitGroundingVersion===u.groundingVersion&&a.unitSourceFingerprint===u.groundingSourceFingerprint;}
 function emptySummary(apply:boolean,sourceExtractionOnly=false):RemediationSummary{return{mode:apply?"APPLY":"DRY_RUN",...(sourceExtractionOnly?{sourceExtractionOnly:true}:{}),requestedTopics:0,processedTopics:0,readyBefore:0,readyAfter:0,reusedReady:0,deterministicRecovered:0,compactMapperAttempted:0,compactMapperRecovered:0,sourceExtractionAttempted:0,sourceEvidenceReady:0,sourceEvidenceNotFound:0,sourceEvidenceFailed:0,finalBlocked:0,topics:[]};}
@@ -57,14 +57,19 @@ function validateExtractionOnlyBatch(options:RemediationOptions,byId:Map<string,
 
 async function runExtractionOnly(options:RemediationOptions,topics:Map<string,any>,sources:Map<string,string>,deps:Dependencies):Promise<RemediationSummary>{
   const report=emptySummary(options.apply,true);report.requestedTopics=options.topicIds.length;
+  const model=await deps.activeModel();if(!model)throw new Error("No active source-evidence extractor model");
+  const evidenceIdentity=(id:string,unit:any,window:SourceWindow)=>({topicId:id,unitId:unit.id,sourceFingerprint:unit.groundingSourceFingerprint,sourcePageStart:window.start,sourcePageEnd:window.end,promptVersion:"topic-source-evidence-v1",extractorModel:model});
   if(!options.apply){
-    for(const id of options.topicIds){const topic=topics.get(id),window=options.sourceWindows.get(id)!;report.processedTopics++;report.finalBlocked++;report.topics.push({topicId:id,topicName:topic.nameEn,unitId:topic.unit.id,unitName:topic.unit.nameEn,before:"BLOCKED",after:"BLOCKED",path:"SOURCE_EXTRACTION_ONLY",sourceWindow:window,wouldPerformSideEffects:true,factualIdentity:{groundingVersion:topic.unit.groundingVersion,sourceFingerprint:topic.unit.groundingSourceFingerprint},unitGroundingAvailable:true,reusableReady:false});}
+    // Read-only plan mirroring apply: only exact READY/NOT_FOUND rows are reused; FAILED/PREPARING rows are re-extracted, so they still plan extraction.
+    for(const id of options.topicIds){const topic=topics.get(id),window=options.sourceWindows.get(id)!;const existing=await deps.sourceEvidence.getReusable(evidenceIdentity(id,topic.unit,window));const status=existing?.status??null;const base={topicId:id,topicName:topic.nameEn,unitId:topic.unit.id,unitName:topic.unit.nameEn,before:"BLOCKED",after:"BLOCKED",sourceWindow:window,factualIdentity:{groundingVersion:topic.unit.groundingVersion,sourceFingerprint:topic.unit.groundingSourceFingerprint},unitGroundingAvailable:true,reusableReady:false,existingEvidenceStatus:status};report.processedTopics++;report.finalBlocked++;
+      if(status==="READY")report.topics.push({...base,path:"REUSE_READY_EVIDENCE",wouldPerformSideEffects:false,readySourceEvidence:true,wouldRunAssignmentPreparation:true});
+      else if(status==="NOT_FOUND"){report.sourceEvidenceNotFound++;report.topics.push({...base,path:"REUSE_NOT_FOUND_EVIDENCE",wouldPerformSideEffects:false,notFoundSourceEvidence:true,wouldRunAssignmentPreparation:false});}
+      else report.topics.push({...base,path:"SOURCE_EXTRACTION_ONLY",wouldPerformSideEffects:true});}
     return report;
   }
-  const model=await deps.activeModel();if(!model)throw new Error("No active source-evidence extractor model");
   for(const id of options.topicIds){
     const topic=topics.get(id),unit=topic.unit,window=options.sourceWindows.get(id)!;
-    const identity={topicId:id,unitId:unit.id,sourceFingerprint:unit.groundingSourceFingerprint,sourcePageStart:window.start,sourcePageEnd:window.end,promptVersion:"topic-source-evidence-v1",extractorModel:model};
+    const identity=evidenceIdentity(id,unit,window);
     const base={topicId:id,topicName:topic.nameEn,unitId:unit.id,unitName:unit.nameEn,before:"BLOCKED",after:"BLOCKED",path:"SOURCE_EXTRACTION_ONLY" as const,sourceWindow:window,wouldPerformSideEffects:true,factualIdentity:{groundingVersion:unit.groundingVersion,sourceFingerprint:unit.groundingSourceFingerprint},unitGroundingAvailable:true,reusableReady:false};
     let evidence=await deps.sourceEvidence.getReusable(identity);
     if(evidence?.status==="NOT_FOUND"){report.sourceEvidenceNotFound++;report.finalBlocked++;report.processedTopics++;report.topics.push({...base,path:"NO_ACTION",wouldPerformSideEffects:false,notFoundSourceEvidence:true});continue;}

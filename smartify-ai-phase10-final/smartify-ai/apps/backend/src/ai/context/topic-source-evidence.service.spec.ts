@@ -84,4 +84,20 @@ describe("TopicSourceEvidenceService shared extraction path", () => {
     expect(h.vision.execute).toHaveBeenCalledTimes(1);
     expect(h.vision.finalizeFailure).toHaveBeenCalledTimes(1);
   });
+
+  it("reserves budget for the rendered images before the provider call",async()=>{
+    const h = harness(JSON.stringify({ supported: false }));
+    await h.service.prepareTopicEvidence(identity, { sourceKey: "book.pdf", curriculumCode: "C", gradeLevel: 5, topicName: "Topic" });
+    expect(h.vision.createAccountingContext).toHaveBeenCalledWith(expect.objectContaining({ imageDetail: "high", images: [expect.objectContaining({ dataUrl: "data:image/png;base64,YQ==" }), expect.objectContaining({ dataUrl: "data:image/png;base64,Yg==" })] }));
+    expect(h.vision.createAccountingContext.mock.invocationCallOrder[0]).toBeLessThan(h.vision.execute.mock.invocationCallOrder[0]);
+  });
+
+  it("persists FAILED without any provider call when the image-aware reservation is refused",async()=>{
+    const h = harness(JSON.stringify({ supported: true, items: [] }));
+    h.vision.createAccountingContext.mockRejectedValue(new Error("Grounding extraction budget reservation refused (daily_limit)."));
+    const result = await h.service.prepareTopicEvidence(identity, { sourceKey: "book.pdf", curriculumCode: "C", gradeLevel: 5, topicName: "Topic" });
+    expect(result).toMatchObject({ status: "FAILED", failureReason: expect.stringMatching(/budget reservation refused/) });
+    expect(h.vision.execute).not.toHaveBeenCalled();
+    expect(h.vision.finalizeFailure).not.toHaveBeenCalled();
+  });
 });

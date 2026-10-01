@@ -20,6 +20,8 @@ export function remapTopicEvidence(items: Array<{type:string; label:string; sour
   return items.map(item=>{ if(!Array.isArray(item.sourceImageIndexes)||!item.sourceImageIndexes.length) throw new Error("MISSING_SOURCE_PROVENANCE"); const pages=item.sourceImageIndexes.map(i=>{if(!Number.isInteger(i)||i<1||i>count) throw new Error("INVALID_SOURCE_IMAGE_INDEX"); return start+i-1;}); return {...item,sourcePages:[...new Set(pages)]}; });
 }
 
+const TOPIC_EVIDENCE_IMAGE_DETAIL = "high" as const;
+
 @Injectable()
 export class TopicSourceEvidenceService {
   constructor(private readonly prisma: PrismaService, private readonly sourceExtraction: GroundingSourceExtractionService, private readonly vision: GroundingVisionExecutionService) {}
@@ -57,8 +59,8 @@ export class TopicSourceEvidenceService {
       const images = (rendered as any).imageDataUrls ?? [];
       if (images.length !== identity.sourcePageEnd - identity.sourcePageStart + 1) throw new Error("RENDERER_PAGE_COUNT_MISMATCH");
       const systemPrompt = `Extract only verified evidence for Topic "${input.topicName}". Return JSON exactly as {"supported":false} or {"supported":true,"items":[{"type":"concept|fact|objective|vocabulary|hint","label":"...","sourceImageIndexes":[1]}]}. Do not add source pages or facts.`;
-      const messages = [{ role: "user", content: [{ type: "text", text: `Topic: ${input.topicName}\nUnit: ${input.unitName ?? ""}\nSubject: ${input.subjectName ?? ""}` }, ...images.map((image: any) => ({ type: "text", text: `Image ${image.index}:` })), ...images.map((image: any) => ({ type: "image_url", image_url: { url: image.dataUrl, detail: "high" } }))] }];
-      accounting = await this.vision.createAccountingContext({ inputText: systemPrompt, estimatedInputTokens: 1200, maxOutputTokens: 600 });
+      const messages = [{ role: "user", content: [{ type: "text", text: `Topic: ${input.topicName}\nUnit: ${input.unitName ?? ""}\nSubject: ${input.subjectName ?? ""}` }, ...images.map((image: any) => ({ type: "text", text: `Image ${image.index}:` })), ...images.map((image: any) => ({ type: "image_url", image_url: { url: image.dataUrl, detail: TOPIC_EVIDENCE_IMAGE_DETAIL } }))] }];
+      accounting = await this.vision.createAccountingContext({ inputText: systemPrompt, estimatedInputTokens: 1200, maxOutputTokens: 600, images, imageDetail: TOPIC_EVIDENCE_IMAGE_DETAIL });
       const response = await this.vision.execute({ systemPrompt, messages, feature: "TOPIC_SOURCE_EVIDENCE", maxOutputTokens: 600, accountingContext: accounting });
       const parsed = parseTopicEvidenceResponse(response.result?.content ?? response.result);
       if (!parsed.supported) { await this.vision.finalizeSuccess(accounting); return this.complete(row.id, "NOT_FOUND"); }
