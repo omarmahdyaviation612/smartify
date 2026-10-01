@@ -180,6 +180,20 @@ describe("TopicGroundingMapperService.mapTopic", () => {
     expect(written.matchedConceptNames).toEqual(["listening"]);
   });
 
+  it("sends the closed-set JSON contract in json_object mode in one provider call", async () => {
+    const { service, generate } = build(JSON.stringify({ supported: true, matches: [{ type: "vocabulary", index: 1 }] }));
+
+    await service.mapTopic("t3");
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    const request = generate.mock.calls[0][0];
+    expect(request.responseFormat).toBe("json_object");
+    expect(JSON.stringify(request.messages)).toMatch(/json/i);
+    expect(request.messages).toEqual([{ role: "user", content: "Select now. Return JSON only." }]);
+    expect(request.systemPrompt).toBe('Select evidence for Topic "The Lost Kite (Listening)". Return ONLY {"supported":false} or {"supported":true,"matches":[{"type":"concept","index":0}]}. Candidates:\nvocabulary[1]: listening');
+    expect(JSON.stringify(request)).not.toMatch(/sourcePages|provenance|sourceFingerprint/i);
+  });
+
   it("persists a vocabulary-only selection as an AI_MAPPER / READY row (previously wrongly BLOCKED as HALLUCINATED)", async () => {
     const { service, upsert } = build(JSON.stringify({ supported: true, matches: [{ type: "vocabulary", index: 1 }] }));
     const outcome = await service.mapTopic("t3");

@@ -255,7 +255,7 @@ export class TopicGroundingMapperService {
     const reserveResult = await this.usageService.reserveBudget(CONTENT_AUTHORING_ACTOR_ID, estimatedUsd);
     if (!reserveResult.ok) return { outcome: "BLOCKED", reason: `Budget unavailable (${reserveResult.reason})`, code: "BUDGET_UNAVAILABLE" };
     let result: Awaited<ReturnType<typeof provider.generate>>;
-    try { result = await provider.generate({ systemPrompt: compactPrompt, messages: [{ role: "user", content: "Select now." }], responseFormat: "json_object" }); }
+    try { result = await provider.generate({ systemPrompt: compactPrompt, messages: [{ role: "user", content: "Select now. Return JSON only." }], responseFormat: "json_object" }); }
     catch (err) { await this.usageService.releaseBudget(reserveResult.reservationId).catch(() => undefined); throw err; }
     const actualCostUsd = await this.logUsage(providerKey, model, result.inputTokens, result.outputTokens);
     await this.usageService.reconcileBudget(reserveResult.reservationId, actualCostUsd).catch(() => undefined);
