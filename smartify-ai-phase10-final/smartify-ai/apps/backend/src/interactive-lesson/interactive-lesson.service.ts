@@ -14,6 +14,7 @@ import { deriveRequestedMathVisual, validateVisualInstruction } from "../tutor/v
 import type { VisualInstruction } from "@smartify/shared-types";
 import { decideStrategySwitch, getCurrentStrategy, isMathSubject, strategyGuidance } from "./teaching-strategy.util";
 import { assignedGroundingSliceOrNull } from "../ai/context/topic-grounding-assignment.util";
+import { canServeTopicSteps, evaluateTopicGroundingGate, TOPIC_GATE_INCLUDE } from "../ai/context/topic-content-provenance.util";
 
 const MAX_HINTS_BEFORE_FORCED_RESOLUTION = 1;
 
@@ -42,6 +43,11 @@ const MAX_MESSAGE_CHARS = 4000;
  * global/per-user USD budget in AIUsageService.
  */
 const NON_PROGRESS_TURN_LIMIT = 20;
+
+// The existing safe, student-facing "not available" response — deliberately
+// the same text for a BLOCKED / ungroundable Topic as for a Topic with no
+// lesson at all, so no internal grounding terminology ever reaches a student.
+const LESSON_NOT_AVAILABLE = "This lesson is not available as an interactive lesson yet.";
 
 @Injectable()
 export class InteractiveLessonService {
@@ -77,9 +83,36 @@ export class InteractiveLessonService {
       },
     });
     if (!topic || !topic.teachingStepsJson) {
-      throw new NotFoundException("This lesson is not available as an interactive lesson yet.");
+      throw new NotFoundException(LESSON_NOT_AVAILABLE);
     }
+    this.assertStepsServable(topic);
     return topic;
+  }
+
+  /**
+   * 2026-10-03 Wave B runtime safety: existing teachingSteps are served ONLY
+   * when the Topic is READY_CURRENT_NON_EMPTY and the steps' stored provenance
+   * is servable under the Unit's enforcement mode (topic-content-provenance.util.ts).
+   * A BLOCKED/stale Topic, or MISMATCHED steps, get the same safe "not
+   * available" response as a Topic with no lesson — never regenerated here.
+   */
+  private assertStepsServable(topic: any) {
+    if (canServeTopicSteps(topic)) return;
+    this.logger.warn(`LESSON_CONTENT_WITHHELD topicId=${topic.id} reason=grounding-or-provenance`);
+    throw new NotFoundException(LESSON_NOT_AVAILABLE);
+  }
+
+  /**
+   * A Topic with NO steps yet whose Unit is already grounded but whose own
+   * assignment is not READY_CURRENT_NON_EMPTY can never be generated — refuse
+   * up front (no grounding preparation, no lock, no provider call). A Topic
+   * whose Unit is not grounded yet keeps the existing preparation flow.
+   */
+  private assertGenerationPossible(topic: any) {
+    if (!topic.unit?.groundingNotesJson) return;
+    if (evaluateTopicGroundingGate(topic).state === "READY") return;
+    this.logger.warn(`LESSON_GENERATION_REFUSED topicId=${topic.id} reason=grounding-unavailable`);
+    throw new NotFoundException(LESSON_NOT_AVAILABLE);
   }
 
   private getSteps(topic: { teachingStepsJson: unknown }): TeachingStep[] {
@@ -125,10 +158,14 @@ export class InteractiveLessonService {
   private async ensureTopicHasSteps(topicId: string, profile: { userId: string; preferredLang?: string; age?: number }): Promise<any> {
     const existing = await this.prisma.client.topic.findUnique({
       where: { id: topicId },
-      include: { unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
+      include: { ...TOPIC_GATE_INCLUDE, unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
     });
-    if (!existing) throw new NotFoundException("This lesson is not available as an interactive lesson yet.");
-    if (existing.teachingStepsJson) return existing;
+    if (!existing) throw new NotFoundException(LESSON_NOT_AVAILABLE);
+    if (existing.teachingStepsJson) {
+      this.assertStepsServable(existing);
+      return existing;
+    }
+    this.assertGenerationPossible(existing);
 
     const preparation = typeof (this.draftGenerator as any).prepareTopicGrounding === "function"
       ? await (this.draftGenerator as any).prepareTopicGrounding(topicId, profile.userId)
@@ -166,9 +203,10 @@ export class InteractiveLessonService {
 
     const generated = await this.prisma.client.topic.findUnique({
       where: { id: topicId },
-      include: { unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
+      include: { ...TOPIC_GATE_INCLUDE, unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
     });
-    if (!generated?.teachingStepsJson) throw new NotFoundException("This lesson is not available as an interactive lesson yet.");
+    if (!generated?.teachingStepsJson) throw new NotFoundException(LESSON_NOT_AVAILABLE);
+    this.assertStepsServable(generated);
     return generated;
   }
 
@@ -940,9 +978,15 @@ export class InteractiveLessonService {
 
   /** Shared curriculum content (see controller doc) — no per-student ownership check needed, only that a visual with this id exists. */
   async getVisualAsset(assetId: string) {
-    const asset = await this.prisma.client.lessonVisualAsset.findUnique({ where: { id: assetId } });
-    if (!asset) throw new NotFoundException("Visual not found.");
-    return asset;
+    const asset = await this.prisma.client.lessonVisualAsset.findUnique({
+      where: { id: assetId },
+      include: { topic: { include: { ...TOPIC_GATE_INCLUDE, unit: true } } },
+    });
+    // A visual belongs to its Topic's teachingSteps — withheld whenever those
+    // steps themselves are not servable (same gate, same safe response).
+    if (!asset || !canServeTopicSteps(asset.topic as any)) throw new NotFoundException("Visual not found.");
+    const { topic: _topic, ...visual } = asset;
+    return visual;
   }
 
   /**
@@ -964,10 +1008,12 @@ export class InteractiveLessonService {
     const profile = await this.getProfileOrThrow(userId);
     const topic = await this.prisma.client.topic.findUnique({
       where: { id: topicId },
-      include: { unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
+      include: { ...TOPIC_GATE_INCLUDE, unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
     });
-    if (!topic) throw new NotFoundException("This lesson is not available as an interactive lesson yet.");
+    if (!topic) throw new NotFoundException(LESSON_NOT_AVAILABLE);
+    if (topic.teachingStepsJson) this.assertStepsServable(topic);
     if (!topic.teachingStepsJson) {
+      this.assertGenerationPossible(topic);
       const preparation = typeof (this.draftGenerator as any).getTopicGroundingPreparationStatus === "function"
         ? await (this.draftGenerator as any).getTopicGroundingPreparationStatus(topicId)
         : { status: "READY" as const };

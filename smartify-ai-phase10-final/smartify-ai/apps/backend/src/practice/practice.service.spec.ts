@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException } from "@nestjs/common";
+import { withReadyGate } from "../ai/context/topic-content-gate.fixtures.testspec";
 import { PracticeService } from "./practice.service";
 
 /** Covers subject-ownership isolation for the practice engine — a student cannot fetch topics or questions for a subject they never selected. */
@@ -9,7 +10,7 @@ describe("PracticeService — authorization & ownership", () => {
     return {
       client: {
         studentProfile: { findUnique: jest.fn().mockResolvedValue(studentProfile) },
-        topic: { findMany: jest.fn().mockResolvedValue([{ id: "topic-1" }]) },
+        topic: { findMany: jest.fn().mockResolvedValue([withReadyGate({ id: "topic-1" })]) },
         question: { findMany: jest.fn().mockResolvedValue([]) },
       },
     } as any;
@@ -53,7 +54,7 @@ describe("PracticeService — placeholder containment", () => {
     const prisma = {
       client: {
         studentProfile: { findUnique: jest.fn().mockResolvedValue(studentProfile) },
-        topic: { findMany: jest.fn().mockResolvedValue([{ id: "topic-1" }]) },
+        topic: { findMany: jest.fn().mockResolvedValue([withReadyGate({ id: "topic-1" })]) },
         question: { findMany: questionFindMany },
       },
     } as any;
@@ -72,7 +73,7 @@ describe("PracticeService — placeholder containment", () => {
     const prisma = {
       client: {
         studentProfile: { findUnique: jest.fn().mockResolvedValue(studentProfile) },
-        topic: { findMany: jest.fn().mockResolvedValue([{ id: "topic-1" }]) },
+        topic: { findMany: jest.fn().mockResolvedValue([withReadyGate({ id: "topic-1" })]) },
         question: { findMany: jest.fn().mockImplementation(async ({ where }: any) => realQuestions.filter((q) => q.isPlaceholder === where.isPlaceholder)) },
       },
     } as any;
@@ -100,8 +101,8 @@ describe("PracticeService.submitPractice — grading & persistence", () => {
   // accidentally compares against the wrong question's key (e.g.
   // array-position instead of a real id-keyed lookup). topic.unit.subjectId
   // is what submitPractice's scope-validation (2026-09-20) actually reads.
-  const Q1 = { id: "q1", topicId: "topic-1", correctAnswerJson: "Paris", explanationEn: "Paris is the capital of France.", explanationAr: null, topic: { unit: { subjectId: "subject-1" } } };
-  const Q2 = { id: "q2", topicId: "topic-1", correctAnswerJson: "London", explanationEn: "London is the capital of the UK.", explanationAr: null, topic: { unit: { subjectId: "subject-1" } } };
+  const Q1 = { id: "q1", topicId: "topic-1", correctAnswerJson: "Paris", explanationEn: "Paris is the capital of France.", explanationAr: null, topic: withReadyGate({ id: "topic-1", unit: { subjectId: "subject-1" } }) };
+  const Q2 = { id: "q2", topicId: "topic-1", correctAnswerJson: "London", explanationEn: "London is the capital of the UK.", explanationAr: null, topic: withReadyGate({ id: "topic-1", unit: { subjectId: "subject-1" } }) };
 
   function makePrisma(opts: { questions?: any[]; profile?: any } = {}) {
     const attemptCreateMany = jest.fn().mockResolvedValue({ count: 0 });
@@ -218,9 +219,9 @@ describe("PracticeService.submitPractice — grading & persistence", () => {
 describe("PracticeService.submitPractice — question-scope validation", () => {
   const studentProfile = { id: "student-1", subjects: [{ subjectId: "subject-1" }, { subjectId: "subject-2" }] };
 
-  const OWNED_Q1 = { id: "q1", topicId: "topic-1", correctAnswerJson: "Paris", explanationEn: null, explanationAr: null, topic: { unit: { subjectId: "subject-1" } } };
-  const OWNED_Q2_OTHER_SUBJECT = { id: "q2", topicId: "topic-2", correctAnswerJson: "4", explanationEn: null, explanationAr: null, topic: { unit: { subjectId: "subject-2" } } };
-  const UNOWNED_Q = { id: "q-foreign", topicId: "topic-foreign", correctAnswerJson: "42", explanationEn: null, explanationAr: null, topic: { unit: { subjectId: "subject-the-student-never-selected" } } };
+  const OWNED_Q1 = { id: "q1", topicId: "topic-1", correctAnswerJson: "Paris", explanationEn: null, explanationAr: null, topic: withReadyGate({ id: "topic-1", unit: { subjectId: "subject-1" } }) };
+  const OWNED_Q2_OTHER_SUBJECT = { id: "q2", topicId: "topic-2", correctAnswerJson: "4", explanationEn: null, explanationAr: null, topic: withReadyGate({ id: "topic-2", unit: { subjectId: "subject-2" } }) };
+  const UNOWNED_Q = { id: "q-foreign", topicId: "topic-foreign", correctAnswerJson: "42", explanationEn: null, explanationAr: null, topic: withReadyGate({ id: "topic-foreign", unit: { subjectId: "subject-the-student-never-selected" } }) };
 
   function makePrisma(opts: { questions?: any[]; profile?: any } = {}) {
     const attemptCreateMany = jest.fn().mockResolvedValue({ count: 0 });
@@ -299,7 +300,7 @@ describe("PracticeService.submitPractice — question-scope validation", () => {
     // duplicated per-student); only Student A's own scope is what's being
     // tested here.
     const studentA = { id: "student-A", subjects: [{ subjectId: "subject-1" }] };
-    const questionOwnedOnlyByBsSubject = { id: "q-b-only", topicId: "topic-b", correctAnswerJson: "x", explanationEn: null, explanationAr: null, topic: { unit: { subjectId: "subject-2" } } };
+    const questionOwnedOnlyByBsSubject = { id: "q-b-only", topicId: "topic-b", correctAnswerJson: "x", explanationEn: null, explanationAr: null, topic: withReadyGate({ id: "topic-b", unit: { subjectId: "subject-2" } }) };
     const { prisma, attemptCreateMany } = makePrisma({ profile: studentA, questions: [questionOwnedOnlyByBsSubject] });
     const service = new PracticeService(prisma, {} as any, {} as any);
 

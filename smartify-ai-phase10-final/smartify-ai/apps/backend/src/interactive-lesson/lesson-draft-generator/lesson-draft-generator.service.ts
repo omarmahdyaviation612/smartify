@@ -10,7 +10,7 @@ import { toUnreviewedBilingualObjectives } from "./lesson-objectives.util";
 import type { GroundingNotes } from "../unit-grounding/unit-grounding.types";
 import { UnitGroundingService } from "../unit-grounding/unit-grounding.service";
 import { resolveEffectiveSourceFile } from "../unit-grounding/unit-effective-source.util";
-import { resolveAssignedGroundingSlice, type AssignmentReadOutcome } from "../../ai/context/topic-grounding-assignment.util";
+import { evaluateTopicGroundingGate, TOPIC_GATE_INCLUDE, UNIT_GATE_SELECT, type TopicContentProvenance, type TopicGroundingGate } from "../../ai/context/topic-content-provenance.util";
 import { checkGroundingConsistency } from "../../ai/context/grounding-consistency-validator";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
 
@@ -96,21 +96,16 @@ export class LessonDraftGeneratorService {
    * groundingNotesJson. Never calls selectRelevantGrounding() live, and never
    * the AI mapper.
    */
-  private async readAssignedGroundingOutcome(topicId: string): Promise<AssignmentReadOutcome> {
+  // 2026-10-03: now the shared READY_CURRENT_NON_EMPTY gate
+  // (topic-content-provenance.util.ts), which also yields the provenance the
+  // generated content is stamped with.
+  async readGroundingGate(topicId: string): Promise<TopicGroundingGate> {
     const row = await this.prisma.client.topic.findUnique({
       where: { id: topicId },
-      select: {
-        groundingAssignment: true,
-        topicSourceEvidence: true,
-        unit: { select: { groundingNotesJson: true, groundingVersion: true, groundingSourceFingerprint: true } },
-      },
+      select: { ...TOPIC_GATE_INCLUDE, unit: { select: UNIT_GATE_SELECT } },
     });
-    if (!row) return { state: "MISSING" };
-    return resolveAssignedGroundingSlice(row.groundingAssignment, {
-      groundingVersion: row.unit.groundingVersion,
-      groundingSourceFingerprint: row.unit.groundingSourceFingerprint,
-      groundingNotesJson: row.unit.groundingNotesJson as unknown as GroundingNotes | null,
-    }, row.topicSourceEvidence);
+    if (!row) return { state: "UNAVAILABLE", reason: "MISSING" };
+    return evaluateTopicGroundingGate(row as any);
   }
 
   async resolveUnitContext(unitId: string): Promise<ResolvedUnitContext & { unitId: string; subjectId: string; sourceFile: string | null }> {
@@ -255,7 +250,6 @@ export class LessonDraftGeneratorService {
     opts: { preferredLang: "ar" | "en"; studentAgeRange: string },
     requestingUserId: string,
   ) {
-    await this.usageService.assertWithinBudget(requestingUserId);
     const unitContext = await this.resolveUnitContext(topic.unitId);
     // 2026-09-27: the Topic's grounding slice is no longer re-inferred from its
     // title here. It is read from the PERSISTED TopicGroundingAssignment row
@@ -265,22 +259,17 @@ export class LessonDraftGeneratorService {
     // mismatch) or BLOCKED row yields null and takes exactly the same safe
     // failure path a "no relevant grounding" selection always took — there is
     // no live fallback to title inference and no path to the AI mapper here.
-    const assignmentOutcome = await this.readAssignedGroundingOutcome(topic.id);
-    const groundingSlice = assignmentOutcome.state === "READY" ? assignmentOutcome.slice : null;
+    const gate = await this.readGroundingGate(topic.id);
+    const groundingSlice = gate.state === "READY" ? gate.slice : null;
+    const provenance: TopicContentProvenance | null = gate.state === "READY" ? gate.provenance : null;
     const groundingNotes = unitContext.groundingNotesJson;
     const groundingConceptCount = groundingNotes?.concepts.length ?? 0;
     const selectedConceptCount = groundingSlice?.concepts.length ?? 0;
     const groundingSelectionFailureReason = !groundingNotes
       ? "no-grounding-notes"
-      : assignmentOutcome.state === "MISSING"
-        ? "assignment-missing"
-        : assignmentOutcome.state === "STALE"
-          ? "assignment-stale"
-          : assignmentOutcome.state === "BLOCKED"
-            ? "assignment-blocked"
-            : assignmentOutcome.state === "EMPTY"
-              ? "assignment-empty"
-              : null;
+      : gate.state === "UNAVAILABLE"
+        ? `assignment-${gate.reason.toLowerCase()}`
+        : null;
     this.logger.log(JSON.stringify({
       event: "TEXTBOOK_TOPIC_GROUNDING_SELECTION",
       topicId: topic.id,
@@ -294,12 +283,15 @@ export class LessonDraftGeneratorService {
       selectedConceptCount,
       failureReason: groundingSelectionFailureReason,
     }));
-    if (unitContext.sourceFile && (!groundingSlice || (
-      groundingSlice.concepts.length === 0 && groundingSlice.facts.length === 0 && groundingSlice.vocabulary.length === 0
-    ))) {
+    // READY_CURRENT_NON_EMPTY is required for every Unit with a mapped
+    // textbook — checked BEFORE any budget call or provider call, so a
+    // blocked Topic costs nothing. Only a Unit with no source file at all keeps
+    // the original title-only fallback (0 such Units in production, 2026-10-03).
+    if (unitContext.sourceFile && !groundingSlice) {
       this.logger.warn(`TEXTBOOK_TOPIC_GENERATION_BLOCKED topicId=${topic.id} unitId=${topic.unitId} reason=no-relevant-grounding`);
       throw new ServiceUnavailableException("Textbook grounding is unavailable for this topic. Lesson generation is blocked until the textbook can be grounded. Please try again later or contact support.");
     }
+    await this.usageService.assertWithinBudget(requestingUserId);
     if (groundingSlice) {
       this.logger.log(`GROUNDED_TOPIC_GENERATION_STARTED topicId=${topic.id} unitId=${topic.unitId}`);
     } else {
@@ -400,6 +392,7 @@ export class LessonDraftGeneratorService {
           generationSource: groundingSlice ? ("TEXTBOOK_GROUNDED" as const) : ("LEGACY_TITLE_ONLY" as const),
           groundingVersionUsed: groundingSlice ? unitContext.groundingVersion ?? null : null,
           generationPromptVersion: AUTO_LESSON_GENERATION_PROMPT_VERSION,
+          provenance,
         };
       }
 
@@ -503,12 +496,12 @@ export class LessonDraftGeneratorService {
     }
 
     try {
-      const { draft, generationSource, groundingVersionUsed, generationPromptVersion } = await this.generateAutoDraft(
+      const { draft, generationSource, groundingVersionUsed, generationPromptVersion, provenance } = await this.generateAutoDraft(
         { id: topic.id, nameEn: topic.nameEn, nameAr: topic.nameAr, unitId: topic.unitId },
         opts,
         CONTENT_AUTHORING_ACTOR_ID,
       );
-      await this.publisher.autoPublishIntoTopic(draft.id, topicId, { generationSource, groundingVersionUsed, generationPromptVersion });
+      await this.publisher.autoPublishIntoTopic(draft.id, topicId, { generationSource, groundingVersionUsed, generationPromptVersion, provenance });
     } finally {
       await this.prisma.client.topic.updateMany({ where: { id: topicId }, data: { generationLockedAt: null, generationLockedBy: null } });
     }

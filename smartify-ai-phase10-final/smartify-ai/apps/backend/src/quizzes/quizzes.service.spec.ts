@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
+import { withReadyGate } from "../ai/context/topic-content-gate.fixtures.testspec";
 import { QuizzesService } from "./quizzes.service";
 
 /**
@@ -15,7 +16,7 @@ describe("QuizzesService — authorization & ownership", () => {
       client: {
         studentProfile: { findUnique: jest.fn().mockResolvedValue(studentProfile) },
         quizResult: { findUnique: jest.fn().mockResolvedValue(overrides.quizResult) },
-        topic: { findMany: jest.fn().mockResolvedValue([{ id: "topic-1" }]) },
+        topic: { findMany: jest.fn().mockResolvedValue([withReadyGate({ id: "topic-1" })]) },
       },
     } as any;
   }
@@ -85,7 +86,7 @@ describe("QuizzesService.getQuizQuestions — Phase 10E hardening", () => {
     return {
       client: {
         studentProfile: { findUnique: jest.fn().mockResolvedValue(studentProfile) },
-        topic: { findMany: jest.fn().mockResolvedValue([{ id: "topic-1" }]) },
+        topic: { findMany: jest.fn().mockResolvedValue([withReadyGate({ id: "topic-1" })]) },
         question: { findMany: jest.fn().mockImplementation(async ({ where }: any) => questions.filter((q) => q.isPlaceholder === where.isPlaceholder)) },
       },
     } as any;
@@ -188,8 +189,8 @@ describe("QuizzesService.submitQuiz — lesson_check parent notification", () =>
 
   function makeQuestions() {
     return [
-      { id: "q1", topicId: "topic-1", promptEn: "Q1", correctAnswerJson: "a", explanationEn: null, explanationAr: null, topic: { nameEn: "Fractions", nameAr: "الكسور", unit: { subjectId: "subject-1" } } },
-      { id: "q2", topicId: "topic-1", promptEn: "Q2", correctAnswerJson: "b", explanationEn: null, explanationAr: null, topic: { nameEn: "Fractions", nameAr: "الكسور", unit: { subjectId: "subject-1" } } },
+      { id: "q1", topicId: "topic-1", promptEn: "Q1", correctAnswerJson: "a", explanationEn: null, explanationAr: null, topic: withReadyGate({ id: "topic-1", nameEn: "Fractions", nameAr: "الكسور", unit: { subjectId: "subject-1" } }) },
+      { id: "q2", topicId: "topic-1", promptEn: "Q2", correctAnswerJson: "b", explanationEn: null, explanationAr: null, topic: withReadyGate({ id: "topic-1", nameEn: "Fractions", nameAr: "الكسور", unit: { subjectId: "subject-1" } }) },
     ];
   }
 
@@ -278,9 +279,9 @@ describe("QuizzesService.submitQuiz — grading, scoring & persistence", () => {
   // recommendation logic is genuinely exercised, not just a single-topic
   // degenerate case. topic.unit.subjectId is what submitQuiz's question-
   // scope validation (2026-09-20) actually reads.
-  const Q1 = { id: "q1", topicId: "t-fractions", correctAnswerJson: "a", promptEn: "Q1", explanationEn: null, explanationAr: null, topic: { nameEn: "Fractions", nameAr: "الكسور", unit: { subjectId: "subject-1" } } };
-  const Q2 = { id: "q2", topicId: "t-fractions", correctAnswerJson: "b", promptEn: "Q2", explanationEn: null, explanationAr: null, topic: { nameEn: "Fractions", nameAr: "الكسور", unit: { subjectId: "subject-1" } } };
-  const Q3 = { id: "q3", topicId: "t-decimals", correctAnswerJson: "c", promptEn: "Q3", explanationEn: null, explanationAr: null, topic: { nameEn: "Decimals", nameAr: "الكسور العشرية", unit: { subjectId: "subject-1" } } };
+  const Q1 = { id: "q1", topicId: "t-fractions", correctAnswerJson: "a", promptEn: "Q1", explanationEn: null, explanationAr: null, topic: withReadyGate({ id: "t-fractions", nameEn: "Fractions", nameAr: "الكسور", unit: { subjectId: "subject-1" } }) };
+  const Q2 = { id: "q2", topicId: "t-fractions", correctAnswerJson: "b", promptEn: "Q2", explanationEn: null, explanationAr: null, topic: withReadyGate({ id: "t-fractions", nameEn: "Fractions", nameAr: "الكسور", unit: { subjectId: "subject-1" } }) };
+  const Q3 = { id: "q3", topicId: "t-decimals", correctAnswerJson: "c", promptEn: "Q3", explanationEn: null, explanationAr: null, topic: withReadyGate({ id: "t-decimals", nameEn: "Decimals", nameAr: "الكسور العشرية", unit: { subjectId: "subject-1" } }) };
 
   function makePrisma(opts: { questions?: any[]; profile?: any } = {}) {
     const attemptCreateMany = jest.fn().mockResolvedValue({ count: 0 });
@@ -420,7 +421,7 @@ describe("QuizzesService.submitQuiz — grading, scoring & persistence", () => {
     // The student owns "subject-1" and correctly passes it as input.subjectId,
     // but q-other-subject's real Topic/Unit chain belongs to a different
     // subject entirely.
-    const otherSubjectQuestion = { id: "q-other", topicId: "topic-in-a-different-subject", correctAnswerJson: "z", promptEn: "Q", explanationEn: null, explanationAr: null, topic: { nameEn: "Unrelated Topic", nameAr: "غير ذلك", unit: { subjectId: "a-different-subject" } } };
+    const otherSubjectQuestion = { id: "q-other", topicId: "topic-in-a-different-subject", correctAnswerJson: "z", promptEn: "Q", explanationEn: null, explanationAr: null, topic: withReadyGate({ id: "topic-in-a-different-subject", nameEn: "Unrelated Topic", nameAr: "غير ذلك", unit: { subjectId: "a-different-subject" } }) };
     const { prisma, attemptCreateMany, quizResultCreate } = makePrisma({ questions: [otherSubjectQuestion] });
     const emailService = { send: jest.fn().mockResolvedValue({ sent: true }) } as any;
     const service = new QuizzesService(prisma, {} as any, noGenerator, emailService);
@@ -434,7 +435,7 @@ describe("QuizzesService.submitQuiz — grading, scoring & persistence", () => {
   });
 
   it("H (question-scope, mixed): one Question genuinely in-scope + one from a foreign Subject rejects the ENTIRE quiz atomically — zero QuestionAttempt writes, zero QuizResult, zero parent email, even for lesson_check", async () => {
-    const foreignQuestion = { id: "q-foreign", topicId: "topic-foreign", correctAnswerJson: "z", promptEn: "Q", explanationEn: null, explanationAr: null, topic: { nameEn: "Foreign", nameAr: "أجنبي", unit: { subjectId: "a-different-subject" } } };
+    const foreignQuestion = { id: "q-foreign", topicId: "topic-foreign", correctAnswerJson: "z", promptEn: "Q", explanationEn: null, explanationAr: null, topic: withReadyGate({ id: "topic-foreign", nameEn: "Foreign", nameAr: "أجنبي", unit: { subjectId: "a-different-subject" } }) };
     const { prisma, attemptCreateMany, quizResultCreate } = makePrisma({ questions: [Q1, foreignQuestion] });
     const emailService = { send: jest.fn().mockResolvedValue({ sent: true }) } as any;
     const service = new QuizzesService(prisma, {} as any, noGenerator, emailService);

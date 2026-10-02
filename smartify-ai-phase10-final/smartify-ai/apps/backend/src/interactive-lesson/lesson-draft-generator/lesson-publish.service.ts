@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException } from "@nes
 import { PrismaService } from "../../prisma/prisma.service";
 import { validateLessonDraft } from "./lesson-draft-validator";
 import { allObjectivesReviewed, applyReviewedTranslations, parseBilingualObjectives } from "./lesson-objectives.util";
+import type { TopicContentProvenance } from "../../ai/context/topic-content-provenance.util";
 
 export interface LessonPublishResult {
   topicId: string;
@@ -196,7 +197,12 @@ export class LessonPublishService {
   async autoPublishIntoTopic(
     draftId: string,
     topicId: string,
-    generationMetadata?: { generationSource: "LEGACY_TITLE_ONLY" | "TEXTBOOK_GROUNDED"; groundingVersionUsed: number | null; generationPromptVersion: string },
+    generationMetadata?: {
+      generationSource: "LEGACY_TITLE_ONLY" | "TEXTBOOK_GROUNDED";
+      groundingVersionUsed: number | null;
+      generationPromptVersion: string;
+      provenance?: TopicContentProvenance | null;
+    },
   ): Promise<LessonPublishResult> {
     const draft = await this.prisma.client.lessonDraft.findUnique({ where: { id: draftId } });
     if (!draft) throw new NotFoundException(`LessonDraft ${draftId} not found.`);
@@ -253,6 +259,12 @@ export class LessonPublishService {
           generationSource: generationMetadata?.generationSource ?? "LEGACY_TITLE_ONLY",
           groundingVersionUsed: generationMetadata?.groundingVersionUsed ?? null,
           generationPromptVersion: generationMetadata?.generationPromptVersion ?? null,
+          // 2026-10-03 downstream provenance: always written (null when the
+          // draft was generated without a READY grounding gate), so a
+          // regeneration can never leave a previous generation's identity
+          // attached to new content.
+          groundingSourceFingerprintUsed: generationMetadata?.provenance?.groundingSourceFingerprint ?? null,
+          groundingAssignmentFingerprintUsed: generationMetadata?.provenance?.groundingAssignmentFingerprint ?? null,
           contentGeneratedAt: new Date(),
         },
       });

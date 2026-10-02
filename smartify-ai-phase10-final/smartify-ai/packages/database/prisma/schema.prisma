@@ -359,6 +359,13 @@ model Unit {
   groundingLockedAt DateTime?
   groundingLockedBy String?
 
+  // Downstream content provenance enforcement (2026-10-03): null = TRANSITION
+  // (pre-provenance LEGACY content may still be served); set = STRICT (only
+  // content whose stored provenance equals the Topic's current grounding is
+  // served). Set explicitly per Unit by scripts/enforce-content-provenance.ts
+  // once its content has been regenerated — never automatically.
+  contentProvenanceEnforcedAt DateTime?
+
   topics            Topic[]
   lessonDrafts      LessonDraft[]
   groundingProgress UnitGroundingProgress?
@@ -431,6 +438,16 @@ model Topic {
   groundingVersionUsed    Int?
   generationPromptVersion String?
   contentGeneratedAt      DateTime?
+
+  // Downstream content provenance (2026-10-03, Wave B runtime safety): the
+  // EXACT grounding identity this Topic's teachingStepsJson was generated
+  // from — Unit.groundingSourceFingerprint at generation time and the
+  // resolved assignment+slice fingerprint (topic-content-provenance.util.ts).
+  // groundingVersionUsed alone cannot tell corrected grounding from the old
+  // shifted one (both are version 1). Null on every Topic generated before
+  // this existed — LEGACY, never backfilled or assumed current.
+  groundingSourceFingerprintUsed     String?
+  groundingAssignmentFingerprintUsed String?
 
   // Production lazy-generation single-flight lock (2026-09-19) — same
   // rationale/pattern as Unit.groundingLockedAt, one level down: two
@@ -797,6 +814,10 @@ model Question {
   // a later-audit marker, nothing in the app currently gates on it.
   needsReview       Boolean      @default(false)
   createdAt         DateTime     @default(now())
+  // Downstream content provenance (2026-10-03) — copied verbatim from the
+  // QuestionDraft this Question was published from. Null = LEGACY.
+  groundingSourceFingerprint     String?
+  groundingAssignmentFingerprint String?
 
   attempts           QuestionAttempt[]
   publishedFromDraft QuestionDraft?
@@ -835,6 +856,11 @@ model QuestionDraft {
   isAiGenerated     Boolean      @default(false)
   aiProvider        String?
   aiModel           String?
+  // Downstream content provenance (2026-10-03): the grounding identity this
+  // draft was generated from (see topic-content-provenance.util.ts). Null =
+  // LEGACY or a human-pipeline draft generated without textbook grounding.
+  groundingSourceFingerprint     String?
+  groundingAssignmentFingerprint String?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
   reviewedAt        DateTime?

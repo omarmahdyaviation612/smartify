@@ -2,6 +2,7 @@ import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { AIContextBuilderService } from "../ai/context/ai-context-builder.service";
 import { InteractiveLessonService } from "./interactive-lesson.service";
 import { TOPIC_GROUNDING_ASSIGNMENT_VERSION } from "../ai/context/topic-grounding-assignment.util";
+import { currentGateProvenance, withBlockedGate, withReadyGate } from "../ai/context/topic-content-gate.fixtures.testspec";
 
 /**
  * Covers the Interactive Lesson engine's core control flow: step
@@ -61,7 +62,14 @@ describe("InteractiveLessonService", () => {
       client: {
         studentProfile: { findUnique: jest.fn().mockImplementation(async ({ where: { userId } }: any) => state.profiles[userId] ?? null) },
         topic: {
-          findUnique: jest.fn().mockImplementation(async ({ where: { id } }: any) => state.topics[id] ?? null),
+          // 2026-10-03: every fixture Topic is READY_CURRENT_NON_EMPTY unless it
+          // explicitly declares its own `groundingAssignment` — the student
+          // runtime gate refuses anything else (see the dedicated gate tests).
+          findUnique: jest.fn().mockImplementation(async ({ where: { id } }: any) => {
+            const t = state.topics[id];
+            if (!t) return null;
+            return "groundingAssignment" in t ? t : withReadyGate(t);
+          }),
         },
         lessonSession: {
           findUnique: jest.fn().mockImplementation(async ({ where: { studentId_topicId } }: any) => {
@@ -886,9 +894,16 @@ describe("InteractiveLessonService", () => {
     it("returns the stored asset when it exists", async () => {
       const h = makeHarness();
       const asset = { id: "asset-1", topicId: "topic-1", stepId: "s4", mimeType: "image/png", data: Buffer.from("fake-bytes") };
-      h.prisma.client.lessonVisualAsset.findUnique.mockResolvedValueOnce(asset);
+      h.prisma.client.lessonVisualAsset.findUnique.mockResolvedValueOnce({ ...asset, topic: withReadyGate({ id: "topic-1", teachingStepsJson: STEPS, unit: {} }) });
       const result = await h.service.getVisualAsset("asset-1");
-      expect(result).toBe(asset);
+      expect(result).toEqual(asset);
+    });
+
+    it("2026-10-03: withholds a visual whose Topic is BLOCKED (same gate as its teachingSteps)", async () => {
+      const h = makeHarness();
+      const asset = { id: "asset-1", topicId: "topic-1", stepId: "s4", mimeType: "image/png", data: Buffer.from("fake-bytes") };
+      h.prisma.client.lessonVisualAsset.findUnique.mockResolvedValueOnce({ ...asset, topic: withBlockedGate({ id: "topic-1", teachingStepsJson: STEPS, unit: {} }) });
+      await expect(h.service.getVisualAsset("asset-1")).rejects.toThrow(NotFoundException);
     });
 
     it("throws NotFoundException for an unknown asset id, rather than serving nothing silently", async () => {
@@ -1215,15 +1230,13 @@ describe("InteractiveLessonService", () => {
     expect(lastCallArgs.systemPrompt).toMatch(/FACTUAL PROVENANCE/i);
   });
 
-  it("with no grounding available for the Unit, the prompt forbids any specific named real-world example", async () => {
+  it("2026-10-03: existing steps on a Topic with no READY grounding assignment are withheld — zero provider calls, safe 'not available'", async () => {
     const h = makeHarness({
       extraTopics: groundedExtraTopics(),
       generateImpl: async () => ({ content: "teaching content", inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }),
     });
-    await h.service.advance("user-1", "topic-ungrounded");
-    const lastCallArgs = h.generateSpy.mock.calls[h.generateSpy.mock.calls.length - 1][0];
-    expect(lastCallArgs.systemPrompt).not.toContain("Atinuke");
-    expect(lastCallArgs.systemPrompt).toMatch(/no REFERENCE NOTES are available/i);
+    await expect(h.service.advance("user-1", "topic-ungrounded")).rejects.toThrow("This lesson is not available as an interactive lesson yet.");
+    expect(h.generateSpy).not.toHaveBeenCalled();
   });
 
   it("adds zero extra Prisma queries — grounding selection reuses the Topic already fetched, never a new lookup", async () => {
@@ -1259,5 +1272,80 @@ describe("InteractiveLessonService", () => {
     await h.service.advance("user-1", "topic-grounded");
     expect(JSON.stringify(h.state.topics["topic-grounded"].teachingStepsJson)).toBe(before);
   });
+  });
+  /**
+   * 2026-10-03 Wave B runtime safety — the student lesson path serves stored
+   * teachingSteps only for a READY_CURRENT_NON_EMPTY Topic whose steps'
+   * provenance is servable, and never generates for a BLOCKED Topic.
+   */
+  describe("Wave B runtime gate (2026-10-03)", () => {
+    const NOT_AVAILABLE = "This lesson is not available as an interactive lesson yet.";
+    const unitOf = { subjectId: "subject-1", subject: { nameEn: "Mathematics" } };
+
+    it("A: a BLOCKED Topic with existing teachingSteps is never served — advance/getState/respond all refuse, zero provider calls, no session", async () => {
+      const h = makeHarness({ extraTopics: { "topic-blocked": withBlockedGate({ id: "topic-blocked", nameEn: "Blocked", teachingStepsJson: STEPS, unit: unitOf }) } });
+      await expect(h.service.advance("user-1", "topic-blocked")).rejects.toThrow(NOT_AVAILABLE);
+      await expect(h.service.getState("user-1", "topic-blocked")).rejects.toThrow(NOT_AVAILABLE);
+      await expect(h.service.respond("user-1", "topic-blocked", "hello")).rejects.toThrow(NOT_AVAILABLE);
+      expect(h.generateSpy).not.toHaveBeenCalled();
+      expect(h.getSession("user-1", "topic-blocked")).toBeUndefined();
+      expect(h.freeTrialCount().reserve).toBe(0);
+    });
+
+    it("A: an already-started session on a now-BLOCKED Topic cannot continue either", async () => {
+      const h = makeHarness();
+      await h.service.advance("user-1", "topic-1");
+      h.state.topics["topic-1"] = withBlockedGate(h.state.topics["topic-1"]);
+      h.generateSpy.mockClear();
+      await expect(h.service.advance("user-1", "topic-1")).rejects.toThrow(NOT_AVAILABLE);
+      await expect(h.service.respond("user-1", "topic-1", "an answer")).rejects.toThrow(NOT_AVAILABLE);
+      expect(h.generateSpy).not.toHaveBeenCalled();
+    });
+
+    it("D: a BLOCKED Topic with no steps triggers NO lazy grounding preparation and NO lazy lesson generation", async () => {
+      const h = makeHarness({ extraTopics: { "topic-blocked-cold": withBlockedGate({ id: "topic-blocked-cold", nameEn: "Cold", nameAr: "بارد", unitId: "unit-gate", teachingStepsJson: null, unit: unitOf }) } });
+      await expect(h.service.advance("user-1", "topic-blocked-cold")).rejects.toThrow(NOT_AVAILABLE);
+      await expect(h.service.getState("user-1", "topic-blocked-cold")).rejects.toThrow(NOT_AVAILABLE);
+      expect(h.draftGenerator.prepareTopicGrounding).not.toHaveBeenCalled();
+      expect(h.draftGenerator.getTopicGroundingPreparationStatus).not.toHaveBeenCalled();
+      expect(h.draftGenerator.ensureTopicHasLesson).not.toHaveBeenCalled();
+      expect(h.generateSpy).not.toHaveBeenCalled();
+    });
+
+    it("a stale (old-fingerprint) READY assignment withholds existing steps exactly like BLOCKED", async () => {
+      const t = withReadyGate({ id: "topic-stale", nameEn: "Stale", teachingStepsJson: STEPS, unit: unitOf });
+      const h = makeHarness({ extraTopics: { "topic-stale": { ...t, groundingAssignment: { ...t.groundingAssignment, unitSourceFingerprint: "fp-old-shifted" } } } });
+      await expect(h.service.advance("user-1", "topic-stale")).rejects.toThrow(NOT_AVAILABLE);
+      expect(h.generateSpy).not.toHaveBeenCalled();
+    });
+
+    it("L: CURRENT-provenance steps are served under STRICT enforcement", async () => {
+      const cur = currentGateProvenance();
+      const t = withReadyGate({ id: "topic-current", nameEn: "Current", teachingStepsJson: STEPS, unit: unitOf, groundingSourceFingerprintUsed: cur.groundingSourceFingerprint, groundingAssignmentFingerprintUsed: cur.groundingAssignmentFingerprint }, { contentProvenanceEnforcedAt: new Date() });
+      const h = makeHarness({ extraTopics: { "topic-current": t } });
+      const r = await h.service.advance("user-1", "topic-current");
+      expect(r.stepType).toBe("INTRO");
+    });
+
+    it("M: MISMATCHED-provenance steps are refused even during TRANSITION — never regenerated by the student request", async () => {
+      const t = withReadyGate({ id: "topic-mismatch", nameEn: "Mismatch", teachingStepsJson: STEPS, unit: unitOf, groundingSourceFingerprintUsed: "fp-old-shifted", groundingAssignmentFingerprintUsed: "tga1:old" });
+      const h = makeHarness({ extraTopics: { "topic-mismatch": t } });
+      await expect(h.service.advance("user-1", "topic-mismatch")).rejects.toThrow(NOT_AVAILABLE);
+      expect(h.draftGenerator.ensureTopicHasLesson).not.toHaveBeenCalled();
+      expect(h.generateSpy).not.toHaveBeenCalled();
+    });
+
+    it("N: LEGACY steps are served during TRANSITION (every other test here) but refused once the Unit is STRICT", async () => {
+      const legacyStrict = withReadyGate({ id: "topic-legacy-strict", nameEn: "Legacy", teachingStepsJson: STEPS, unit: unitOf }, { contentProvenanceEnforcedAt: new Date() });
+      const h = makeHarness({ extraTopics: { "topic-legacy-strict": legacyStrict } });
+      await expect(h.service.advance("user-1", "topic-legacy-strict")).rejects.toThrow(NOT_AVAILABLE);
+      await expect(h.service.advance("user-1", "topic-1")).resolves.toMatchObject({ stepType: "INTRO" });
+    });
+
+    it("E: a READY Topic with no steps still lazily generates (existing behavior preserved)", async () => {
+      const h = makeHarness({ extraTopics: { "topic-cold": withReadyGate({ id: "topic-cold", nameEn: "Cold", nameAr: "بارد", unitId: "unit-gate", teachingStepsJson: null, unit: unitOf }) } });
+      await h.service.advance("user-1", "topic-cold");
+      expect(h.draftGenerator.ensureTopicHasLesson).toHaveBeenCalledTimes(1);
+    });
   });
 });

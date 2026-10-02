@@ -1,5 +1,6 @@
 import { QuestionDraftGeneratorService, QuestionDraftGenerationError } from "./question-draft-generator.service";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
+import { withReadyGate } from "../../ai/context/topic-content-gate.fixtures.testspec";
 
 /**
  * Budget-attribution regression suite (2026-09-20) — mirrors
@@ -20,7 +21,7 @@ describe("QuestionDraftGeneratorService.ensurePoolForTopic — budget attributio
   const VALID_QUESTION = {
     type: "MULTIPLE_CHOICE",
     difficulty: "EASY",
-    promptEn: "What is 2 + 2?",
+    promptEn: "Addition: what is 2 + 2?",
     promptAr: "ما هو ٢ + ٢؟",
     optionsJson: ["3", "4", "5"],
     correctAnswerJson: "4",
@@ -39,14 +40,17 @@ describe("QuestionDraftGeneratorService.ensurePoolForTopic — budget attributio
       client: {
         question: {
           count: jest.fn().mockResolvedValue(existingQuestionCount),
+          // 2026-10-03: the pool counts only SERVABLE Questions — LEGACY ones
+          // still count under TRANSITION enforcement (the fixture Unit's mode).
+          findMany: jest.fn().mockResolvedValue(Array.from({ length: existingQuestionCount }, () => ({ topicId: TOPIC_ID, groundingSourceFingerprint: null, groundingAssignmentFingerprint: null }))),
         },
         topic: {
-          findUnique: jest.fn().mockResolvedValue({
+          findUnique: jest.fn().mockResolvedValue(withReadyGate({
             id: TOPIC_ID,
             nameEn: "Test Topic",
             unit: { nameEn: "Unit 1", groundingNotesJson: null, groundingVersion: null, subject: { nameEn: "Science", grade: { nameEn: "Year 5", curriculum: { nameEn: "Test Curriculum" } } }, _count: { topics: 1 } },
             lessons: [{ isPlaceholder: false, objectives: [] }],
-          }),
+          })),
         },
         questionDraft: {
           create: jest.fn().mockResolvedValue({ id: "qd-1" }),
@@ -137,7 +141,7 @@ describe("QuestionDraftGeneratorService.generateAutoQuestionBatch — maxOutputT
   const VALID_QUESTION = {
     type: "MULTIPLE_CHOICE",
     difficulty: "EASY",
-    promptEn: "What is 2 + 2?",
+    promptEn: "Addition: what is 2 + 2?",
     promptAr: "ما هو ٢ + ٢؟",
     optionsJson: ["3", "4", "5"],
     correctAnswerJson: "4",
@@ -160,10 +164,9 @@ describe("QuestionDraftGeneratorService.generateAutoQuestionBatch — maxOutputT
     const prisma = {
       client: {
         topic: {
-          findUnique: jest.fn().mockResolvedValue({
+          findUnique: jest.fn().mockResolvedValue(withReadyGate({
             id: TOPIC_ID,
             nameEn: "Test Topic",
-            groundingAssignment: null,
             unit: {
               nameEn: "Unit 1",
               groundingNotesJson: null,
@@ -173,7 +176,7 @@ describe("QuestionDraftGeneratorService.generateAutoQuestionBatch — maxOutputT
               _count: { topics: 1 },
             },
             lessons: [{ isPlaceholder: false, objectives: [] }],
-          }),
+          })),
         },
         questionDraft: {
           create: jest.fn().mockResolvedValue({ id: "qd-1" }),

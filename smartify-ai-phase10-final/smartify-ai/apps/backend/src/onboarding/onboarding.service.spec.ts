@@ -1,4 +1,5 @@
 import { BadRequestException } from "@nestjs/common";
+import { withReadyGate } from "../ai/context/topic-content-gate.fixtures.testspec";
 import { studentOnboardingSchema } from "@smartify/validation";
 import { OnboardingService } from "./onboarding.service";
 
@@ -274,8 +275,9 @@ describe("OnboardingService", () => {
     function makeQuestion(id: string, subjectId: string, correctAnswer: string) {
       return {
         id,
+        topicId: `topic-${id}`,
         correctAnswerJson: correctAnswer,
-        topic: { unit: { subject: { id: subjectId, nameEn: `Subject ${subjectId}`, nameAr: "مادة" } } },
+        topic: withReadyGate({ id: `topic-${id}`, unit: { subject: { id: subjectId, nameEn: `Subject ${subjectId}`, nameAr: "مادة" } } }),
       };
     }
 

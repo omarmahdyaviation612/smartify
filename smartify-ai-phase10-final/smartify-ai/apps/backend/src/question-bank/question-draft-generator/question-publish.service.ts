@@ -131,6 +131,10 @@ export class QuestionPublishService {
           explanationAr: draft.explanationAr,
           isAiGenerated: draft.isAiGenerated,
           isPlaceholder: false,
+          // 2026-10-03 downstream provenance: copied verbatim from the draft
+          // (null on a draft generated without a READY grounding gate = LEGACY).
+          groundingSourceFingerprint: draft.groundingSourceFingerprint ?? null,
+          groundingAssignmentFingerprint: draft.groundingAssignmentFingerprint ?? null,
         },
       });
 
@@ -191,6 +195,10 @@ export class QuestionPublishService {
           isAiGenerated: true,
           needsReview: true, // AI-authored bilingual content, never human-reviewed — see this method's doc comment
           isPlaceholder: false,
+          // 2026-10-03 downstream provenance: copied verbatim from the draft
+          // (null on a draft generated without a READY grounding gate = LEGACY).
+          groundingSourceFingerprint: draft.groundingSourceFingerprint ?? null,
+          groundingAssignmentFingerprint: draft.groundingAssignmentFingerprint ?? null,
         },
       });
 

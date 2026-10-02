@@ -1,4 +1,5 @@
 import { PracticeService } from "./practice.service";
+import { withReadyGate } from "../ai/context/topic-content-gate.fixtures.testspec";
 import { QuizzesService } from "../quizzes/quizzes.service";
 
 /**
@@ -20,7 +21,7 @@ describe("Practice vs Quiz grading consistency", () => {
     correctAnswerJson: "Paris",
     explanationEn: null,
     explanationAr: null,
-    topic: { nameEn: "Geography", nameAr: "جغرافيا", unit: { subjectId: "subject-1" } },
+    topic: withReadyGate({ id: "topic-1", nameEn: "Geography", nameAr: "جغرافيا", unit: { subjectId: "subject-1" } }),
   };
 
   function makePracticeService() {

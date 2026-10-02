@@ -8,7 +8,7 @@ import { QuestionPublishService } from "./question-publish.service";
 import { LessonDraftGeneratorService } from "../../interactive-lesson/lesson-draft-generator/lesson-draft-generator.service";
 import type { QuestionGenerationInput, ResolvedTopicContext } from "./question-draft.types";
 import type { GroundingNotes } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
-import { assignedGroundingSliceOrNull } from "../../ai/context/topic-grounding-assignment.util";
+import { evaluateTopicGroundingGate, questionServabilityByTopic, QUESTION_PROVENANCE_SELECT, TOPIC_GATE_INCLUDE, UNIT_GATE_SELECT, type TopicGroundingGate } from "../../ai/context/topic-content-provenance.util";
 import { checkGroundingConsistency } from "../../ai/context/grounding-consistency-validator";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
 
@@ -104,21 +104,16 @@ export class QuestionDraftGeneratorService {
    * The single authoritative grounding read for question authoring
    * (2026-09-27) — see LessonDraftGeneratorService.readAssignedGroundingOutcome.
    */
-  private async readAssignedGroundingSlice(topicId: string) {
+  // 2026-10-03: the shared READY_CURRENT_NON_EMPTY gate
+  // (topic-content-provenance.util.ts) — also yields the provenance every
+  // generated draft is stamped with.
+  private async readGroundingGate(topicId: string): Promise<TopicGroundingGate> {
     const row = await this.prisma.client.topic.findUnique({
       where: { id: topicId },
-      select: {
-        groundingAssignment: true,
-        topicSourceEvidence: true,
-        unit: { select: { groundingNotesJson: true, groundingVersion: true, groundingSourceFingerprint: true } },
-      },
+      select: { ...TOPIC_GATE_INCLUDE, unit: { select: UNIT_GATE_SELECT } },
     });
-    if (!row) return null;
-    return assignedGroundingSliceOrNull(row.groundingAssignment, {
-      groundingVersion: row.unit.groundingVersion,
-      groundingSourceFingerprint: row.unit.groundingSourceFingerprint,
-      groundingNotesJson: row.unit.groundingNotesJson as unknown as GroundingNotes | null,
-    }, row.topicSourceEvidence);
+    if (!row) return { state: "UNAVAILABLE", reason: "MISSING" };
+    return evaluateTopicGroundingGate(row as any);
   }
 
   async resolveTopicContext(topicId: string): Promise<ResolvedTopicContext & { topicId: string; isPlaceholder: boolean }> {
@@ -279,6 +274,17 @@ export class QuestionDraftGeneratorService {
    * pipeline) — generate the lesson first.
    */
   async generateAutoQuestionBatch(topicId: string, count: number, requestingUserId: string) {
+    // 2026-10-03 Wave B runtime safety: READY_CURRENT_NON_EMPTY is REQUIRED —
+    // checked before any budget check, provider call or write. There is no
+    // title-only fallback: a missing/stale/BLOCKED/EMPTY assignment means zero
+    // provider calls, zero QuestionDraft rows and zero Question rows.
+    const gate = await this.readGroundingGate(topicId);
+    if (gate.state !== "READY") {
+      this.logger.warn(`TEXTBOOK_TOPIC_GENERATION_BLOCKED topicId=${topicId} kind=questions reason=assignment-${gate.reason.toLowerCase()}`);
+      throw new ServiceUnavailableException("Questions are not available for this topic yet.");
+    }
+    const groundingSlice = gate.slice;
+    const provenance = gate.provenance;
     await this.usageService.assertWithinBudget(requestingUserId);
 
     const topicContext = await this.resolveTopicContext(topicId);
@@ -287,13 +293,9 @@ export class QuestionDraftGeneratorService {
     }
 
     // 2026-09-27: same authoritative source as generateAutoDraft — the Topic's
-    // PERSISTED TopicGroundingAssignment, not a fresh title-based inference.
-    // A missing/stale/BLOCKED row yields null and takes the pre-existing
-    // "no grounding available" path unchanged; never a live mapper call.
-    const groundingSlice = await this.readAssignedGroundingSlice(topicId);
-    if (groundingSlice) {
-      this.logger.log(`GROUNDED_TOPIC_GENERATION_STARTED topicId=${topicId} kind=questions`);
-    }
+    // PERSISTED TopicGroundingAssignment, never a fresh title-based inference
+    // and never a live mapper call (gated above).
+    this.logger.log(`GROUNDED_TOPIC_GENERATION_STARTED topicId=${topicId} kind=questions`);
 
     let lastErrors: string[] = [];
     let callsMade = 0;
@@ -413,18 +415,15 @@ export class QuestionDraftGeneratorService {
       // lesson draft where "mostly right" isn't a coherent thing to keep.
       if (validDrafts.length > 0) {
         // §10: grounding-consistency check on the accepted subset as a
-        // whole — only when grounding was actually supplied. Feeds the
-        // SAME retry loop as structural validation.
-        if (groundingSlice) {
-          const consistencyErrors = checkGroundingConsistency(
-            validDrafts.map((q) => q.promptEn as string),
-            groundingSlice,
-          );
-          if (consistencyErrors.length > 0) {
-            lastErrors = consistencyErrors;
-            this.logger.warn(`CONTENT_VALIDATION_FAILED topicId=${topicId} kind=questions attempt=${attempt}: ${consistencyErrors.join("; ")}`);
-            continue;
-          }
+        // whole. Feeds the SAME retry loop as structural validation.
+        const consistencyErrors = checkGroundingConsistency(
+          validDrafts.map((q) => q.promptEn as string),
+          groundingSlice,
+        );
+        if (consistencyErrors.length > 0) {
+          lastErrors = consistencyErrors;
+          this.logger.warn(`CONTENT_VALIDATION_FAILED topicId=${topicId} kind=questions attempt=${attempt}: ${consistencyErrors.join("; ")}`);
+          continue;
         }
 
         const drafts = [];
@@ -445,19 +444,20 @@ export class QuestionDraftGeneratorService {
                 isAiGenerated: true,
                 aiProvider: providerKey,
                 aiModel: model,
+                groundingSourceFingerprint: provenance.groundingSourceFingerprint,
+                groundingAssignmentFingerprint: provenance.groundingAssignmentFingerprint,
               },
             }),
           );
         }
-        if (groundingSlice) {
-          this.logger.log(`GROUNDED_TOPIC_GENERATION_COMPLETED topicId=${topicId} kind=questions`);
-        }
+        this.logger.log(`GROUNDED_TOPIC_GENERATION_COMPLETED topicId=${topicId} kind=questions`);
         return {
           drafts,
           attempts: attempt,
           callsMade,
           rejectedCount: perItemErrors.length,
-          generationSource: groundingSlice ? ("TEXTBOOK_GROUNDED" as const) : ("LEGACY_TITLE_ONLY" as const),
+          generationSource: "TEXTBOOK_GROUNDED" as const,
+          provenance,
         };
       }
 
@@ -505,7 +505,24 @@ export class QuestionDraftGeneratorService {
    * bookkeeping — see its own 2026-09-20 fix comment — never AI spend).
    */
   async ensurePoolForTopic(topicId: string, requestingUserId: string, targetCount = DEFAULT_POOL_TARGET): Promise<void> {
-    const existing = await this.prisma.client.question.count({ where: { topicId, isPlaceholder: false } });
+    // 2026-10-03 Wave B runtime safety: a Topic that is not
+    // READY_CURRENT_NON_EMPTY never triggers lazy lesson OR question
+    // generation — zero provider calls, zero writes. Only SERVABLE Questions
+    // (topic-content-provenance.util.ts) count toward the pool, so a pool made
+    // entirely of MISMATCHED (or, once a Unit is STRICT, LEGACY) Questions is
+    // topped up with current ones rather than leaving the student with none.
+    const topic = await this.prisma.client.topic.findUnique({
+      where: { id: topicId },
+      select: { id: true, ...TOPIC_GATE_INCLUDE, unit: { select: UNIT_GATE_SELECT } },
+    });
+    if (!topic) return;
+    if (evaluateTopicGroundingGate(topic as any).state !== "READY") {
+      this.logger.log(`QUESTION_POOL_TOPUP_SKIPPED topicId=${topicId} reason=grounding-unavailable`);
+      return;
+    }
+    const servable = questionServabilityByTopic([topic as any]);
+    const pool = await this.prisma.client.question.findMany({ where: { topicId, isPlaceholder: false }, select: { topicId: true, ...QUESTION_PROVENANCE_SELECT } });
+    const existing = pool.filter(servable).length;
     if (existing >= targetCount) return;
 
     try {
