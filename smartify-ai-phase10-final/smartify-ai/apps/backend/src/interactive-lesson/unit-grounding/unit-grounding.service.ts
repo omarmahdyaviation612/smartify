@@ -352,6 +352,49 @@ export class UnitGroundingService {
       unitNameEn: unit.nameEn,
     };
 
+    const generated = await this.generateGroundingForRange(unit, unitId, sourceFile, pageStart, pageEnd, ctx, requestingUserId);
+    await this.prisma.client.unit.update({
+      where: { id: unitId },
+      data: {
+        groundingNotesJson: generated.merged as any,
+        groundingGeneratedAt: new Date(),
+        groundingVersion: CURRENT_GROUNDING_VERSION,
+        groundingModel: generated.model,
+        groundingPromptVersion: GROUNDING_PROMPT_VERSION,
+        groundingSourceFingerprint: generated.pdfFingerprint,
+      },
+    });
+    this.logger.log(`GROUNDING_EXTRACTION_COMPLETED unitId=${unitId} conceptCount=${generated.merged.concepts.length} chunks=${generated.chunkCount}`);
+    return { unitId, groundingVersion: CURRENT_GROUNDING_VERSION, conceptCount: generated.merged.concepts.length };
+  }
+
+  /**
+   * Replacement-grounding primitive for controlled re-grounding (2026-10-02):
+   * runs the exact extraction pipeline extractUnitGrounding() uses for the
+   * Unit's CURRENT effective source and page range, but persists NOTHING —
+   * the caller validates the result and performs its own guarded write, so a
+   * failure here can never remove or alter the existing grounding.
+   */
+  async generateReplacementGrounding(unitId: string, requestingUserId: string): Promise<{ notes: GroundingNotes; model: string; chunkCount: number; sourceKey: string; pageStart: number; pageEnd: number; groundingVersion: number; groundingPromptVersion: string }> {
+    const unit = await this.prisma.client.unit.findUnique({ where: { id: unitId }, include: { subject: { include: { grade: { include: { curriculum: true } } } } } });
+    if (!unit) throw new NotFoundException(`Unit ${unitId} not found.`);
+    const sourceKey = resolveEffectiveSourceFile(unit, unit.subject);
+    if (!sourceKey || unit.sourcePageStart == null || unit.sourcePageEnd == null || unit.sourcePageEnd < unit.sourcePageStart) throw new BadRequestException(`Unit ${unitId} has no valid source/page range.`);
+    if (unit.sourcePageEnd - unit.sourcePageStart + 1 > MAX_UNIT_PAGE_COUNT) throw new BadRequestException(`Unit ${unitId}'s page range exceeds the ${MAX_UNIT_PAGE_COUNT}-page limit.`);
+    const ctx = { curriculumNameEn: unit.subject.grade.curriculum.nameEn, gradeNameEn: unit.subject.grade.nameEn, subjectNameEn: unit.subject.nameEn, unitNameEn: unit.nameEn };
+    const generated = await this.generateGroundingForRange(unit, unitId, sourceKey, unit.sourcePageStart, unit.sourcePageEnd, ctx, requestingUserId);
+    return { notes: generated.merged, model: generated.model, chunkCount: generated.chunkCount, sourceKey, pageStart: unit.sourcePageStart, pageEnd: unit.sourcePageEnd, groundingVersion: CURRENT_GROUNDING_VERSION, groundingPromptVersion: GROUNDING_PROMPT_VERSION };
+  }
+
+  private async generateGroundingForRange(
+    unit: { subject: { grade: { level: number; curriculum: { code: string } } } },
+    unitId: string,
+    sourceFile: string,
+    pageStart: number,
+    pageEnd: number,
+    ctx: { curriculumNameEn: string; gradeNameEn: string; subjectNameEn: string; unitNameEn: string },
+    requestingUserId: string,
+  ): Promise<{ merged: GroundingNotes; model: string; chunkCount: number; pdfFingerprint: string }> {
     this.logger.log(`CURRICULUM_SOURCE_FETCH_STARTED unitId=${unitId}`);
     let fetched: { localPath: string; isTemporary: boolean };
     try {
@@ -394,22 +437,7 @@ export class UnitGroundingService {
       }
 
       const merged = mergeGroundingNotes(chunkNotes);
-      const fingerprint = this.computeFingerprint(pdfPath, pageStart, pageEnd);
-      const { model } = active;
-
-      await this.prisma.client.unit.update({
-        where: { id: unitId },
-        data: {
-          groundingNotesJson: merged as any,
-          groundingGeneratedAt: new Date(),
-          groundingVersion: CURRENT_GROUNDING_VERSION,
-          groundingModel: model,
-          groundingPromptVersion: GROUNDING_PROMPT_VERSION,
-          groundingSourceFingerprint: fingerprint,
-        },
-      });
-      this.logger.log(`GROUNDING_EXTRACTION_COMPLETED unitId=${unitId} conceptCount=${merged.concepts.length} chunks=${chunks.length}`);
-      return { unitId, groundingVersion: CURRENT_GROUNDING_VERSION, conceptCount: merged.concepts.length };
+      return { merged, model: active.model, chunkCount: chunks.length, pdfFingerprint: this.computeFingerprint(pdfPath, pageStart, pageEnd) };
     } catch (err) {
       this.logger.warn(`GROUNDING_EXTRACTION_FAILED unitId=${unitId}: ${err instanceof Error ? err.message : String(err)}`);
       throw err;
