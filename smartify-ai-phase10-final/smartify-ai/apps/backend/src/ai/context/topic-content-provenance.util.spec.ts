@@ -115,9 +115,9 @@ describe("canServeTopicSteps / questionServabilityByTopic", () => {
     expect(canServeTopicSteps(topic() as any)).toBe(true);
     expect(canServeTopicSteps(withReadyGate({ id: "t1" }, strict) as any)).toBe(false);
   });
-  it("B/L/M/N: per-Question servability", () => {
-    const servable = questionServabilityByTopic([withReadyGate({ id: "ready" }) as any, withBlockedGate({ id: "blocked" }) as any, withReadyGate({ id: "strict" }, strict) as any]);
-    expect(servable({ topicId: "ready" })).toBe(true); // LEGACY, TRANSITION
+  it("B/L/M/N: per-Question servability (pool with no CURRENT Questions)", () => {
+    const servable = questionServabilityByTopic([withReadyGate({ id: "ready" }) as any, withBlockedGate({ id: "blocked" }) as any, withReadyGate({ id: "strict" }, strict) as any], []);
+    expect(servable({ topicId: "ready" })).toBe(true); // LEGACY, TRANSITION, Topic has no CURRENT
     expect(servable({ topicId: "ready", ...cur })).toBe(true); // CURRENT
     expect(servable({ topicId: "ready", groundingSourceFingerprint: "fp-old", groundingAssignmentFingerprint: "tga1:old" })).toBe(false); // MISMATCH
     expect(servable({ topicId: "blocked" })).toBe(false);
@@ -125,5 +125,49 @@ describe("canServeTopicSteps / questionServabilityByTopic", () => {
     expect(servable({ topicId: "strict" })).toBe(false); // LEGACY under STRICT
     expect(servable({ topicId: "strict", ...cur })).toBe(true);
     expect(servable({ topicId: "unknown-topic" })).toBe(false);
+  });
+});
+
+/** 2026-10-03 pilot fix: a Topic's pool is never a mix of LEGACY and CURRENT Questions. */
+describe("questionServabilityByTopic — Topic-level CURRENT precedence", () => {
+  const cur = currentGateProvenance();
+  const strict = { contentProvenanceEnforcedAt: new Date() };
+  const legacy = (n: number, topicId = "t1") => Array.from({ length: n }, () => ({ topicId, groundingSourceFingerprint: null, groundingAssignmentFingerprint: null }));
+  const current = (n: number, topicId = "t1") => Array.from({ length: n }, () => ({ topicId, ...cur }));
+  const mismatch = (n: number, topicId = "t1") => Array.from({ length: n }, () => ({ topicId, groundingSourceFingerprint: "fp-old", groundingAssignmentFingerprint: "tga1:old" }));
+  const servedFrom = (topic: any, pool: any[]) => {
+    const servable = questionServabilityByTopic([topic], pool);
+    const served = pool.filter(servable);
+    return { total: served.length, current: served.filter((q) => q.groundingSourceFingerprint).length, legacy: served.filter((q) => !q.groundingSourceFingerprint).length };
+  };
+  it.each([
+    ["1: TRANSITION + 0 CURRENT + 7 LEGACY -> 7 LEGACY", 0, 7, { total: 7, current: 0, legacy: 7 }],
+    ["2: TRANSITION + 1 CURRENT + 7 LEGACY -> only 1 CURRENT", 1, 7, { total: 1, current: 1, legacy: 0 }],
+    ["3: TRANSITION + 6 CURRENT + 7 LEGACY -> only 6 CURRENT", 6, 7, { total: 6, current: 6, legacy: 0 }],
+    ["4: TRANSITION + 8 CURRENT + 7 LEGACY -> only 8 CURRENT", 8, 7, { total: 8, current: 8, legacy: 0 }],
+  ])("%s", (_n, nCurrent, nLegacy, expected) => {
+    expect(servedFrom(withReadyGate({ id: "t1" }), [...legacy(nLegacy), ...current(nCurrent)])).toEqual(expected);
+  });
+  it("5: STRICT + 0 CURRENT + LEGACY -> 0 servable", () => {
+    expect(servedFrom(withReadyGate({ id: "t1" }, strict), legacy(7))).toEqual({ total: 0, current: 0, legacy: 0 });
+  });
+  it("6: STRICT + 8 CURRENT + LEGACY -> only 8 CURRENT", () => {
+    expect(servedFrom(withReadyGate({ id: "t1" }, strict), [...legacy(7), ...current(8)])).toEqual({ total: 8, current: 8, legacy: 0 });
+  });
+  it("7: MISMATCH is never servable — not even alone, and it never counts as CURRENT for precedence", () => {
+    expect(servedFrom(withReadyGate({ id: "t1" }), mismatch(8)).total).toBe(0);
+    expect(servedFrom(withReadyGate({ id: "t1" }), [...mismatch(8), ...legacy(7)])).toEqual({ total: 7, current: 0, legacy: 7 });
+    expect(servedFrom(withReadyGate({ id: "t1" }, strict), mismatch(8)).total).toBe(0);
+  });
+  it("precedence is per Topic: one Topic going CURRENT does not hide another Topic's LEGACY pool", () => {
+    const pool = [...legacy(7, "a"), ...current(8, "a"), ...legacy(7, "b")];
+    const servable = questionServabilityByTopic([withReadyGate({ id: "a" }) as any, withReadyGate({ id: "b" }) as any], pool);
+    const served = pool.filter(servable);
+    expect(served.filter((q) => q.topicId === "a").every((q) => q.groundingSourceFingerprint)).toBe(true);
+    expect(served.filter((q) => q.topicId === "b")).toHaveLength(7);
+  });
+  it("placeholder rows never establish CURRENT precedence", () => {
+    const pool = [...legacy(7), { topicId: "t1", isPlaceholder: true, ...cur }];
+    expect(questionServabilityByTopic([withReadyGate({ id: "t1" }) as any], pool)({ topicId: "t1" })).toBe(true);
   });
 });

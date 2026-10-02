@@ -95,10 +95,6 @@ export class QuizzesService {
     const topicWhere = type === "mock_exam" ? { unit: { subjectId } } : { id: topicId, unit: { subjectId } };
     const topics = await this.prisma.client.topic.findMany({ where: topicWhere, include: { ...TOPIC_GATE_INCLUDE, unit: { select: UNIT_GATE_SELECT } } });
     if (topics.length === 0) throw new BadRequestException("No topics found for this quiz.");
-    // 2026-10-03 Wave B runtime safety: same servability rule as Practice —
-    // a BLOCKED Topic contributes no Questions to any quiz type, including a
-    // whole-subject mock_exam.
-    const isServable = questionServabilityByTopic(topics as any);
 
     // Launch-speed lazy-generation path (2026-09-19): only for a single-
     // topic assessment/check — a mock_exam spans a whole subject's worth
@@ -122,6 +118,10 @@ export class QuizzesService {
         ...QUESTION_PROVENANCE_SELECT,
       },
     });
+    // 2026-10-03 Wave B runtime safety: same servability rule as Practice —
+    // a BLOCKED Topic contributes no Questions to any quiz type, including a
+    // whole-subject mock_exam, and no Topic mixes LEGACY with CURRENT.
+    const isServable = questionServabilityByTopic(topics as any, candidates);
     const eligible = candidates.filter(isServable).map(({ groundingSourceFingerprint: _s, groundingAssignmentFingerprint: _a, ...q }) => q);
 
     const questions = shuffleQuestionPool(eligible, rng).slice(0, requestedCount);
@@ -156,7 +156,13 @@ export class QuizzesService {
       include: { topic: { include: { ...TOPIC_GATE_INCLUDE, unit: { select: { subjectId: true, ...UNIT_GATE_SELECT } } } } },
     });
     // Never-servable Questions are treated as unresolved ids (see PracticeService.submitPractice).
-    const isServable = questionServabilityByTopic(loaded.map((q) => q.topic) as any);
+    // Topic-level precedence needs each Topic's FULL stored pool, not just
+    // the submitted ids (topic-content-provenance.util.ts).
+    const submittedTopicIds = [...new Set(loaded.map((q) => q.topicId))];
+    const topicPool = submittedTopicIds.length
+      ? await this.prisma.client.question.findMany({ where: { topicId: { in: submittedTopicIds }, isPlaceholder: false }, select: { topicId: true, isPlaceholder: true, ...QUESTION_PROVENANCE_SELECT } })
+      : [];
+    const isServable = questionServabilityByTopic(loaded.map((q) => q.topic) as any, topicPool);
     const questions = loaded.filter(isServable);
     const questionById = new Map(questions.map((q) => [q.id, q]));
 

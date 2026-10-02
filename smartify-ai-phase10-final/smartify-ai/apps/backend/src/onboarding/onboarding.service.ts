@@ -156,9 +156,6 @@ export class OnboardingService {
     // READY_CURRENT_NON_EMPTY + servable provenance) may appear — a BLOCKED
     // Topic contributes nothing. Filtered before the 10-question cut so a
     // withheld Question never shrinks the diagnostic.
-    const isServable = questionServabilityByTopic(
-      studentSubjects.flatMap((ss) => ss.subject.units.flatMap((u) => u.topics.map((t) => ({ ...t, unit: u })))) as any,
-    );
     const candidates = await this.prisma.client.question.findMany({
       where: { topicId: { in: topicIds }, isPlaceholder: false },
       orderBy: { createdAt: "asc" },
@@ -175,6 +172,10 @@ export class OnboardingService {
         topic: { select: { unit: { select: { subject: { select: { id: true, nameEn: true, nameAr: true } } } } } },
       },
     });
+    const isServable = questionServabilityByTopic(
+      studentSubjects.flatMap((ss) => ss.subject.units.flatMap((u) => u.topics.map((t) => ({ ...t, unit: u })))) as any,
+      candidates,
+    );
     const questions = candidates.filter(isServable).slice(0, 10);
 
     // Correct answers are intentionally omitted from this response.
@@ -201,7 +202,13 @@ export class OnboardingService {
       include: { topic: { include: { ...TOPIC_GATE_INCLUDE, unit: { include: { subject: true } } } } },
     });
     // Never-servable Questions are treated as unresolved ids (see PracticeService.submitPractice).
-    const isServable = questionServabilityByTopic(loaded.map((q) => q.topic) as any);
+    // Topic-level precedence needs each Topic's FULL stored pool, not just
+    // the submitted ids (topic-content-provenance.util.ts).
+    const submittedTopicIds = [...new Set(loaded.map((q) => q.topicId))];
+    const topicPool = submittedTopicIds.length
+      ? await this.prisma.client.question.findMany({ where: { topicId: { in: submittedTopicIds }, isPlaceholder: false }, select: { topicId: true, isPlaceholder: true, ...QUESTION_PROVENANCE_SELECT } })
+      : [];
+    const isServable = questionServabilityByTopic(loaded.map((q) => q.topic) as any, topicPool);
     const questions = loaded.filter(isServable);
     const questionById = new Map(questions.map((q) => [q.id, q]));
 

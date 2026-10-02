@@ -185,18 +185,37 @@ export function canServeTopicSteps(topic: GateTopic & TopicStepsProvenanceFields
   return isProvenanceServable(classifyContentProvenance(topicStepsProvenance(topic), gate.provenance), enforcementForUnit(topic.unit));
 }
 
+/** One stored Question as the servability rule sees it (provenance + owning Topic). */
+export type PoolQuestion = { topicId: string; isPlaceholder?: boolean } & StoredProvenance;
+
 /**
  * Builds a per-Topic predicate deciding whether one stored Question may be
  * served. Gate evaluated ONCE per Topic (not per Question). A Topic that is
  * not READY_CURRENT_NON_EMPTY serves no Questions at all.
+ *
+ * TOPIC-LEVEL PRECEDENCE (2026-10-03, pilot fix): a Topic's pool is never a
+ * mix of LEGACY and CURRENT Questions. `pool` must be EVERY stored
+ * non-placeholder Question of these Topics (not just a page of candidates or
+ * the ids a student submitted), because it decides per Topic whether any
+ * CURRENT Question exists:
+ *   - CURRENT  -> servable (TRANSITION and STRICT)
+ *   - LEGACY   -> servable only in TRANSITION AND only while the Topic has
+ *                 zero CURRENT Questions
+ *   - MISMATCH -> never servable
  */
-export function questionServabilityByTopic(topics: Array<GateTopic & { id: string }>): (question: { topicId: string } & StoredProvenance) => boolean {
-  const byTopic = new Map<string, { gate: TopicGroundingGate; enforcement: ProvenanceEnforcement }>();
-  for (const t of topics) byTopic.set(t.id, { gate: evaluateTopicGroundingGate(t), enforcement: enforcementForUnit(t.unit) });
+export function questionServabilityByTopic(topics: Array<GateTopic & { id: string }>, pool: PoolQuestion[]): (question: { topicId: string } & StoredProvenance) => boolean {
+  const byTopic = new Map<string, { gate: TopicGroundingGate; enforcement: ProvenanceEnforcement; hasCurrent: boolean }>();
+  for (const t of topics) byTopic.set(t.id, { gate: evaluateTopicGroundingGate(t), enforcement: enforcementForUnit(t.unit), hasCurrent: false });
+  for (const q of pool) {
+    const entry = byTopic.get(q.topicId);
+    if (entry && entry.gate.state === "READY" && !q.isPlaceholder && classifyContentProvenance(q, entry.gate.provenance) === "CURRENT") entry.hasCurrent = true;
+  }
   return (question) => {
     const entry = byTopic.get(question.topicId);
     if (!entry || entry.gate.state !== "READY") return false;
-    return isProvenanceServable(classifyContentProvenance(question, entry.gate.provenance), entry.enforcement);
+    const state = classifyContentProvenance(question, entry.gate.provenance);
+    if (state === "LEGACY" && entry.hasCurrent) return false;
+    return isProvenanceServable(state, entry.enforcement);
   };
 }
 

@@ -14,10 +14,16 @@
  *     stamps the new steps with their grounding provenance (the old ones are
  *     replaced in place — the same mechanism the old version of this script
  *     used).
- *   - The Question pool is topped up until it holds POOL_TARGET CURRENT
- *     Questions. Existing LEGACY Questions are NOT deleted here; once a Unit
- *     is switched to STRICT enforcement (enforce-content-provenance.ts) they
- *     simply stop being served.
+ *   - The Question pool is completed to POOL_TARGET CURRENT Questions:
+ *     only CURRENT Questions are counted, each batch requests (and the
+ *     generator persists) at most the missing number, and the count is
+ *     re-read from the database after every batch, for at most
+ *     MAX_QUESTION_BATCHES_PER_TOPIC batches. LEGACY Questions are never
+ *     copied, restamped or deleted; a Topic with any CURRENT Question no
+ *     longer serves its LEGACY ones (topic-content-provenance.util.ts).
+ *   - A Topic is COMPLETED only when, re-read after all writes, its steps are
+ *     CURRENT and it holds >= POOL_TARGET CURRENT Questions; otherwise it is
+ *     INCOMPLETE and the run stops there (exit code 1).
  *   - DRY RUN (default) only reports the per-Topic plan. --apply is required
  *     to call any provider or write anything. Stops at the first failure.
  *   - Explicit --topicIds only, at most MAX_TOPICS_PER_RUN per invocation —
@@ -34,6 +40,10 @@ import { classifyContentProvenance, evaluateTopicGroundingGate, topicStepsProven
 
 export const MAX_TOPICS_PER_RUN = 25;
 export const POOL_TARGET = 8;
+// Same bound as the generators' own MAX_ATTEMPTS (2): one batch plus one
+// completion batch per Topic. Each batch itself retries at most once inside
+// generateAutoQuestionBatch, so a Topic costs at most 4 Question provider calls.
+export const MAX_QUESTION_BATCHES_PER_TOPIC = 2;
 const ID = /^[a-z0-9]{20,40}$/;
 
 export interface RegenerationArgs { topicIds: string[]; apply: boolean; lesson: boolean; questions: boolean }
@@ -90,28 +100,60 @@ export interface RegenerationDeps {
   generateQuestions(topicId: string, count: number): Promise<number>;
 }
 
-type TopicResult = TopicPlan & { lessonRegenerated?: boolean; questionsPublished?: number };
+type TopicResult = TopicPlan & {
+  status: "PLANNED" | "COMPLETED" | "INCOMPLETE";
+  lessonRegenerated?: boolean;
+  questionBatches?: number;
+  questionsPublished?: number;
+  batchErrors?: string[];
+  final?: { steps: TopicPlan["steps"]; currentQuestions: number; gate: string };
+};
 
-export async function runRegeneration(args: RegenerationArgs, deps: RegenerationDeps): Promise<{ mode: "APPLY" | "DRY_RUN"; results: TopicResult[] }> {
+async function reload(deps: RegenerationDeps, id: string): Promise<RegenerationTopic> {
+  const topic = await deps.loadTopic(id);
+  if (!topic) throw new Error(`Topic ${id} not found`);
+  return topic;
+}
+
+export async function runRegeneration(
+  args: RegenerationArgs,
+  deps: RegenerationDeps,
+): Promise<{ mode: "APPLY" | "DRY_RUN"; results: TopicResult[]; stoppedOnFailure: boolean }> {
   const results: TopicResult[] = [];
   for (const id of args.topicIds) {
-    const topic = await deps.loadTopic(id);
-    if (!topic) throw new Error(`Topic ${id} not found`);
+    const topic = await reload(deps, id);
     const plan = planTopic(topic, args);
     if (plan.lessonAction === "REFUSE") throw new Error(`Topic ${id} is not READY_CURRENT_NON_EMPTY (${plan.gate}); nothing generated`);
     if (!args.apply) {
-      results.push(plan);
+      results.push({ ...plan, status: "PLANNED" });
       continue;
     }
-    const result: TopicResult = { ...plan };
+    const result: TopicResult = { ...plan, status: "INCOMPLETE", questionBatches: 0, questionsPublished: 0 };
     if (plan.lessonAction === "REGENERATE") {
       await deps.regenerateLesson(topic);
       result.lessonRegenerated = true;
     }
-    if (plan.questionsToGenerate > 0) result.questionsPublished = await deps.generateQuestions(id, plan.questionsToGenerate);
+    if (args.questions) {
+      // CURRENT is always re-read from the database, never inferred from what
+      // a batch claims to have published.
+      let current = planTopic(await reload(deps, id), args).questions.CURRENT;
+      while (current < POOL_TARGET && result.questionBatches! < MAX_QUESTION_BATCHES_PER_TOPIC) {
+        result.questionBatches!++;
+        try {
+          result.questionsPublished! += await deps.generateQuestions(id, POOL_TARGET - current);
+        } catch (err) {
+          (result.batchErrors ??= []).push(err instanceof Error ? err.message : String(err));
+        }
+        current = planTopic(await reload(deps, id), args).questions.CURRENT;
+      }
+    }
+    const final = planTopic(await reload(deps, id), args);
+    result.final = { steps: final.steps, currentQuestions: final.questions.CURRENT, gate: final.gate };
+    result.status = final.gate === "READY" && final.steps === "CURRENT" && final.questions.CURRENT >= POOL_TARGET ? "COMPLETED" : "INCOMPLETE";
     results.push(result);
+    if (result.status !== "COMPLETED") return { mode: "APPLY", results, stoppedOnFailure: true };
   }
-  return { mode: args.apply ? "APPLY" : "DRY_RUN", results };
+  return { mode: args.apply ? "APPLY" : "DRY_RUN", results, stoppedOnFailure: false };
 }
 
 async function main() {
@@ -156,6 +198,7 @@ async function main() {
       },
     });
     console.log(JSON.stringify(out, null, 2));
+    if (out.stoppedOnFailure) process.exitCode = 1;
   } finally {
     await app.close();
   }
@@ -163,7 +206,7 @@ async function main() {
 
 if (require.main === module) {
   main()
-    .then(() => process.exit(0))
+    .then(() => process.exit(process.exitCode ?? 0))
     .catch((err) => {
       console.error("REGENERATION FAILED:", err instanceof Error ? err.message : err);
       process.exit(1);

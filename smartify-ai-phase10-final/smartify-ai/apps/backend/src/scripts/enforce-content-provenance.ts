@@ -8,11 +8,12 @@
  * STRICT (contentProvenanceEnforcedAt set): only content whose stored
  * provenance equals the Topic's current grounding is served.
  *
- * Enabling STRICT is refused unless, for every READY_CURRENT_NON_EMPTY Topic
- * in the Unit, (a) existing teachingSteps are CURRENT and (b) a Topic that
- * still has LEGACY/MISMATCHED Questions already holds a full CURRENT pool — so
- * switching can never silently empty a lesson or a practice pool. BLOCKED
- * Topics are ignored: runtime never serves them in either mode.
+ * Enabling STRICT is refused unless EVERY READY_CURRENT_NON_EMPTY Topic in the
+ * Unit (a) has CURRENT teachingSteps and (b) holds at least POOL_TARGET
+ * CURRENT Questions — so after switching no student request needs a lazy
+ * lesson generation or a Question top-up, and no lesson or practice pool is
+ * silently emptied. BLOCKED Topics are ignored: runtime never serves them in
+ * either mode.
  *
  * DRY RUN (default) only reports. --apply writes contentProvenanceEnforcedAt
  * with a compare-and-set on the current value. --disable reverts a Unit to
@@ -46,10 +47,9 @@ export function strictReadinessBlockers(topics: EnforcementTopic[]): string[] {
   for (const t of topics) {
     const gate = evaluateTopicGroundingGate(t);
     if (gate.state !== "READY") continue;
-    if (t.teachingStepsJson && classifyContentProvenance(topicStepsProvenance(t), gate.provenance) !== "CURRENT") blockers.push(`${t.id}: teachingSteps not CURRENT`);
-    const states = t.questions.filter((q) => !q.isPlaceholder).map((q) => classifyContentProvenance(q, gate.provenance));
-    const current = states.filter((s) => s === "CURRENT").length;
-    if (states.length > current && current < POOL_TARGET) blockers.push(`${t.id}: ${current}/${POOL_TARGET} CURRENT Questions alongside ${states.length - current} non-current`);
+    if (!t.teachingStepsJson || classifyContentProvenance(topicStepsProvenance(t), gate.provenance) !== "CURRENT") blockers.push(`${t.id}: teachingSteps not CURRENT`);
+    const current = t.questions.filter((q) => !q.isPlaceholder && classifyContentProvenance(q, gate.provenance) === "CURRENT").length;
+    if (current < POOL_TARGET) blockers.push(`${t.id}: only ${current}/${POOL_TARGET} CURRENT Questions`);
   }
   return blockers;
 }

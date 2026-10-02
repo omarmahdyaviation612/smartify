@@ -89,11 +89,6 @@ export class PracticeService {
     const topicWhere = topicId ? { id: topicId, unit: { subjectId } } : { unit: { subjectId } };
     const topics = await this.prisma.client.topic.findMany({ where: topicWhere, include: { ...TOPIC_GATE_INCLUDE, unit: { select: UNIT_GATE_SELECT } } });
     if (topics.length === 0) throw new BadRequestException("No topics found for this selection.");
-    // 2026-10-03 Wave B runtime safety: only Questions whose Topic is
-    // READY_CURRENT_NON_EMPTY and whose provenance is servable are ever
-    // returned — a BLOCKED Topic yields an empty pool (the existing "nothing
-    // to practice yet" response), never its old Questions.
-    const isServable = questionServabilityByTopic(topics as any);
 
     // Launch-speed lazy-generation path (2026-09-19): only for a single
     // requested topic — an undifferentiated "any topic in this subject"
@@ -130,6 +125,12 @@ export class PracticeService {
         ...QUESTION_PROVENANCE_SELECT,
       },
     });
+    // 2026-10-03 Wave B runtime safety: only Questions whose Topic is
+    // READY_CURRENT_NON_EMPTY and whose provenance is servable are ever
+    // returned — a BLOCKED Topic yields an empty pool (the existing "nothing
+    // to practice yet" response), never its old Questions; a Topic with any
+    // CURRENT Question never mixes in its LEGACY ones.
+    const isServable = questionServabilityByTopic(topics as any, candidateQuestions);
     const allQuestions = candidateQuestions.filter(isServable).map(({ groundingSourceFingerprint: _s, groundingAssignmentFingerprint: _a, ...q }) => q);
 
     // Weighted random sample without replacement, honoring difficulty weights loosely.
@@ -175,7 +176,13 @@ export class PracticeService {
     // READY_CURRENT_NON_EMPTY, or its provenance is not servable) is treated
     // exactly like an unresolved questionId: skipped, never graded, and its
     // correct answer/explanation never returned.
-    const isServable = questionServabilityByTopic(loaded.map((q) => q.topic) as any);
+    // Topic-level precedence needs each Topic's FULL stored pool, not just
+    // the submitted ids (topic-content-provenance.util.ts).
+    const submittedTopicIds = [...new Set(loaded.map((q) => q.topicId))];
+    const topicPool = submittedTopicIds.length
+      ? await this.prisma.client.question.findMany({ where: { topicId: { in: submittedTopicIds }, isPlaceholder: false }, select: { topicId: true, isPlaceholder: true, ...QUESTION_PROVENANCE_SELECT } })
+      : [];
+    const isServable = questionServabilityByTopic(loaded.map((q) => q.topic) as any, topicPool);
     const questions = loaded.filter(isServable);
     const questionById = new Map(questions.map((q) => [q.id, q]));
 

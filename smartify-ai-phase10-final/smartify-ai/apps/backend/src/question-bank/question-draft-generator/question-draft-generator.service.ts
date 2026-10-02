@@ -413,6 +413,10 @@ export class QuestionDraftGeneratorService {
       // At least one usable question is enough to persist — a partially
       // invalid batch still adds real value to the pool, unlike a single
       // lesson draft where "mostly right" isn't a coherent thing to keep.
+      // 2026-10-03: never persist MORE than requested — a model that returns
+      // extra valid items cannot push a Topic's CURRENT pool past its target
+      // (the extras' tokens are still logged and reconciled like any call).
+      validDrafts.splice(count);
       if (validDrafts.length > 0) {
         // §10: grounding-consistency check on the accepted subset as a
         // whole. Feeds the SAME retry loop as structural validation.
@@ -520,9 +524,8 @@ export class QuestionDraftGeneratorService {
       this.logger.log(`QUESTION_POOL_TOPUP_SKIPPED topicId=${topicId} reason=grounding-unavailable`);
       return;
     }
-    const servable = questionServabilityByTopic([topic as any]);
-    const pool = await this.prisma.client.question.findMany({ where: { topicId, isPlaceholder: false }, select: { topicId: true, ...QUESTION_PROVENANCE_SELECT } });
-    const existing = pool.filter(servable).length;
+    const pool = await this.prisma.client.question.findMany({ where: { topicId, isPlaceholder: false }, select: { topicId: true, isPlaceholder: true, ...QUESTION_PROVENANCE_SELECT } });
+    const existing = pool.filter(questionServabilityByTopic([topic as any], pool)).length;
     if (existing >= targetCount) return;
 
     try {
