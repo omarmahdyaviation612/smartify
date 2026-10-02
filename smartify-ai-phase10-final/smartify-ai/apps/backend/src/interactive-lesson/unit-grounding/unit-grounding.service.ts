@@ -37,7 +37,7 @@ const MAX_ATTEMPTS = 2; // one initial attempt + one corrective retry — same b
 const MAX_RETRYABLE_ATTEMPTS = 5;
 const MAX_PAGES_PER_RENDER = 10; // caps vision-token cost per call; a larger Unit range runs multiple sequential calls, merged into one GroundingNotes
 const MAX_TPM_TRANSPORT_ATTEMPTS = 2;
-const MAX_UNIT_PAGE_COUNT = 40; // a sane ceiling on a single Unit's total page range — protects against an accidentally huge manifest range being silently rendered/processed in full
+export const MAX_UNIT_PAGE_COUNT = 40; // a sane ceiling on a single Unit's total page range — protects against an accidentally huge manifest range being silently rendered/processed in full
 
 const CURRENT_GROUNDING_VERSION = 1; // bump only when the extraction schema/methodology changes in a way that makes old groundingNotesJson stale
 // Page-provenance hotfix (2026-09-25): bumped v1 -> v2 because the

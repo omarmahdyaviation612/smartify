@@ -25,8 +25,8 @@ import * as fs from "fs";
 import { validatePlan, type RepairPlan } from "./repair-unit-page-offset";
 import { approvedTarget, validateReplacement, type ApprovedTarget } from "./reground-unit";
 
-export type UnitClass = "ALREADY_COMPLETED" | "READY_TO_REGROUND" | "FAILED_PREVIOUSLY" | "PARTIAL_ASSIGNMENT" | "DRIFTED";
-export type UnitOutcome = "COMPLETED" | "SKIPPED_ALREADY_COMPLETED" | "SKIPPED_FAILED_PREVIOUSLY" | "FAILED_BEFORE_REPLACEMENT" | "FAILED_GUARDED_REPLACEMENT" | "GROUNDING_REPLACED_ASSIGNMENT_FAILED";
+export type UnitClass = "ALREADY_COMPLETED" | "READY_TO_REGROUND" | "FAILED_PREVIOUSLY" | "PAGE_LIMIT" | "PARTIAL_ASSIGNMENT" | "DRIFTED";
+export type UnitOutcome = "COMPLETED" | "SKIPPED_ALREADY_COMPLETED" | "SKIPPED_FAILED_PREVIOUSLY" | "SKIPPED_PAGE_LIMIT" | "FAILED_BEFORE_REPLACEMENT" | "FAILED_GUARDED_REPLACEMENT" | "GROUNDING_REPLACED_ASSIGNMENT_FAILED";
 
 export interface LiveTopic { id: string; nameEn: string; status: string | null; fingerprint: string | null }
 export interface LiveUnit { id: string; sourceFileOverride: string | null; subjectSourceFile: string | null; sourcePageStart: number | null; sourcePageEnd: number | null; groundingSourceFingerprint: string | null; hasNotes: boolean; topics: LiveTopic[] }
@@ -64,6 +64,12 @@ export function parseArgs(argv: string[]) {
   return { plan: get("plan", true)!, subjectIds, priorReport: get("priorReport", false), report: get("report", false), apply: argv.includes("--apply") };
 }
 
+/** Orchestration-level page-limit classification: an otherwise eligible Unit whose corrected range exceeds the extraction limit is a known, expected skip (never rendered, never sent, never written), not a failure. */
+export function classifyWithPageLimit(t: ApprovedTarget, live: LiveUnit | null, prior: Map<string, UnitOutcome>, maxUnitPages: number): UnitClass {
+  const cls = classify(t, live, prior);
+  return cls === "READY_TO_REGROUND" && t.newEnd - t.newStart + 1 > maxUnitPages ? "PAGE_LIMIT" : cls;
+}
+
 export function classify(t: ApprovedTarget, live: LiveUnit | null, prior: Map<string, UnitOutcome>): UnitClass {
   const p = prior.get(t.unitId);
   if (p === "FAILED_BEFORE_REPLACEMENT" || p === "FAILED_GUARDED_REPLACEMENT" || p === "GROUNDING_REPLACED_ASSIGNMENT_FAILED") return "FAILED_PREVIOUSLY";
@@ -91,13 +97,14 @@ export function comparePageRanges(before: Record<string, string>, after: Record<
 const emptyAcct = (): Accounting => ({ usageRows: 0, byFeature: {}, inputTokens: 0, outputTokens: 0, costUsd: 0, reservations: {}, reconciledUsd: 0 });
 const isBudgetRefusal = (e: unknown) => /budget reservation refused|Budget unavailable|daily_limit|misconfigured/i.test(e instanceof Error ? e.message : String(e));
 
-export async function runWave(options: { plan: RepairPlan; subjectIds: string[]; apply: boolean; prior: Map<string, UnitOutcome> }, deps: WaveDeps): Promise<WaveReport> {
+export async function runWave(options: { plan: RepairPlan; subjectIds: string[]; apply: boolean; prior: Map<string, UnitOutcome>; maxUnitPages: number }, deps: WaveDeps): Promise<WaveReport> {
+  if (!Number.isSafeInteger(options.maxUnitPages) || options.maxUnitPages < 1) throw new Error("maxUnitPages must be a positive integer");
   const books = options.subjectIds.map((id) => { const b = options.plan.books.find((x) => x.subjectId === id); if (!b) throw new Error(`book ${id} is not in the reviewed Wave B plan`); return b; });
   const report: WaveReport = { mode: options.apply ? "APPLY" : "DRY_RUN", status: "RUNNING", classification: [], units: [], books: [] };
   const stop = (reason: string) => { report.status = "STOPPED"; report.stopReason = reason; deps.writeReport(report); return report; };
   const targets = books.map((b) => ({ book: b, units: [...b.expectedUnits].sort((x, y) => x.order - y.order).map((u) => approvedTarget(options.plan, u.unitId)) }));
   // Full classification before any work.
-  for (const { units } of targets) for (const t of units) report.classification.push({ unitId: t.unitId, label: t.label, classification: classify(t, await deps.loadUnit(t.unitId), options.prior) });
+  for (const { units } of targets) for (const t of units) report.classification.push({ unitId: t.unitId, label: t.label, classification: classifyWithPageLimit(t, await deps.loadUnit(t.unitId), options.prior, options.maxUnitPages) });
   const bad = report.classification.filter((c) => c.classification === "DRIFTED" || c.classification === "PARTIAL_ASSIGNMENT");
   if (bad.length) return stop(`pre-classification found ${bad.map((b) => `${b.label}=${b.classification}`).join(", ")}`);
   if (!options.apply) { report.status = "COMPLETED"; deps.writeReport(report); return report; }
@@ -113,9 +120,10 @@ export async function runWave(options: { plan: RepairPlan; subjectIds: string[];
     const bookStart = deps.now(); const before = await deps.snapshot(); const processed = new Set<string>(); const processedTopics = new Set<string>();
     let completed = 0, failed = 0;
     for (const t of units) {
-      const live = await deps.loadUnit(t.unitId); const cls = classify(t, live, options.prior);
+      const live = await deps.loadUnit(t.unitId); const cls = classifyWithPageLimit(t, live, options.prior, options.maxUnitPages);
       const base: UnitRecord = { unitId: t.unitId, label: t.label, bookId: book.subjectId, classification: cls, outcome: "COMPLETED", oldFingerprint: t.oldFingerprint, newFingerprint: t.newFingerprint };
       if (cls === "ALREADY_COMPLETED") { report.units.push({ ...base, outcome: "SKIPPED_ALREADY_COMPLETED" }); continue; }
+      if (cls === "PAGE_LIMIT") { report.units.push({ ...base, outcome: "SKIPPED_PAGE_LIMIT", reason: `corrected range ${t.newStart}-${t.newEnd} is ${t.newEnd - t.newStart + 1} pages > ${options.maxUnitPages}` }); continue; }
       if (cls === "FAILED_PREVIOUSLY") { report.units.push({ ...base, outcome: "SKIPPED_FAILED_PREVIOUSLY" }); continue; }
       if (cls !== "READY_TO_REGROUND") { report.units.push({ ...base, outcome: "FAILED_BEFORE_REPLACEMENT", reason: cls }); return stop(`${t.label} classified ${cls} immediately before processing`); }
       const unitStart = deps.now();
@@ -187,7 +195,7 @@ async function main() {
   const { NestFactory } = await import("@nestjs/core");
   const { AppModule } = await import("../app.module");
   const { PrismaService } = await import("../prisma/prisma.service");
-  const { UnitGroundingService } = await import("../interactive-lesson/unit-grounding/unit-grounding.service");
+  const { UnitGroundingService, MAX_UNIT_PAGE_COUNT } = await import("../interactive-lesson/unit-grounding/unit-grounding.service");
   const { CONTENT_AUTHORING_ACTOR_ID } = await import("../ai/content-authoring-actor.const");
   const { TopicGroundingAssignmentService } = await import("../ai/context/topic-grounding-assignment.service");
   const { TopicGroundingMapperService } = await import("../ai/context/topic-grounding-mapper.service");
@@ -255,7 +263,7 @@ async function main() {
       now: () => new Date(),
       writeReport: (r) => { if (args.report) fs.writeFileSync(args.report, JSON.stringify(r, null, 1)); },
     };
-    const report = await runWave({ plan, subjectIds: args.subjectIds, apply: args.apply, prior: loadPrior(args.priorReport) }, deps);
+    const report = await runWave({ plan, subjectIds: args.subjectIds, apply: args.apply, prior: loadPrior(args.priorReport), maxUnitPages: MAX_UNIT_PAGE_COUNT }, deps);
     console.log(JSON.stringify({ status: report.status, stopReason: report.stopReason, units: report.units.length, books: report.books.length }));
     if (report.status !== "COMPLETED") process.exitCode = 3;
   } finally { await app.close(); }

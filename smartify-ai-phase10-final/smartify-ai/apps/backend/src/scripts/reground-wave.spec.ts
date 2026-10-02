@@ -1,4 +1,4 @@
-import { classify, comparePageRanges, parseArgs, runWave, type LiveUnit, type Snapshot, type UnitOutcome } from "./reground-wave";
+import { classify, classifyWithPageLimit, comparePageRanges, parseArgs, runWave, type LiveUnit, type Snapshot, type UnitOutcome } from "./reground-wave";
 import { approvedTarget } from "./reground-unit";
 import type { RepairPlan } from "./repair-unit-page-offset";
 
@@ -28,7 +28,7 @@ function harness(initial: Record<string, "old" | "new">, opts: { genFail?: Recor
   };
   return { deps, state, reports };
 }
-const run = (h: any, apply = true, prior = new Map<string, UnitOutcome>()) => runWave({ plan, subjectIds: [BOOK], apply, prior }, h.deps);
+const run = (h: any, apply = true, prior = new Map<string, UnitOutcome>(), maxUnitPages = 1000) => runWave({ plan, subjectIds: [BOOK], apply, prior, maxUnitPages }, h.deps);
 
 describe("reground-wave classification", () => {
   const live = (t: any, fp: string, topicFp = fp): LiveUnit => ({ id: t.unitId, sourceFileOverride: null, subjectSourceFile: KEY, sourcePageStart: t.newStart, sourcePageEnd: t.newEnd, groundingSourceFingerprint: fp, hasNotes: true, topics: [{ id: "x", nameEn: "x", status: "READY", fingerprint: topicFp }] });
@@ -145,4 +145,43 @@ describe("accounting baseline gap gate", () => {
   it("dry-run does not measure or require an accounting baseline", async () => {
     const h = harness({}); const r = await run(h, false); expect(r.accountingBaseline).toBeUndefined(); expect(h.deps.platformGap).not.toHaveBeenCalled();
   });
+});
+
+describe("SKIPPED_PAGE_LIMIT (orchestration-level, extraction limit untouched)", () => {
+  const sized = (pages: number[]): RepairPlan => { let start = 1; const units = pages.map((n, i) => { const u = { unitId: `unitsized${String(i).padStart(19, "x")}`, order: i + 1, persistedStart: start, persistedEnd: start + n - 1 }; start += n; return u; }); return { version: 1, excluded: [], books: [{ ...plan.books[0], offset: 1, physicalPageCount: 500, finalUnitContentEnd: start, expectedUnits: units }] }; };
+  const p = sized([40, 41, 48, 5]); const tg = p.books[0].expectedUnits.map((u) => approvedTarget(p, u.unitId));
+  const liveOld = (t: any): LiveUnit => ({ id: t.unitId, sourceFileOverride: null, subjectSourceFile: KEY, sourcePageStart: t.newStart, sourcePageEnd: t.newEnd, groundingSourceFingerprint: t.oldFingerprint, hasNotes: true, topics: [] });
+  it("40 pages is eligible; 41 and 48 pages are PAGE_LIMIT", () => {
+    expect(tg.slice(0, 3).map((t) => t.newEnd - t.newStart + 1)).toEqual([40, 41, 48]);
+    expect(tg.slice(0, 3).map((t) => classifyWithPageLimit(t, liveOld(t), new Map(), 40))).toEqual(["READY_TO_REGROUND", "PAGE_LIMIT", "PAGE_LIMIT"]);
+  });
+  it("never applies to completed, failed, or drifted Units (only to otherwise-eligible ones)", () => {
+    expect(classifyWithPageLimit(tg[1], { ...liveOld(tg[1]), groundingSourceFingerprint: tg[1].newFingerprint }, new Map(), 40)).toBe("ALREADY_COMPLETED");
+    expect(classifyWithPageLimit(tg[1], liveOld(tg[1]), new Map([[tg[1].unitId, "FAILED_BEFORE_REPLACEMENT" as UnitOutcome]]), 40)).toBe("FAILED_PREVIOUSLY");
+    expect(classifyWithPageLimit(tg[1], { ...liveOld(tg[1]), groundingSourceFingerprint: "x" }, new Map(), 40)).toBe("DRIFTED");
+  });
+  // Harness plan: U1 14 pages, U2 20 pages, U3 77 pages.
+  it("skips an oversized Unit with zero generation, provider calls, writes or rebuild, preserving old grounding", async () => {
+    const h = harness({}); const r = await run(h, true, new Map(), 20);
+    expect(r.status).toBe("COMPLETED");
+    expect(r.units.map((u) => u.outcome)).toEqual(["COMPLETED", "COMPLETED", "SKIPPED_PAGE_LIMIT"]);
+    expect(h.deps.generate).not.toHaveBeenCalledWith(U[2]); expect(h.deps.generate).toHaveBeenCalledTimes(2);
+    expect(h.deps.replace.mock.calls.map((c: any) => c[0].unitId)).not.toContain(U[2]);
+    expect(h.deps.rebuildAssignments).toHaveBeenCalledTimes(2);
+    expect(h.state[U[2]].groundingSourceFingerprint).toBe(T[2].oldFingerprint);
+    expect(r.classification.map((c) => c.classification)).toEqual(["READY_TO_REGROUND", "READY_TO_REGROUND", "PAGE_LIMIT"]);
+  });
+  it("page-limit skips never count toward the repeated-failure stop", async () => {
+    const h = harness({}, { genFail: { [U[0]]: "Grounding extraction failed validation" } }); const r = await run(h, true, new Map(), 20);
+    expect(r.status).toBe("COMPLETED"); expect(r.units.map((u) => u.outcome)).toEqual(["FAILED_BEFORE_REPLACEMENT", "COMPLETED", "SKIPPED_PAGE_LIMIT"]);
+  });
+  it("real unexpected failures still count normally and stop on repetition", async () => {
+    const h = harness({}, { genFail: { [U[0]]: "boom one", [U[1]]: "boom two" } }); const r = await run(h, true, new Map(), 20);
+    expect(r.status).toBe("STOPPED"); expect(r.stopReason).toMatch(/repeated failure \(2\)/);
+  });
+  it("a prior SKIPPED_PAGE_LIMIT resumes as a skip, not processing", async () => {
+    const h = harness({ [U[0]]: "new", [U[1]]: "new" }); const r = await run(h, true, new Map([[U[2], "SKIPPED_PAGE_LIMIT" as UnitOutcome]]), 20);
+    expect(r.units.map((u) => u.outcome)).toEqual(["SKIPPED_ALREADY_COMPLETED", "SKIPPED_ALREADY_COMPLETED", "SKIPPED_PAGE_LIMIT"]); expect(h.deps.generate).not.toHaveBeenCalled();
+  });
+  it("rejects an invalid limit", async () => { await expect(run(harness({}), true, new Map(), 0)).rejects.toThrow(/maxUnitPages/); });
 });
