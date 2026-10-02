@@ -25,3 +25,52 @@ describe("GroundingVisionExecutionService image-aware reservation",()=>{
  it("reconciles with actual usage, not the image estimate",async()=>{const x=h({generate:async()=>({content:"{}",inputTokens:884233,outputTokens:5})});const c=await x.s.createAccountingContext({inputText:"p",estimatedInputTokens:1200,maxOutputTokens:600,images:Array.from({length:24},page)});await x.s.execute({systemPrompt:"p",messages:[],feature:"TOPIC_SOURCE_EVIDENCE",accountingContext:c});await x.s.finalizeSuccess(c);expect(x.usage.reconcileBudget).toHaveBeenCalledWith("r1",884233*rate+5*outRate);expect(x.provider.generate).toHaveBeenCalledTimes(1);});
  it("still releases the image reservation exactly once on failure",async()=>{const x=h({generate:async()=>{throw new Error("provider down");}});const c=await x.s.createAccountingContext({inputText:"p",images:[page(),page()]});await expect(x.s.execute({systemPrompt:"p",messages:[],feature:"f",accountingContext:c})).rejects.toThrow();await x.s.finalizeFailure(c);await x.s.finalizeFailure(c);expect(x.usage.releaseBudget).toHaveBeenCalledTimes(1);expect(x.usage.releaseBudget).toHaveBeenCalledWith("r1");expect(x.usage.reconcileBudget).not.toHaveBeenCalled();});
 });
+
+describe("GroundingVisionExecutionService failure-path accounting", () => {
+ function h(generate: any, reconcile: any = jest.fn().mockResolvedValue(undefined)) {
+  const provider = { generate: jest.fn(generate) };
+  const prisma: any = { client: { aIUsage: { create: jest.fn().mockResolvedValue(undefined) } } };
+  const providers: any = { getActiveProvider: jest.fn().mockResolvedValue({ provider, providerKey: "openai", model: "gpt-4o-mini" }), getCostRates: jest.fn().mockResolvedValue({ costPerInputToken: 0.001, costPerOutputToken: 0.002 }) };
+  const usage: any = { estimateMaxChatCostUsd: jest.fn().mockResolvedValue(0.5), reserveBudget: jest.fn().mockResolvedValue({ ok: true, reservationId: "r1" }), reconcileBudget: reconcile, releaseBudget: jest.fn().mockResolvedValue(undefined) };
+  return { s: new GroundingVisionExecutionService(prisma, providers, usage), provider, usage, prisma };
+ }
+ const call = (x: any, c: any) => x.s.execute({ systemPrompt: "p", messages: [], feature: "grounding_extraction", accountingContext: c });
+ it("1: provider + validation success reconciles actual spend exactly once", async () => {
+  const x = h(async () => ({ content: "{}", inputTokens: 100, outputTokens: 10 }));
+  const c = await x.s.createAccountingContext({ inputText: "p" }); await call(x, c); await x.s.finalizeSuccess(c); await x.s.finalizeSuccess(c);
+  expect(x.usage.reconcileBudget).toHaveBeenCalledTimes(1); expect(x.usage.reconcileBudget).toHaveBeenCalledWith("r1", 100 * 0.001 + 10 * 0.002); expect(x.usage.releaseBudget).not.toHaveBeenCalled();
+ });
+ it("2: validation failure then retry success commits both attempts' actual spend, once each", async () => {
+  const x = h(async () => ({ content: "{}", inputTokens: 100, outputTokens: 10 }));
+  const c = await x.s.createAccountingContext({ inputText: "p" }); await call(x, c); await call(x, c); await x.s.finalizeSuccess(c);
+  expect(x.provider.generate).toHaveBeenCalledTimes(2); expect(x.prisma.client.aIUsage.create).toHaveBeenCalledTimes(2);
+  expect(x.usage.reconcileBudget).toHaveBeenCalledTimes(1); expect(x.usage.reconcileBudget.mock.calls[0][1]).toBeCloseTo(2 * (0.1 + 0.02), 12);
+ });
+ it("3: every allowed attempt fails validation -> all actual spend committed, nothing released, reservation closed", async () => {
+  const x = h(async () => ({ content: "not valid", inputTokens: 200, outputTokens: 5 }));
+  const c = await x.s.createAccountingContext({ inputText: "p" }); await call(x, c); await call(x, c); await x.s.finalizeFailure(c); await x.s.finalizeFailure(c);
+  expect(x.usage.reconcileBudget).toHaveBeenCalledTimes(1); expect(x.usage.reconcileBudget.mock.calls[0][1]).toBeCloseTo(2 * (0.2 + 0.01), 12);
+  expect(x.usage.releaseBudget).not.toHaveBeenCalled();
+ });
+ it("4: failure before any provider execution releases the reservation and commits no spend", async () => {
+  const x = h(async () => ({ content: "{}", inputTokens: 1, outputTokens: 1 }));
+  const c = await x.s.createAccountingContext({ inputText: "p" }); await x.s.finalizeFailure(c);
+  expect(x.usage.releaseBudget).toHaveBeenCalledWith("r1"); expect(x.usage.reconcileBudget).not.toHaveBeenCalled(); expect(x.provider.generate).not.toHaveBeenCalled();
+ });
+ it("5: a provider call that fails without billable usage keeps the existing release behavior", async () => {
+  const x = h(async () => { throw Object.assign(new Error("boom"), { status: 500 }); });
+  const c = await x.s.createAccountingContext({ inputText: "p" }); await expect(call(x, c)).rejects.toThrow("boom"); await x.s.finalizeFailure(c);
+  expect(x.usage.releaseBudget).toHaveBeenCalledTimes(1); expect(x.usage.reconcileBudget).not.toHaveBeenCalled(); expect(x.prisma.client.aIUsage.create).not.toHaveBeenCalled();
+ });
+ it("5b: an earlier successful attempt followed by a failing provider call still commits the earlier spend", async () => {
+  let n = 0; const x = h(async () => { if (n++ === 0) return { content: "bad", inputTokens: 100, outputTokens: 10 }; throw Object.assign(new Error("429"), { status: 429 }); });
+  const c = await x.s.createAccountingContext({ inputText: "p" }); await call(x, c); await expect(call(x, c)).rejects.toThrow("429"); await x.s.finalizeFailure(c);
+  expect(x.usage.reconcileBudget).toHaveBeenCalledWith("r1", 0.1 + 0.02); expect(x.usage.releaseBudget).not.toHaveBeenCalled();
+ });
+ it("6: reconciliation failure fails safely — the billable reservation is never silently released", async () => {
+  const x = h(async () => ({ content: "bad", inputTokens: 100, outputTokens: 10 }), jest.fn().mockRejectedValue(new Error("db down")));
+  const c = await x.s.createAccountingContext({ inputText: "p" }); await call(x, c);
+  await expect(x.s.finalizeFailure(c)).resolves.toBeUndefined();
+  expect(x.usage.reconcileBudget).toHaveBeenCalledTimes(1); expect(x.usage.releaseBudget).not.toHaveBeenCalled(); expect((c as any).reconcileFailed).toBe(true);
+ });
+});

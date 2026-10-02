@@ -22,6 +22,7 @@ function harness(initial: Record<string, "old" | "new">, opts: { genFail?: Recor
     snapshot: jest.fn(async () => snap()),
     accountingSince: jest.fn(async () => ({ usageRows: 2, byFeature: { grounding_extraction: 2 }, inputTokens: 10, outputTokens: 1, costUsd: 0.02, reservations: { RECONCILED: 2 }, reconciledUsd: 0.02 })),
     health: jest.fn(async () => ({ live: 200, ready: 200 })),
+    platformGap: jest.fn(async () => ({ aiUsageUsd: 1.41992535, committedUsd: 1.39702815, gapUsd: 0.0228972 })),
     now: () => new Date("2026-10-02T00:00:00Z"),
     writeReport: (r: any) => reports.push(JSON.parse(JSON.stringify(r))),
   };
@@ -124,5 +125,24 @@ describe("pageRangesUnchanged checkpoint (deterministic, keyed by Unit ID)", () 
     const r = await run(ok); expect(r.status).toBe("COMPLETED"); expect(r.books[0].gates.pageRangesUnchanged).toBe(true);
     const bad = harness({}); let m = 0; bad.deps.snapshot.mockImplementation(async () => snap({ ranges: m++ === 0 ? pre : { ...reordered, unitaaaaaaaaaaaaaaaaaaaaaa1: "10-24" } }));
     const r2 = await run(bad); expect(r2.status).toBe("STOPPED"); expect(r2.stopReason).toMatch(/pageRangesUnchanged/); expect(r2.books[0].problems).toContain("unit unitaaaaaaaaaaaaaaaaaaaaaa1 range 10-23 -> 10-24");
+  });
+});
+
+describe("accounting baseline gap gate", () => {
+  it("records the pre-existing gap and passes while it stays exactly unchanged (historical gap isolated, not forgiven)", async () => {
+    const h = harness({}); const r = await run(h);
+    expect(r.status).toBe("COMPLETED"); expect(r.accountingBaseline).toMatchObject({ gapUsd: 0.0228972 });
+    expect(r.books[0].gates.accountingBaselineGapUnchanged).toBe(true); expect(r.books[0].gates.accountingReconciled).toBe(true);
+  });
+  it("stops when the run creates a NEW gap on top of the baseline", async () => {
+    const h = harness({}); let n = 0; h.deps.platformGap.mockImplementation(async () => (n++ === 0 ? { aiUsageUsd: 1, committedUsd: 0.98, gapUsd: 0.02 } : { aiUsageUsd: 1.5, committedUsd: 1.45, gapUsd: 0.05 }));
+    const r = await run(h); expect(r.status).toBe("STOPPED"); expect(r.stopReason).toMatch(/accountingBaselineGapUnchanged/);
+  });
+  it("also stops when the gap shrinks without an authorized reconciliation", async () => {
+    const h = harness({}); let n = 0; h.deps.platformGap.mockImplementation(async () => (n++ === 0 ? { aiUsageUsd: 1, committedUsd: 0.98, gapUsd: 0.02 } : { aiUsageUsd: 1.2, committedUsd: 1.2, gapUsd: 0 }));
+    expect((await run(h)).stopReason).toMatch(/accountingBaselineGapUnchanged/);
+  });
+  it("dry-run does not measure or require an accounting baseline", async () => {
+    const h = harness({}); const r = await run(h, false); expect(r.accountingBaseline).toBeUndefined(); expect(h.deps.platformGap).not.toHaveBeenCalled();
   });
 });

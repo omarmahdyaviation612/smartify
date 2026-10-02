@@ -1,4 +1,4 @@
-import { validateGroundingNotes } from "./unit-grounding-validator";
+import { subjectMatchesExpected, validateGroundingNotes } from "./unit-grounding-validator";
 
 function validNotes(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -127,5 +127,25 @@ describe("validateGroundingNotes", () => {
     const result = validateGroundingNotes(notes, expected);
     expect(result.valid).toBe(true);
     expect(result.notes?.facts).toEqual([]);
+  });
+});
+
+describe("bilingual Subject identity check (stored nameEn + nameAr)", () => {
+  // Actual persisted production values (EG_NATIONAL Mathematics G2/G4/G5/G6).
+  const EN = "Mathematics", AR = "الرياضيات";
+  it("accepts the English canonical form", () => expect(subjectMatchesExpected("Mathematics", EN, AR)).toBe(true));
+  it("accepts the exact stored Arabic form (and whitespace-only differences)", () => { expect(subjectMatchesExpected("الرياضيات", EN, AR)).toBe(true); expect(subjectMatchesExpected("  الرياضيات ", EN, AR)).toBe(true); });
+  it("accepts the observed article-less variant of the stored Arabic name", () => expect(subjectMatchesExpected("رياضيات", EN, AR)).toBe(true));
+  it("rejects another Subject's English name", () => expect(subjectMatchesExpected("Science", EN, AR)).toBe(false));
+  it("rejects another Subject's Arabic name (with or without article)", () => { expect(subjectMatchesExpected("العلوم", EN, AR)).toBe(false); expect(subjectMatchesExpected("علوم", EN, AR)).toBe(false); expect(subjectMatchesExpected("اللغة العربية", EN, AR)).toBe(false); });
+  it("rejects unrelated Arabic text and near-misses (no fuzzy matching)", () => { expect(subjectMatchesExpected("الرياضيات للصف الرابع", EN, AR)).toBe(false); expect(subjectMatchesExpected("رياضة", EN, AR)).toBe(false); expect(subjectMatchesExpected("ال", EN, AR)).toBe(false); });
+  it("does not let one Subject's Arabic name satisfy another Subject", () => expect(subjectMatchesExpected("الرياضيات", "Science", "العلوم")).toBe(false));
+  it("keeps English-only behavior when nameAr is missing", () => { expect(subjectMatchesExpected("Mathematics", EN, null)).toBe(true); expect(subjectMatchesExpected("الرياضيات", EN, null)).toBe(false); expect(subjectMatchesExpected("الرياضيات", EN, undefined)).toBe(false); expect(subjectMatchesExpected("الرياضيات", EN, "  ")).toBe(false); });
+  it("is wired into validateGroundingNotes (Arabic subject passes only with nameAr supplied)", () => {
+    const notes = { ...validNotes(), subject: "رياضيات" };
+    const ok = validateGroundingNotes(notes, { unitNameEn: "Plant parts", subjectNameEn: EN, subjectNameAr: AR, imageCount: 9 });
+    const old = validateGroundingNotes(notes, { unitNameEn: "Plant parts", subjectNameEn: EN, imageCount: 9 });
+    expect(ok.errors.some((e) => /possible unrelated-subject leakage/.test(e))).toBe(false);
+    expect(old.errors.some((e) => /possible unrelated-subject leakage/.test(e))).toBe(true);
   });
 });

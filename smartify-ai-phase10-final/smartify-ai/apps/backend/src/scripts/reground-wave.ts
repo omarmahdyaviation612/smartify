@@ -43,13 +43,15 @@ export interface WaveDeps {
   snapshot(): Promise<Snapshot>;
   accountingSince(since: Date): Promise<Accounting>;
   health(): Promise<{ live: number; ready: number }>;
+  /** Platform-actor spend gap since a UTC day: AIUsage actual cost minus committed platform budget counters. */
+  platformGap(sinceDay: Date): Promise<{ aiUsageUsd: number; committedUsd: number; gapUsd: number }>;
   now(): Date;
   writeReport(report: WaveReport): void;
 }
 
 export interface UnitRecord { unitId: string; label: string; bookId: string; classification: UnitClass; outcome: UnitOutcome; reason?: string; oldFingerprint: string; newFingerprint: string; chunkCount?: number; concepts?: number; deterministicRecovered?: number; compactMapperAttempted?: number; compactMapperRecovered?: number; topics?: TopicVerdict[]; accounting?: Accounting }
-export interface BookCheckpoint { bookId: string; label: string; unitsCompleted: number; unitsFailed: number; readyBefore: number; readyAfter: number; blockedBefore: number; blockedAfter: number; accounting: Accounting; gates: Record<string, boolean>; passed: boolean; problems: string[] }
-export interface WaveReport { mode: "DRY_RUN" | "APPLY"; status: "RUNNING" | "COMPLETED" | "STOPPED"; stopReason?: string; classification: { unitId: string; label: string; classification: UnitClass }[]; units: UnitRecord[]; books: BookCheckpoint[] }
+export interface BookCheckpoint { bookId: string; label: string; platformGapUsd?: number; unitsCompleted: number; unitsFailed: number; readyBefore: number; readyAfter: number; blockedBefore: number; blockedAfter: number; accounting: Accounting; gates: Record<string, boolean>; passed: boolean; problems: string[] }
+export interface WaveReport { mode: "DRY_RUN" | "APPLY"; status: "RUNNING" | "COMPLETED" | "STOPPED"; stopReason?: string; accountingBaseline?: { sinceDay: string; aiUsageUsd: number; committedUsd: number; gapUsd: number }; classification: { unitId: string; label: string; classification: UnitClass }[]; units: UnitRecord[]; books: BookCheckpoint[] }
 
 const ID = /^[a-z0-9]{20,40}$/;
 export function parseArgs(argv: string[]) {
@@ -100,6 +102,12 @@ export async function runWave(options: { plan: RepairPlan; subjectIds: string[];
   if (bad.length) return stop(`pre-classification found ${bad.map((b) => `${b.label}=${b.classification}`).join(", ")}`);
   if (!options.apply) { report.status = "COMPLETED"; deps.writeReport(report); return report; }
 
+  // Pre-existing platform accounting gap (e.g. spend released before the
+  // failure-path accounting fix) is recorded once; every checkpoint then
+  // requires it to be exactly unchanged, so only a NEW gap can stop the run.
+  const sinceDay = new Date(deps.now()); sinceDay.setUTCHours(0, 0, 0, 0);
+  const baseline = await deps.platformGap(sinceDay);
+  report.accountingBaseline = { sinceDay: sinceDay.toISOString(), ...baseline };
   let failures = 0;
   for (const { book, units } of targets) {
     const bookStart = deps.now(); const before = await deps.snapshot(); const processed = new Set<string>(); const processedTopics = new Set<string>();
@@ -136,7 +144,7 @@ export async function runWave(options: { plan: RepairPlan; subjectIds: string[];
       report.units.push(rec); completed++; deps.writeReport(report);
     }
     // Book checkpoint.
-    const after = await deps.snapshot(); const acct = await deps.accountingSince(bookStart); const h = await deps.health(); const problems: string[] = [];
+    const after = await deps.snapshot(); const acct = await deps.accountingSince(bookStart); const h = await deps.health(); const gapNow = await deps.platformGap(sinceDay); const problems: string[] = [];
     const changedUnits = Object.keys({ ...before.units, ...after.units }).filter((k) => before.units[k] !== after.units[k]);
     const changedAssign = Object.keys({ ...before.assignByTopic, ...after.assignByTopic }).filter((k) => before.assignByTopic[k] !== after.assignByTopic[k]);
     const gates: Record<string, boolean> = {
@@ -150,6 +158,7 @@ export async function runWave(options: { plan: RepairPlan; subjectIds: string[];
       groundingProgressUnchanged: before.progress === after.progress,
       noOpenReservations: !acct.reservations.RESERVED,
       accountingReconciled: Math.abs(acct.costUsd - acct.reconciledUsd) < 1e-6,
+      accountingBaselineGapUnchanged: Math.abs(gapNow.gapUsd - baseline.gapUsd) < 1e-6,
       healthLive: h.live === 200,
       healthReady: h.ready === 200,
     };
@@ -157,7 +166,8 @@ export async function runWave(options: { plan: RepairPlan; subjectIds: string[];
     if (!gates.pageRangesUnchanged) problems.push(...comparePageRanges(before.ranges, after.ranges).slice(0, 20));
     if (!gates.onlyProcessedUnitsChanged) problems.push(`unrelated units: ${changedUnits.filter((k) => !processed.has(k)).join(",")}`);
     if (!gates.onlyProcessedTopicsAssignmentsChanged) problems.push(`unrelated assignments: ${changedAssign.filter((k) => !processedTopics.has(k)).join(",")}`);
-    const cp: BookCheckpoint = { bookId: book.subjectId, label: book.label, unitsCompleted: completed, unitsFailed: failed, readyBefore: before.ready, readyAfter: after.ready, blockedBefore: before.blocked, blockedAfter: after.blocked, accounting: acct, gates, passed: problems.length === 0, problems };
+    if (!gates.accountingBaselineGapUnchanged) problems.push(`platform gap ${baseline.gapUsd.toFixed(8)} -> ${gapNow.gapUsd.toFixed(8)}`);
+    const cp: BookCheckpoint = { bookId: book.subjectId, label: book.label, platformGapUsd: gapNow.gapUsd, unitsCompleted: completed, unitsFailed: failed, readyBefore: before.ready, readyAfter: after.ready, blockedBefore: before.blocked, blockedAfter: after.blocked, accounting: acct, gates, passed: problems.length === 0, problems };
     report.books.push(cp); deps.writeReport(report);
     if (!cp.passed) return stop(`checkpoint failed for ${book.label}: ${problems.join("; ")}`);
   }
@@ -236,6 +246,12 @@ async function main() {
         return a;
       },
       health: async () => { const get = async (p: string) => { try { return (await fetch(`http://127.0.0.1:${port}${p}`)).status; } catch { return 0; } }; return { live: await get("/health/live"), ready: await get("/health/ready") }; },
+      platformGap: async (sinceDay) => {
+        const usage = await prisma.aIUsage.aggregate({ where: { createdAt: { gte: sinceDay }, userId: CONTENT_AUTHORING_ACTOR_ID }, _sum: { costUsd: true } });
+        const counters = await prisma.aIDailyBudgetCounter.findMany({ where: { scope: "platform", scopeKey: CONTENT_AUTHORING_ACTOR_ID, usageDate: { gte: sinceDay } }, select: { committedUsd: true } });
+        const aiUsageUsd = Number(usage._sum.costUsd ?? 0), committedUsd = counters.reduce((n: number, c: any) => n + Number(c.committedUsd), 0);
+        return { aiUsageUsd, committedUsd, gapUsd: aiUsageUsd - committedUsd };
+      },
       now: () => new Date(),
       writeReport: (r) => { if (args.report) fs.writeFileSync(args.report, JSON.stringify(r, null, 1)); },
     };

@@ -229,7 +229,7 @@ export class UnitGroundingService {
         const rendered = await (this.sharedExtraction ?? new GroundingSourceExtractionService(this.storageFactory)).renderSourcePages(sourceKey, unit.subject.grade.curriculum.code, unit.subject.grade.level, chunk.pageStart, chunk.pageEnd);
         const pages: SizedPage[] = rendered.imageDataUrls.map((image, index) => { const bytes=Buffer.from(image.dataUrl.slice(image.dataUrl.indexOf(",")+1),"base64");const d = pngDimensions(bytes); return { page: chunk.pageStart + index, imagePath: "", imageTokens: estimateImageTokens(active.model, d.width, d.height, groundingSizingConfig().detail), imageDataUrl:image.dataUrl } as SizedPage; });
         const textTokens = estimateTextTokens(this.contextBuilder.buildUnitGroundingExtractionPrompt({ curriculumNameEn: unit.subject.grade.curriculum.nameEn, gradeNameEn: unit.subject.grade.nameEn, subjectNameEn: unit.subject.nameEn, unitNameEn: unit.nameEn, pageRangeStart: chunk.pageStart, pageRangeEnd: chunk.pageEnd }) + "Extract the curriculum grounding now.");
-        const notes = await this.extractChunk(pages, { curriculumNameEn: unit.subject.grade.curriculum.nameEn, gradeNameEn: unit.subject.grade.nameEn, subjectNameEn: unit.subject.nameEn, unitNameEn: unit.nameEn }, requestingActorId, unitId, groundingSizingConfig().detail, active, textTokens, this.createTpmPacer(), true);
+        const notes = await this.extractChunk(pages, { curriculumNameEn: unit.subject.grade.curriculum.nameEn, gradeNameEn: unit.subject.grade.nameEn, subjectNameEn: unit.subject.nameEn, subjectNameAr: unit.subject.nameAr, unitNameEn: unit.nameEn }, requestingActorId, unitId, groundingSizingConfig().detail, active, textTokens, this.createTpmPacer(), true);
         await progress.persistChunk(unitId, leaseOwner, { chunkId: chunk.chunkId, pageStart: chunk.pageStart, pageEnd: chunk.pageEnd, notes } as GroundingChunkResult, false);
         const after = await progress.get(unitId);
         const done = Array.isArray(after?.completedChunksJson) ? after.completedChunksJson : [];
@@ -349,6 +349,7 @@ export class UnitGroundingService {
       curriculumNameEn: unit.subject.grade.curriculum.nameEn,
       gradeNameEn: unit.subject.grade.nameEn,
       subjectNameEn: unit.subject.nameEn,
+      subjectNameAr: unit.subject.nameAr,
       unitNameEn: unit.nameEn,
     };
 
@@ -381,7 +382,7 @@ export class UnitGroundingService {
     const sourceKey = resolveEffectiveSourceFile(unit, unit.subject);
     if (!sourceKey || unit.sourcePageStart == null || unit.sourcePageEnd == null || unit.sourcePageEnd < unit.sourcePageStart) throw new BadRequestException(`Unit ${unitId} has no valid source/page range.`);
     if (unit.sourcePageEnd - unit.sourcePageStart + 1 > MAX_UNIT_PAGE_COUNT) throw new BadRequestException(`Unit ${unitId}'s page range exceeds the ${MAX_UNIT_PAGE_COUNT}-page limit.`);
-    const ctx = { curriculumNameEn: unit.subject.grade.curriculum.nameEn, gradeNameEn: unit.subject.grade.nameEn, subjectNameEn: unit.subject.nameEn, unitNameEn: unit.nameEn };
+    const ctx = { curriculumNameEn: unit.subject.grade.curriculum.nameEn, gradeNameEn: unit.subject.grade.nameEn, subjectNameEn: unit.subject.nameEn, subjectNameAr: unit.subject.nameAr, unitNameEn: unit.nameEn };
     const generated = await this.generateGroundingForRange(unit, unitId, sourceKey, unit.sourcePageStart, unit.sourcePageEnd, ctx, requestingUserId);
     return { notes: generated.merged, model: generated.model, chunkCount: generated.chunkCount, sourceKey, pageStart: unit.sourcePageStart, pageEnd: unit.sourcePageEnd, groundingVersion: CURRENT_GROUNDING_VERSION, groundingPromptVersion: GROUNDING_PROMPT_VERSION };
   }
@@ -392,7 +393,7 @@ export class UnitGroundingService {
     sourceFile: string,
     pageStart: number,
     pageEnd: number,
-    ctx: { curriculumNameEn: string; gradeNameEn: string; subjectNameEn: string; unitNameEn: string },
+    ctx: { curriculumNameEn: string; gradeNameEn: string; subjectNameEn: string; subjectNameAr?: string | null; unitNameEn: string },
     requestingUserId: string,
   ): Promise<{ merged: GroundingNotes; model: string; chunkCount: number; pdfFingerprint: string }> {
     this.logger.log(`CURRICULUM_SOURCE_FETCH_STARTED unitId=${unitId}`);
@@ -532,7 +533,7 @@ export class UnitGroundingService {
   /** Sequential token-sized request; financial reservation spans SDK retries. */
   private async extractChunk(
     pages: SizedPage[],
-    ctx: { curriculumNameEn: string; gradeNameEn: string; subjectNameEn: string; unitNameEn: string },
+    ctx: { curriculumNameEn: string; gradeNameEn: string; subjectNameEn: string; subjectNameAr?: string | null; unitNameEn: string },
     requestingUserId: string,
     unitId: string,
     detail: ImageDetail,
@@ -581,7 +582,7 @@ export class UnitGroundingService {
       pacer.recordSuccessfulResponse(result.rateLimit);
       let parsed: unknown;
       try { parsed = JSON.parse(result.content); } catch { lastErrors=["Response was not valid JSON."]; continue; }
-      const validation = validateGroundingNotes(parsed, { unitNameEn: ctx.unitNameEn, subjectNameEn: ctx.subjectNameEn, imageCount: pages.length });
+      const validation = validateGroundingNotes(parsed, { unitNameEn: ctx.unitNameEn, subjectNameEn: ctx.subjectNameEn, subjectNameAr: ctx.subjectNameAr, imageCount: pages.length });
       if (validation.valid && validation.notes) { await vision.finalizeSuccess(accountingContext); return remapSourceImageIndexToPages(validation.notes, pages); }
       lastErrors = validation.errors;
       this.logger.warn(`GROUNDING_VALIDATION_FAILED chunkTag=${chunkTag} pages=${pageStart}-${pageEnd} attempt=${attempt}: ${validation.errors.join("; ")}`);

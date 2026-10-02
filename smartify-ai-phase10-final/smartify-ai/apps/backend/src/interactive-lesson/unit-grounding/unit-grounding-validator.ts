@@ -38,9 +38,27 @@ function isImageIndexArray(value: unknown, imageCount: number): value is number[
   return value.every((v) => typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= imageCount);
 }
 
+/**
+ * The model may report the subject in the book's own language. A reported
+ * subject is accepted only for THIS Subject's stored identity: the existing
+ * English rule (case-insensitive substring of the English name's first word),
+ * or an exact whitespace-normalized match of the stored Arabic name. The only
+ * Arabic alias is a single leading definite article "ال" on either side
+ * (observed: stored "الرياضيات", reported "رياضيات"). No fuzzy matching, no
+ * translation; a missing nameAr keeps English-only behavior.
+ */
+export function subjectMatchesExpected(reported: string, subjectNameEn: string, subjectNameAr?: string | null): boolean {
+  if (reported.toLowerCase().includes(subjectNameEn.toLowerCase().split(" ")[0])) return true;
+  if (!subjectNameAr || !subjectNameAr.trim()) return false;
+  const norm = (s: string) => s.trim().replace(/\s+/g, " ");
+  const withoutArticle = (s: string) => (s.startsWith("ال") ? s.slice(2) : s);
+  const r = norm(reported), a = norm(subjectNameAr);
+  return r === a || (withoutArticle(r) === withoutArticle(a) && withoutArticle(a).length > 0);
+}
+
 export function validateGroundingNotes(
   raw: unknown,
-  expected: { unitNameEn: string; subjectNameEn: string; imageCount: number },
+  expected: { unitNameEn: string; subjectNameEn: string; subjectNameAr?: string | null; imageCount: number },
 ): GroundingValidationResult {
   const errors: string[] = [];
 
@@ -56,7 +74,7 @@ export function validateGroundingNotes(
   // this validator.
   if (typeof obj.subject !== "string" || !obj.subject.trim()) {
     errors.push("Missing subject.");
-  } else if (!obj.subject.toLowerCase().includes(expected.subjectNameEn.toLowerCase().split(" ")[0])) {
+  } else if (!subjectMatchesExpected(obj.subject, expected.subjectNameEn, expected.subjectNameAr)) {
     errors.push(`subject "${obj.subject}" does not appear to match expected subject "${expected.subjectNameEn}" — possible unrelated-subject leakage.`);
   }
 
