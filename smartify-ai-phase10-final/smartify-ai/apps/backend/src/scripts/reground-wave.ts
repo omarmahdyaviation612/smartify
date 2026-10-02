@@ -74,6 +74,18 @@ export function classify(t: ApprovedTarget, live: LiveUnit | null, prior: Map<st
   return "DRIFTED";
 }
 
+/** Deterministic, row-order-independent page-range comparison keyed by Unit ID (ranges are "start-end" strings). Returns one problem per differing Unit; empty means unchanged. */
+export function comparePageRanges(before: Record<string, string>, after: Record<string, string>): string[] {
+  const ids = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort();
+  const problems: string[] = [];
+  for (const id of ids) {
+    if (!(id in after)) problems.push(`unit ${id} missing after`);
+    else if (!(id in before)) problems.push(`unit ${id} unexpected after`);
+    else if (before[id] !== after[id]) problems.push(`unit ${id} range ${before[id]} -> ${after[id]}`);
+  }
+  return problems;
+}
+
 const emptyAcct = (): Accounting => ({ usageRows: 0, byFeature: {}, inputTokens: 0, outputTokens: 0, costUsd: 0, reservations: {}, reconciledUsd: 0 });
 const isBudgetRefusal = (e: unknown) => /budget reservation refused|Budget unavailable|daily_limit|misconfigured/i.test(e instanceof Error ? e.message : String(e));
 
@@ -130,7 +142,7 @@ export async function runWave(options: { plan: RepairPlan; subjectIds: string[];
     const gates: Record<string, boolean> = {
       onlyProcessedUnitsChanged: changedUnits.every((k) => processed.has(k)),
       onlyProcessedTopicsAssignmentsChanged: changedAssign.every((k) => processedTopics.has(k)),
-      pageRangesUnchanged: JSON.stringify(before.ranges) === JSON.stringify(after.ranges),
+      pageRangesUnchanged: comparePageRanges(before.ranges, after.ranges).length === 0,
       teachingStepsUnchanged: before.teachingSteps === after.teachingSteps,
       questionsUnchanged: before.questions === after.questions,
       questionDraftsUnchanged: before.questionDrafts === after.questionDrafts,
@@ -142,6 +154,7 @@ export async function runWave(options: { plan: RepairPlan; subjectIds: string[];
       healthReady: h.ready === 200,
     };
     for (const [k, v] of Object.entries(gates)) if (!v) problems.push(k);
+    if (!gates.pageRangesUnchanged) problems.push(...comparePageRanges(before.ranges, after.ranges).slice(0, 20));
     if (!gates.onlyProcessedUnitsChanged) problems.push(`unrelated units: ${changedUnits.filter((k) => !processed.has(k)).join(",")}`);
     if (!gates.onlyProcessedTopicsAssignmentsChanged) problems.push(`unrelated assignments: ${changedAssign.filter((k) => !processedTopics.has(k)).join(",")}`);
     const cp: BookCheckpoint = { bookId: book.subjectId, label: book.label, unitsCompleted: completed, unitsFailed: failed, readyBefore: before.ready, readyAfter: after.ready, blockedBefore: before.blocked, blockedAfter: after.blocked, accounting: acct, gates, passed: problems.length === 0, problems };

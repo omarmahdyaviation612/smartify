@@ -1,4 +1,4 @@
-import { classify, parseArgs, runWave, type LiveUnit, type Snapshot, type UnitOutcome } from "./reground-wave";
+import { classify, comparePageRanges, parseArgs, runWave, type LiveUnit, type Snapshot, type UnitOutcome } from "./reground-wave";
 import { approvedTarget } from "./reground-unit";
 import type { RepairPlan } from "./repair-unit-page-offset";
 
@@ -105,5 +105,24 @@ describe("reground-wave execution", () => {
     expect((await run(h)).stopReason).toMatch(/onlyProcessedUnitsChanged/);
     const h2 = harness({}); h2.deps.health.mockResolvedValue({ live: 200, ready: 503 }); expect((await run(h2)).stopReason).toMatch(/healthReady/);
     const h3 = harness({}); h3.deps.accountingSince.mockResolvedValue({ usageRows: 1, byFeature: {}, inputTokens: 1, outputTokens: 1, costUsd: 0.01, reservations: { RESERVED: 1 }, reconciledUsd: 0 }); expect((await run(h3)).status).toBe("STOPPED");
+  });
+});
+
+describe("pageRangesUnchanged checkpoint (deterministic, keyed by Unit ID)", () => {
+  const pre = { unitaaaaaaaaaaaaaaaaaaaaaa1: "10-23", unitaaaaaaaaaaaaaaaaaaaaaa2: "24-43", unitaaaaaaaaaaaaaaaaaaaaaa3: "44-67" };
+  const reordered = { unitaaaaaaaaaaaaaaaaaaaaaa3: "44-67", unitaaaaaaaaaaaaaaaaaaaaaa1: "10-23", unitaaaaaaaaaaaaaaaaaaaaaa2: "24-43" };
+  it("passes when the same Units come back in a different row order (the 2026-10-02 production false positive)", () => {
+    expect(JSON.stringify(pre)).not.toBe(JSON.stringify(reordered));
+    expect(comparePageRanges(pre, reordered)).toEqual([]);
+  });
+  it("fails on an actual start-page change", () => expect(comparePageRanges(pre, { ...reordered, unitaaaaaaaaaaaaaaaaaaaaaa2: "25-43" })).toEqual(["unit unitaaaaaaaaaaaaaaaaaaaaaa2 range 24-43 -> 25-43"]));
+  it("fails on an actual end-page change", () => expect(comparePageRanges(pre, { ...reordered, unitaaaaaaaaaaaaaaaaaaaaaa3: "44-66" })).toEqual(["unit unitaaaaaaaaaaaaaaaaaaaaaa3 range 44-67 -> 44-66"]));
+  it("fails when a Unit is missing after", () => { const { unitaaaaaaaaaaaaaaaaaaaaaa1: _drop, ...rest } = reordered; expect(comparePageRanges(pre, rest)).toEqual(["unit unitaaaaaaaaaaaaaaaaaaaaaa1 missing after"]); });
+  it("fails on an unexpected extra Unit", () => expect(comparePageRanges(pre, { ...reordered, unitextraextraextraextraext1: "1-2" })).toEqual(["unit unitextraextraextraextraext1 unexpected after"]));
+  it("the book checkpoint passes with reordered identical ranges and stops on a real range change", async () => {
+    const ok = harness({}); let n = 0; ok.deps.snapshot.mockImplementation(async () => snap({ ranges: n++ === 0 ? pre : reordered }));
+    const r = await run(ok); expect(r.status).toBe("COMPLETED"); expect(r.books[0].gates.pageRangesUnchanged).toBe(true);
+    const bad = harness({}); let m = 0; bad.deps.snapshot.mockImplementation(async () => snap({ ranges: m++ === 0 ? pre : { ...reordered, unitaaaaaaaaaaaaaaaaaaaaaa1: "10-24" } }));
+    const r2 = await run(bad); expect(r2.status).toBe("STOPPED"); expect(r2.stopReason).toMatch(/pageRangesUnchanged/); expect(r2.books[0].problems).toContain("unit unitaaaaaaaaaaaaaaaaaaaaaa1 range 10-23 -> 10-24");
   });
 });
