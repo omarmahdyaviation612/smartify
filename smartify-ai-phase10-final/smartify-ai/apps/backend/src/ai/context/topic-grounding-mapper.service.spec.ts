@@ -263,12 +263,13 @@ describe("TopicGroundingMapperService.mapTopic", () => {
     expect(request).not.toContain("999");
   });
 
-  it("uses zero provider calls and zero budget for an empty compact pool", async () => {
-    const { service, prisma, generate, usageService } = build("{}");
+  it("uses zero provider calls and zero budget for an empty compact pool, and finalizes BLOCKED on the current identity", async () => {
+    const { service, prisma, generate, usageService, upsert } = build("{}");
     prisma.client.topic.findUnique.mockResolvedValue({ ...UNRESOLVED_TOPIC, topicSourceEvidence: [], unit: { id: "u1", groundingNotesJson: { ...notes, vocabulary: [] }, groundingVersion: 1, groundingSourceFingerprint: "fp", topics: SIBLINGS } });
-    expect((await service.mapTopic("t3")).outcome).toBe("NOT_GROUNDED");
+    expect(await service.mapTopic("t3")).toMatchObject({ outcome: "BLOCKED", code: "NO_CANDIDATES" });
     expect(generate).not.toHaveBeenCalled();
     expect(usageService.reserveBudget).not.toHaveBeenCalled();
+    expect(upsert.mock.calls[0][0].create).toMatchObject({ status: "BLOCKED", unitSourceFingerprint: "fp", matchedConceptNames: [], mapperModel: null });
   });
 
   it("does not retry a provider failure", async () => {
@@ -382,8 +383,9 @@ describe("mapper READY invariant: READY only with a non-empty runtime slice", ()
     const h = build("not json"); expect((await h.service.mapTopic("t1")).outcome).toBe("BLOCKED");
     expect(written(h.upsert).status).toBe("BLOCKED"); expect(written(h.upsert).reason).toMatch(/^Compact mapper rejected/);
   });
-  it("13: zero usable candidates -> zero provider calls, existing NOT_GROUNDED behavior", async () => {
-    const h = build("{}", []); expect((await h.service.mapTopic("t1")).outcome).toBe("NOT_GROUNDED"); expect(h.generate).not.toHaveBeenCalled(); expect(h.upsert).not.toHaveBeenCalled();
+  it("13: zero usable candidates -> zero provider calls, persisted BLOCKED on the current grounding identity", async () => {
+    const h = build("{}", []); expect((await h.service.mapTopic("t1")).outcome).toBe("BLOCKED"); expect(h.generate).not.toHaveBeenCalled();
+    expect(h.upsert).toHaveBeenCalledTimes(1); expect(written(h.upsert)).toMatchObject({ status: "BLOCKED", unitSourceFingerprint: "fp" }); expect(sliceOf(written(h.upsert)).state).toBe("BLOCKED");
   });
   it("integration: no mapper-created READY row resolves to an EMPTY slice, for every single-candidate selection", async () => {
     for (const c of candidates) {

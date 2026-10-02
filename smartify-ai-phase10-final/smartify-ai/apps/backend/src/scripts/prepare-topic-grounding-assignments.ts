@@ -266,7 +266,7 @@ export async function applyOne(
     report.providerCalls++;
     report.aiMapperReady++;
   } else if (mapped.outcome === "BLOCKED") {
-    if (mapped.code !== "BUDGET_UNAVAILABLE") {
+    if (mapped.code !== "BUDGET_UNAVAILABLE" && mapped.code !== "NO_CANDIDATES") {
       report.providerCalls++; // a validation/LOW-confidence BLOCKED still made exactly one real provider call
     }
     report.aiMapperBlocked++;

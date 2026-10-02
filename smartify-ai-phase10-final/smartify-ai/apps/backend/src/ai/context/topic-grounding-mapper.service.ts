@@ -193,7 +193,7 @@ export type MapperOutcome =
   | { outcome: "SKIPPED_DETERMINISTIC"; reason: string }
   | { outcome: "NOT_GROUNDED"; reason: string }
   | { outcome: "READY"; matchedConceptNames: string[]; matchedHintTitles: string[] | null; model: string }
-  | { outcome: "BLOCKED"; reason: string; code?: MapperValidationFailure["code"] | "BUDGET_UNAVAILABLE" | "NO_USABLE_SLICE_REFERENCE" };
+  | { outcome: "BLOCKED"; reason: string; code?: MapperValidationFailure["code"] | "BUDGET_UNAVAILABLE" | "NO_USABLE_SLICE_REFERENCE" | "NO_CANDIDATES" };
 
 @Injectable()
 export class TopicGroundingMapperService {
@@ -248,7 +248,13 @@ export class TopicGroundingMapperService {
 
     // Compact closed-set mapper: only request-local indexed candidates are sent.
     const candidates = prefilterCompactCandidates(topic.nameEn, notes);
-    if (candidates.length === 0) return { outcome: "NOT_GROUNDED", reason: "No compact grounding candidates; provider call skipped." };
+    if (candidates.length === 0) {
+      // Finalize on the CURRENT grounding identity (2026-10-02): with deterministic unresolved and no
+      // authorized candidate, the decision is BLOCKED for this grounding — persisted so no assignment
+      // from a previous grounding fingerprint can survive. Zero provider calls, zero budget, nothing fabricated.
+      await this.assignmentService.upsert({ topicId, unitGroundingVersion: unit.groundingVersion!, unitSourceFingerprint: unit.groundingSourceFingerprint!, method: "AI_MAPPER", confidence: "LOW", status: "BLOCKED", matchedConceptNames: [], matchedHintTitles: null, mapperModel: null, mapperPromptVersion: MAPPER_PROMPT_VERSION, reason: "No compact grounding candidates; provider call skipped." });
+      return { outcome: "BLOCKED", reason: "No compact grounding candidates; provider call skipped.", code: "NO_CANDIDATES" };
+    }
     const compactPrompt = `Select evidence for Topic "${topic.nameEn}". Return ONLY {"supported":false} or {"supported":true,"matches":[{"type":"concept","index":0}]}. Candidates:\n${candidates.map(c => `${c.type}[${c.index}]: ${c.label}`).join("\n")}`;
     const { provider, providerKey, model } = await this.providerFactory.getActiveProvider();
     const estimatedUsd = await this.usageService.estimateMaxChatCostUsd({ providerKey, inputText: compactPrompt });
