@@ -5,7 +5,7 @@ import { AIUsageService } from "../usage/ai-usage.service";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../content-authoring-actor.const";
 import type { GroundingNotes } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
 import { TopicGroundingAssignmentService, computeDeterministicAssignment } from "./topic-grounding-assignment.service";
-import { MAPPER_PROMPT_VERSION } from "./topic-grounding-assignment.util";
+import { DETERMINISTIC_ASSIGNMENT_VERSION, MAPPER_PROMPT_VERSION, resolveAssignedGroundingSlice } from "./topic-grounding-assignment.util";
 import { prefilterCompactCandidates, validateCompactResponse } from "./compact-grounding-mapper.util";
 
 /**
@@ -193,7 +193,7 @@ export type MapperOutcome =
   | { outcome: "SKIPPED_DETERMINISTIC"; reason: string }
   | { outcome: "NOT_GROUNDED"; reason: string }
   | { outcome: "READY"; matchedConceptNames: string[]; matchedHintTitles: string[] | null; model: string }
-  | { outcome: "BLOCKED"; reason: string; code?: MapperValidationFailure["code"] | "BUDGET_UNAVAILABLE" };
+  | { outcome: "BLOCKED"; reason: string; code?: MapperValidationFailure["code"] | "BUDGET_UNAVAILABLE" | "NO_USABLE_SLICE_REFERENCE" };
 
 @Injectable()
 export class TopicGroundingMapperService {
@@ -265,6 +265,18 @@ export class TopicGroundingMapperService {
     if (!compact.supported) { await this.assignmentService.upsert({ topicId, unitGroundingVersion: unit.groundingVersion!, unitSourceFingerprint: unit.groundingSourceFingerprint!, method: "AI_MAPPER", confidence: "LOW", status: "BLOCKED", matchedConceptNames: [], matchedHintTitles: null, mapperModel: model, mapperPromptVersion: MAPPER_PROMPT_VERSION, reason: "[REFINEMENT:DECIDED] Model reported supported:false." }); return { outcome: "BLOCKED", reason: "Topic unsupported by existing grounding" }; }
     const resolved = compact.matches.map(m => candidates.find(c => c.type === m.type && c.index === m.index)!);
     const names = resolved.filter(x => x.type === "concept" || x.type === "vocabulary").map(x => x.label);
+    const hintTitles = resolved.filter(x => x.type === "topicHint").map(x => x.label);
+    // READY invariant (2026-10-02): READY is persisted only if the exact runtime slice resolver,
+    // against this same verified grounding identity and evidence, yields a NON-EMPTY slice.
+    // Selections of fact/skill/scopeNote/objective alone are not persistable references, so
+    // such a response is persisted BLOCKED — never fabricated, never re-asked, no fallback.
+    const wouldBe = { unitGroundingVersion: unit.groundingVersion!, unitSourceFingerprint: unit.groundingSourceFingerprint!, assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION, method: "AI_MAPPER", mapperPromptVersion: MAPPER_PROMPT_VERSION, status: "READY" as const, matchedConceptNames: names, matchedHintTitles: hintTitles };
+    const slice = resolveAssignedGroundingSlice(wouldBe, { id: unit.id, groundingVersion: unit.groundingVersion, groundingSourceFingerprint: unit.groundingSourceFingerprint, groundingNotesJson: unit.groundingNotesJson as unknown as GroundingNotes }, (topic as any).topicSourceEvidence);
+    if (slice.state !== "READY") {
+      const types = [...new Set(resolved.map(x => x.type))].join(",");
+      await this.assignmentService.upsert({ topicId, unitGroundingVersion: unit.groundingVersion!, unitSourceFingerprint: unit.groundingSourceFingerprint!, method: "AI_MAPPER", confidence: "LOW", status: "BLOCKED", matchedConceptNames: [], matchedHintTitles: null, mapperModel: model, mapperPromptVersion: MAPPER_PROMPT_VERSION, reason: `Compact mapper selection (${types}) has no slice-usable reference; slice would be ${slice.state}.` });
+      return { outcome: "BLOCKED", reason: `Selection has no slice-usable reference (${types}).`, code: "NO_USABLE_SLICE_REFERENCE" };
+    }
     await this.assignmentService.upsert({ topicId, unitGroundingVersion: unit.groundingVersion!, unitSourceFingerprint: unit.groundingSourceFingerprint!, method: "AI_MAPPER", confidence: "HIGH", status: "READY", matchedConceptNames: names, matchedHintTitles: resolved.filter(x => x.type === "topicHint").map(x => x.label), mapperModel: model, mapperPromptVersion: MAPPER_PROMPT_VERSION, reason: "Compact mapper selected persisted evidence." });
     return { outcome: "READY", matchedConceptNames: names, matchedHintTitles: resolved.filter(x => x.type === "topicHint").map(x => x.label), model };
   }

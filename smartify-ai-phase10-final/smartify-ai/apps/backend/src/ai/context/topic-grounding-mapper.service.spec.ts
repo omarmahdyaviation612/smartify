@@ -313,3 +313,83 @@ describe("the AI mapper is structurally unreachable from any student-facing runt
     }
   });
 });
+
+describe("mapper READY invariant: READY only with a non-empty runtime slice", () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const assignmentModule = require("./topic-grounding-assignment.service");
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const compactModule = require("./compact-grounding-mapper.util");
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { resolveAssignedGroundingSlice } = require("./topic-grounding-assignment.util");
+  const invNotes: any = {
+    unitTitle: "U", gradeLevel: "G4", subject: "Mathematics",
+    learningObjectives: ["Find the area of a rectangle."],
+    concepts: [{ name: "Area", description: "space inside", sourcePages: [10], importance: "core" }],
+    facts: [{ fact: "Area is measured in square units.", sourcePages: [10], importance: "core" }],
+    vocabulary: [{ term: "perimeter", meaning: "distance around", sourcePages: [11] }],
+    skills: ["measure area"],
+    topicHints: [{ topicTitle: "Area hint", sourcePages: [10], relevantConcepts: ["Area"] }, { topicTitle: "Orphan hint", sourcePages: [99], relevantConcepts: ["Nothing"] }],
+    scopeNotes: ["area scope note"],
+  };
+  const candidates = [
+    { type: "concept", index: 0, label: "Area" }, { type: "vocabulary", index: 0, label: "perimeter" },
+    { type: "topicHint", index: 0, label: "Area hint" }, { type: "topicHint", index: 1, label: "Orphan hint" },
+    { type: "fact", index: 0, label: "Area is measured in square units." }, { type: "skill", index: 0, label: "measure area" },
+    { type: "scopeNote", index: 0, label: "area scope note" }, { type: "learningObjective", index: 0, label: "Find the area of a rectangle." },
+  ];
+  const unit = { id: "u1", groundingNotesJson: invNotes, groundingVersion: 1, groundingSourceFingerprint: "fp", topics: [{ id: "t1", nameEn: "Topic", order: 1 }] };
+  function build(content: string, pool: any[] = candidates) {
+    jest.spyOn(assignmentModule, "computeDeterministicAssignment").mockReturnValue(null);
+    jest.spyOn(compactModule, "prefilterCompactCandidates").mockReturnValue(pool);
+    const generate = jest.fn().mockResolvedValue({ content, inputTokens: 100, outputTokens: 20 });
+    const upsert = jest.fn().mockResolvedValue({});
+    const prisma = { client: { topic: { findUnique: jest.fn().mockResolvedValue({ id: "t1", nameEn: "Topic", order: 1, topicSourceEvidence: [], unit }) }, topicGroundingAssignment: { upsert }, aIUsage: { create: jest.fn().mockResolvedValue({}) } } } as any;
+    const providerFactory = { getActiveProvider: jest.fn().mockResolvedValue({ provider: { generate }, providerKey: "openai", model: "gpt-test" }), getCostRates: jest.fn().mockResolvedValue({ costPerInputToken: 0, costPerOutputToken: 0 }) } as any;
+    const usageService = { estimateMaxChatCostUsd: jest.fn().mockResolvedValue(0.01), reserveBudget: jest.fn().mockResolvedValue({ ok: true, reservationId: "r1" }), releaseBudget: jest.fn().mockResolvedValue(undefined), reconcileBudget: jest.fn().mockResolvedValue(undefined) } as any;
+    return { service: new TopicGroundingMapperService(prisma, providerFactory, usageService, new TopicGroundingAssignmentService(prisma)), upsert, generate };
+  }
+  afterEach(() => jest.restoreAllMocks());
+  const sel = (...m: [string, number][]) => JSON.stringify({ supported: true, matches: m.map(([type, index]) => ({ type, index })) });
+  const written = (upsert: jest.Mock) => upsert.mock.calls[0][0].create;
+  const sliceOf = (row: any) => resolveAssignedGroundingSlice(row, { id: "u1", groundingVersion: 1, groundingSourceFingerprint: "fp", groundingNotesJson: invNotes }, []);
+  const expectReadyNonEmpty = async (content: string, check: (row: any) => void) => {
+    const h = build(content); const out = await h.service.mapTopic("t1");
+    expect(out.outcome).toBe("READY"); expect(h.generate).toHaveBeenCalledTimes(1);
+    const row = written(h.upsert); expect(row.status).toBe("READY"); check(row);
+    const s = sliceOf(row); expect(s.state).toBe("READY"); expect(s.slice.concepts.length + s.slice.facts.length + s.slice.vocabulary.length).toBeGreaterThan(0);
+  };
+  const expectBlocked = async (content: string) => {
+    const h = build(content); const out: any = await h.service.mapTopic("t1");
+    expect(out.outcome).toBe("BLOCKED"); expect(out.code).toBe("NO_USABLE_SLICE_REFERENCE"); expect(h.generate).toHaveBeenCalledTimes(1);
+    const row = written(h.upsert); expect(row.status).toBe("BLOCKED"); expect(row.matchedConceptNames).toEqual([]); expect(row.matchedHintTitles).toBeNull();
+    expect(sliceOf(row).state).toBe("BLOCKED"); expect(h.upsert).toHaveBeenCalledTimes(1);
+  };
+  it("1: concept only -> READY with a non-empty usable reference", () => expectReadyNonEmpty(sel(["concept", 0]), (r) => expect(r.matchedConceptNames).toEqual(["Area"])));
+  it("2: vocabulary only -> READY with a non-empty usable reference", () => expectReadyNonEmpty(sel(["vocabulary", 0]), (r) => expect(r.matchedConceptNames).toEqual(["perimeter"])));
+  it("3: topicHint only -> READY with a non-empty usable reference", () => expectReadyNonEmpty(sel(["topicHint", 0]), (r) => expect(r.matchedHintTitles).toEqual(["Area hint"])));
+  it("4: fact only -> BLOCKED", () => expectBlocked(sel(["fact", 0])));
+  it("5: skill only -> BLOCKED", () => expectBlocked(sel(["skill", 0])));
+  it("6: scopeNote only -> BLOCKED", () => expectBlocked(sel(["scopeNote", 0])));
+  it("7: objective (learningObjective) only -> BLOCKED", () => expectBlocked(sel(["learningObjective", 0])));
+  it("8: fact + skill + objective -> BLOCKED", () => expectBlocked(sel(["fact", 0], ["skill", 0], ["learningObjective", 0])));
+  it("9: fact + concept -> READY using the valid concept reference", () => expectReadyNonEmpty(sel(["fact", 0], ["concept", 0]), (r) => expect(r.matchedConceptNames).toEqual(["Area"])));
+  it("10: supported=true but the only selection resolves to an EMPTY slice server-side -> BLOCKED", () => expectBlocked(sel(["topicHint", 1])));
+  it("11: supported=false keeps the existing BLOCKED behavior", async () => {
+    const h = build(JSON.stringify({ supported: false })); expect((await h.service.mapTopic("t1")).outcome).toBe("BLOCKED");
+    expect(written(h.upsert)).toMatchObject({ status: "BLOCKED", reason: "[REFINEMENT:DECIDED] Model reported supported:false." });
+  });
+  it("12: malformed provider output keeps the existing safe BLOCKED behavior", async () => {
+    const h = build("not json"); expect((await h.service.mapTopic("t1")).outcome).toBe("BLOCKED");
+    expect(written(h.upsert).status).toBe("BLOCKED"); expect(written(h.upsert).reason).toMatch(/^Compact mapper rejected/);
+  });
+  it("13: zero usable candidates -> zero provider calls, existing NOT_GROUNDED behavior", async () => {
+    const h = build("{}", []); expect((await h.service.mapTopic("t1")).outcome).toBe("NOT_GROUNDED"); expect(h.generate).not.toHaveBeenCalled(); expect(h.upsert).not.toHaveBeenCalled();
+  });
+  it("integration: no mapper-created READY row resolves to an EMPTY slice, for every single-candidate selection", async () => {
+    for (const c of candidates) {
+      const h = build(sel([c.type, c.index])); const out = await h.service.mapTopic("t1"); const row = written(h.upsert);
+      if (row.status === "READY") { expect(out.outcome).toBe("READY"); expect(sliceOf(row).state).toBe("READY"); } else expect(out.outcome).toBe("BLOCKED");
+      jest.restoreAllMocks();
+    }
+  });
+});
