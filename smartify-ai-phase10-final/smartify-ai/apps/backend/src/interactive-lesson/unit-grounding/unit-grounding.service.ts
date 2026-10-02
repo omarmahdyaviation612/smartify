@@ -119,6 +119,25 @@ function chunkPageRange(start: number, end: number, maxPerChunk: number): Array<
   return chunks;
 }
 
+/**
+ * Deterministic bounded partition of a Unit page range into extraction windows of at most
+ * `maxPages` pages (2026-10-02 large-Unit replacement support). A range within the limit is a
+ * single window (unchanged behavior). Otherwise the minimum window count is used with an even
+ * window size where possible, so window boundaries fall on the same ~2-page chunk pairing a
+ * single pass would use. Windows are contiguous, ordered, non-overlapping and cover the range exactly.
+ */
+export function partitionUnitRange(start: number, end: number, maxPages: number): Array<[number, number]> {
+  if (![start, end, maxPages].every(Number.isSafeInteger) || start < 1 || end < start || maxPages < 1) throw new Error("Invalid page range or window size");
+  const n = end - start + 1;
+  if (n <= maxPages) return [[start, end]];
+  const windowCount = Math.ceil(n / maxPages);
+  let size = Math.ceil(n / windowCount);
+  if (size % 2 === 1 && size + 1 <= maxPages) size += 1;
+  const windows: Array<[number, number]> = [];
+  for (let s = start; s <= end; s += size) windows.push([s, Math.min(end, s + size - 1)]);
+  return windows;
+}
+
 function mergeGroundingNotes(chunks: GroundingNotes[]): GroundingNotes {
   return {
     unitTitle: chunks[0].unitTitle,
@@ -381,9 +400,16 @@ export class UnitGroundingService {
     if (!unit) throw new NotFoundException(`Unit ${unitId} not found.`);
     const sourceKey = resolveEffectiveSourceFile(unit, unit.subject);
     if (!sourceKey || unit.sourcePageStart == null || unit.sourcePageEnd == null || unit.sourcePageEnd < unit.sourcePageStart) throw new BadRequestException(`Unit ${unitId} has no valid source/page range.`);
-    if (unit.sourcePageEnd - unit.sourcePageStart + 1 > MAX_UNIT_PAGE_COUNT) throw new BadRequestException(`Unit ${unitId}'s page range exceeds the ${MAX_UNIT_PAGE_COUNT}-page limit.`);
+    // A range above MAX_UNIT_PAGE_COUNT is processed as several bounded windows (each <= the limit)
+    // through the SAME pipeline; nothing is persisted here, so the caller's single guarded write
+    // happens only after every window has succeeded.
+    const windows = partitionUnitRange(unit.sourcePageStart, unit.sourcePageEnd, MAX_UNIT_PAGE_COUNT);
     const ctx = { curriculumNameEn: unit.subject.grade.curriculum.nameEn, gradeNameEn: unit.subject.grade.nameEn, subjectNameEn: unit.subject.nameEn, subjectNameAr: unit.subject.nameAr, unitNameEn: unit.nameEn };
-    const generated = await this.generateGroundingForRange(unit, unitId, sourceKey, unit.sourcePageStart, unit.sourcePageEnd, ctx, requestingUserId);
+    if (windows.length > 1) this.logger.log(`GROUNDING_REPLACEMENT_WINDOWS unitId=${unitId} range=${unit.sourcePageStart}-${unit.sourcePageEnd} windows=${windows.map(([a, b]) => `${a}-${b}`).join(",")}`);
+    const results = [];
+    for (const [windowStart, windowEnd] of windows) results.push(await this.generateGroundingForRange(unit, unitId, sourceKey, windowStart, windowEnd, ctx, requestingUserId));
+    if (new Set(results.map((r) => r.model)).size !== 1) throw new Error("Active grounding model changed between extraction windows; replacement aborted.");
+    const generated = results.length === 1 ? results[0] : { merged: mergeGroundingNotes(results.flatMap((r) => r.chunkNotes)), model: results[0].model, chunkCount: results.reduce((n, r) => n + r.chunkCount, 0) };
     return { notes: generated.merged, model: generated.model, chunkCount: generated.chunkCount, sourceKey, pageStart: unit.sourcePageStart, pageEnd: unit.sourcePageEnd, groundingVersion: CURRENT_GROUNDING_VERSION, groundingPromptVersion: GROUNDING_PROMPT_VERSION };
   }
 
@@ -395,7 +421,7 @@ export class UnitGroundingService {
     pageEnd: number,
     ctx: { curriculumNameEn: string; gradeNameEn: string; subjectNameEn: string; subjectNameAr?: string | null; unitNameEn: string },
     requestingUserId: string,
-  ): Promise<{ merged: GroundingNotes; model: string; chunkCount: number; pdfFingerprint: string }> {
+  ): Promise<{ merged: GroundingNotes; chunkNotes: GroundingNotes[]; model: string; chunkCount: number; pdfFingerprint: string }> {
     this.logger.log(`CURRICULUM_SOURCE_FETCH_STARTED unitId=${unitId}`);
     let fetched: { localPath: string; isTemporary: boolean };
     try {
@@ -438,7 +464,7 @@ export class UnitGroundingService {
       }
 
       const merged = mergeGroundingNotes(chunkNotes);
-      return { merged, model: active.model, chunkCount: chunks.length, pdfFingerprint: this.computeFingerprint(pdfPath, pageStart, pageEnd) };
+      return { merged, chunkNotes, model: active.model, chunkCount: chunks.length, pdfFingerprint: this.computeFingerprint(pdfPath, pageStart, pageEnd) };
     } catch (err) {
       this.logger.warn(`GROUNDING_EXTRACTION_FAILED unitId=${unitId}: ${err instanceof Error ? err.message : String(err)}`);
       throw err;

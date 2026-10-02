@@ -208,3 +208,21 @@ describe("failure persistence across resumes", () => {
     }
   });
 });
+
+describe("assignment rebuild ordering for a large Unit (limit lifted only in this test)", () => {
+  // Harness U3 spans 77 pages; maxUnitPages=1000 lets the orchestration path process it here.
+  it("16/17: assignments are rebuilt only after a successful replacement, and READY Topics are verified non-empty", async () => {
+    const h = harness({}); const r = await run(h, true, new Map(), 1000);
+    expect(r.units[2].outcome).toBe("COMPLETED");
+    const replaceOrder = h.deps.replace.mock.invocationCallOrder[2], rebuildOrder = h.deps.rebuildAssignments.mock.invocationCallOrder[2];
+    expect(replaceOrder).toBeLessThan(rebuildOrder);
+    expect(r.units[2].topics!.every((t: any) => t.state === "READY_CURRENT")).toBe(true);
+  });
+  it("18: no assignment rebuild when the large Unit's replacement generation fails", async () => {
+    const h = harness({}, { genFail: { [U[2]]: "Grounding extraction failed validation for pages 70-71 after 2 attempt(s)." } });
+    const r = await run(h, true, new Map(), 1000);
+    expect(r.units[2].outcome).toBe("FAILED_BEFORE_REPLACEMENT");
+    expect(h.deps.rebuildAssignments.mock.calls.flat(2)).not.toContain("topic2xxxxxxxxxxxxxxxxxxxx");
+    expect(h.state[U[2]].groundingSourceFingerprint).toBe(T[2].oldFingerprint);
+  });
+});

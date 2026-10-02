@@ -67,3 +67,37 @@ describe("reground-unit", () => {
     expect(d.generate).not.toHaveBeenCalled();
   });
 });
+
+describe("reground-unit with a large (>40-page) Unit", () => {
+  const LU = "unitlargelargelargelargel1";
+  const largePlan: RepairPlan = { version: 1, excluded: [], books: [{ ...plan.books[0], offset: 1, finalUnitContentEnd: 55, physicalPageCount: 154, expectedUnits: [{ unitId: LU, order: 1, persistedStart: 7, persistedEnd: 54 }] }] };
+  const lt = approvedTarget(largePlan, LU);
+  const liveLarge = (fp: string): LiveUnitGrounding => ({ id: LU, sourceFileOverride: null, subjectSourceFile: KEY, sourcePageStart: 8, sourcePageEnd: 55, groundingSourceFingerprint: fp, hasNotes: true });
+  const largeGen = { notes: { concepts: [{ name: "first", sourcePages: [8] }, { name: "boundary-a", sourcePages: [31] }, { name: "boundary-b", sourcePages: [32] }, { name: "last", sourcePages: [55] }] }, model: "gpt-4o-mini", chunkCount: 24, sourceKey: KEY, pageStart: 8, pageEnd: 55, groundingVersion: 1, groundingPromptVersion: "grounding-extraction-v2" };
+  it("15: the replacement fingerprint is the FULL corrected Unit identity, not any window's", () => {
+    expect(lt).toMatchObject({ newStart: 8, newEnd: 55 });
+    expect(lt.newFingerprint).toBe(groundingSourceFingerprint(KEY, 8, 55));
+    expect(lt.newFingerprint).not.toBe(groundingSourceFingerprint(KEY, 8, 31));
+    expect(lt.newFingerprint).not.toBe(groundingSourceFingerprint(KEY, 32, 55));
+  });
+  it("5: all windows succeed -> exactly one guarded replacement at the end with the full-range fingerprint", async () => {
+    const d = { loadLive: jest.fn().mockResolvedValue(liveLarge(lt.oldFingerprint)), generate: jest.fn().mockResolvedValue(largeGen), replace: jest.fn().mockResolvedValue(1) };
+    await runReground({ plan: largePlan, unitIds: [LU], apply: true }, d);
+    expect(d.replace).toHaveBeenCalledTimes(1);
+    expect(d.replace.mock.calls[0][0]).toMatchObject({ newFingerprint: groundingSourceFingerprint(KEY, 8, 55), newStart: 8, newEnd: 55 });
+  });
+  it("6/7: a failed window (generation throws) -> zero replacement writes", async () => {
+    const d = { loadLive: jest.fn().mockResolvedValue(liveLarge(lt.oldFingerprint)), generate: jest.fn().mockRejectedValue(new Error("Grounding extraction failed validation for pages 40-41 after 2 attempt(s).")), replace: jest.fn() };
+    await expect(runReground({ plan: largePlan, unitIds: [LU], apply: true }, d)).rejects.toThrow(/failed validation/);
+    expect(d.replace).not.toHaveBeenCalled();
+  });
+  it("12/13: boundary-page evidence inside the corrected range is accepted; anything outside it is rejected", () => {
+    expect(() => validateReplacement(lt, largeGen)).not.toThrow();
+    expect(() => validateReplacement(lt, { ...largeGen, notes: { concepts: [{ name: "x", sourcePages: [56] }] } })).toThrow(/outside 8-55/);
+  });
+  it("20: an idempotent re-run after a successful replacement does not regenerate", async () => {
+    const d = { loadLive: jest.fn().mockResolvedValue(liveLarge(lt.newFingerprint)), generate: jest.fn(), replace: jest.fn() };
+    await expect(runReground({ plan: largePlan, unitIds: [LU], apply: true }, d)).rejects.toThrow(/historical old-range fingerprint/);
+    expect(d.generate).not.toHaveBeenCalled(); expect(d.replace).not.toHaveBeenCalled();
+  });
+});
