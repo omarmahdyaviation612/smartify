@@ -72,7 +72,8 @@ export function classifyWithPageLimit(t: ApprovedTarget, live: LiveUnit | null, 
 
 export function classify(t: ApprovedTarget, live: LiveUnit | null, prior: Map<string, UnitOutcome>): UnitClass {
   const p = prior.get(t.unitId);
-  if (p === "FAILED_BEFORE_REPLACEMENT" || p === "FAILED_GUARDED_REPLACEMENT" || p === "GROUNDING_REPLACED_ASSIGNMENT_FAILED") return "FAILED_PREVIOUSLY";
+  // A failure stays terminal across ANY number of resumes: a later report records it as SKIPPED_FAILED_PREVIOUSLY, which must carry it forward too.
+  if (p === "FAILED_BEFORE_REPLACEMENT" || p === "FAILED_GUARDED_REPLACEMENT" || p === "GROUNDING_REPLACED_ASSIGNMENT_FAILED" || p === "SKIPPED_FAILED_PREVIOUSLY") return "FAILED_PREVIOUSLY";
   if (!live || live.sourceFileOverride !== null || live.subjectSourceFile !== t.sourceKey || live.sourcePageStart !== t.newStart || live.sourcePageEnd !== t.newEnd || !live.hasNotes) return "DRIFTED";
   if (live.groundingSourceFingerprint === t.oldFingerprint) return "READY_TO_REGROUND";
   if (live.groundingSourceFingerprint === t.newFingerprint) {

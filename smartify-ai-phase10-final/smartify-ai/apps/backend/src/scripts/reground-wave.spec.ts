@@ -185,3 +185,26 @@ describe("SKIPPED_PAGE_LIMIT (orchestration-level, extraction limit untouched)",
   });
   it("rejects an invalid limit", async () => { await expect(run(harness({}), true, new Map(), 0)).rejects.toThrow(/maxUnitPages/); });
 });
+
+describe("failure persistence across resumes", () => {
+  const liveOld = (t: any): LiveUnit => ({ id: t.unitId, sourceFileOverride: null, subjectSourceFile: KEY, sourcePageStart: t.newStart, sourcePageEnd: t.newEnd, groundingSourceFingerprint: t.oldFingerprint, hasNotes: true, topics: [{ id: "x", nameEn: "x", status: "READY", fingerprint: t.oldFingerprint }] });
+  it.each(["FAILED_BEFORE_REPLACEMENT", "FAILED_GUARDED_REPLACEMENT", "GROUNDING_REPLACED_ASSIGNMENT_FAILED", "SKIPPED_FAILED_PREVIOUSLY"])("prior %s is terminal for resume (never READY_TO_REGROUND)", (outcome) => {
+    expect(classify(T[0], liveOld(T[0]), new Map([[T[0].unitId, outcome as UnitOutcome]]))).toBe("FAILED_PREVIOUSLY");
+    expect(classifyWithPageLimit(T[0], liveOld(T[0]), new Map([[T[0].unitId, outcome as UnitOutcome]]), 40)).toBe("FAILED_PREVIOUSLY");
+  });
+  it("carries a failure through report N (FAILED_*) -> N+1 (SKIPPED_FAILED_PREVIOUSLY) -> N+2 (SKIPPED_FAILED_PREVIOUSLY) with zero work", async () => {
+    const h1 = harness({}, { genFail: { [U[0]]: "Grounding extraction failed validation" } });
+    const reportN = await run(h1); expect(reportN.units[0].outcome).toBe("FAILED_BEFORE_REPLACEMENT");
+    const priorFrom = (rep: any) => new Map<string, UnitOutcome>(rep.units.map((u: any) => [u.unitId, u.outcome]));
+    let rep = reportN;
+    for (const step of [1, 2]) {
+      const h = harness({ [U[1]]: "new", [U[2]]: "new" }); const before = JSON.stringify(h.state[U[0]]);
+      rep = await run(h, true, priorFrom(rep));
+      expect(rep.classification[0].classification).toBe("FAILED_PREVIOUSLY");
+      expect(rep.units[0].outcome).toBe("SKIPPED_FAILED_PREVIOUSLY");
+      expect(h.deps.generate).not.toHaveBeenCalled(); expect(h.deps.replace).not.toHaveBeenCalled(); expect(h.deps.rebuildAssignments).not.toHaveBeenCalled();
+      expect(JSON.stringify(h.state[U[0]])).toBe(before); expect(h.state[U[0]].groundingSourceFingerprint).toBe(T[0].oldFingerprint);
+      expect(step).toBeGreaterThan(0);
+    }
+  });
+});
