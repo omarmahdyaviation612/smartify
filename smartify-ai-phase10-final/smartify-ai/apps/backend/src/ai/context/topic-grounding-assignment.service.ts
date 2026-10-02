@@ -58,7 +58,7 @@ export interface DeterministicAssignment {
 
 /** Adds only current, topic/unit-scoped READY evidence to the in-memory
  * candidate pool. The persisted Unit grounding object is never changed. */
-function mergeReadyTopicEvidence(notes: GroundingNotes, rows: any[] | undefined, topicId: string, unitId: string, fingerprint: string, unitStart?: number | null, unitEnd?: number | null): GroundingNotes {
+export function mergeReadyTopicEvidence(notes: GroundingNotes, rows: any[] | undefined, topicId: string, unitId: string, fingerprint: string, unitStart?: number | null, unitEnd?: number | null): GroundingNotes {
   const hasWindow = Number.isInteger(unitStart) && Number.isInteger(unitEnd);
   const extra = (rows ?? []).filter((row) => row.topicId === topicId && row.unitId === unitId && row.sourceFingerprint === fingerprint && row.status === "READY" && (!hasWindow || (row.sourcePageStart >= (unitStart as number) && row.sourcePageEnd <= (unitEnd as number))));
   if (extra.length === 0) return notes;
@@ -138,10 +138,22 @@ export function stepsOneToThree(notes: GroundingNotes, topic: AssignmentTopic, u
         ? "SINGLE_TOPIC_FALLBACK"
         : "KEYWORD_OVERLAP";
 
+  // A sole-Topic (whole-Unit) row must resolve the WHOLE Unit at read time.
+  // The read path re-filters the Unit's notes by persisted NAMES and pulls in
+  // facts/vocabulary only by shared pages, so items on pages without any
+  // concept would silently drop out. Their verbatim term/fact text is
+  // persisted too — the opaque-identifier convention sliceFromAssignment
+  // already resolves (topic-grounding-assignment.util.ts). Other methods are
+  // unchanged.
+  const names =
+    method === "SINGLE_TOPIC_FALLBACK"
+      ? [...slice.concepts.map((c) => c.name), ...slice.vocabulary.map((v) => v.term), ...slice.facts.map((f) => f.fact)]
+      : slice.concepts.map((c) => c.name);
+
   return {
     method,
     confidence: "HIGH",
-    matchedConceptNames: conceptNamesOf(slice.concepts.map((c) => c.name)),
+    matchedConceptNames: conceptNamesOf(names),
     matchedHintTitles: slice.matchedHintTitle ? [slice.matchedHintTitle] : null,
     reason: `selectRelevantGrounding matched via ${method}.`,
   };

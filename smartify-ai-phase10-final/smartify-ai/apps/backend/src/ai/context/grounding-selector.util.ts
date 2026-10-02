@@ -74,6 +74,13 @@ function overlapScore(a: Set<string>, b: Set<string>): number {
  * instead of null. Every fact/concept returned still comes from the real
  * textbook grounding; this widens WHICH slice of real grounding is
  * supplied, it never permits inventing content outside it.
+ *
+ * 2026-10-03 (sole-Topic precedence): the sole-Topic rule is now evaluated
+ * FIRST, before the topicHints match and keyword overlap. A Unit's only Topic
+ * owns the whole Unit unambiguously, so a coincidental one-word title overlap
+ * (Wave B "Planet Earth" vs concept "Components of Earth") must not narrow it
+ * to a fragment of its own textbook pages. Units with 2+ Topics never reach
+ * this branch, so multi-Topic selection is unchanged.
  */
 export function selectRelevantGrounding(
   groundingNotesJson: GroundingNotes | null | undefined,
@@ -81,6 +88,19 @@ export function selectRelevantGrounding(
   unitTopicCount?: number,
 ): GroundingSlice | null {
   if (!groundingNotesJson) return null;
+
+  if (unitTopicCount === 1) {
+    // Sole Topic under this Unit — the Unit's whole grounding IS this Topic's
+    // grounding, unambiguously. Never applied when a Unit has 2+ Topics.
+    return {
+      matchedViaHint: false,
+      matchedVia: "SINGLE_TOPIC_UNIT",
+      learningObjectives: groundingNotesJson.learningObjectives,
+      concepts: groundingNotesJson.concepts,
+      facts: groundingNotesJson.facts,
+      vocabulary: groundingNotesJson.vocabulary,
+    };
+  }
 
   const normalizedTopic = normalizeTitle(topicNameEn);
   const exactHint = groundingNotesJson.topicHints?.find((h) => normalizeTitle(h.topicTitle) === normalizedTopic);
@@ -107,19 +127,6 @@ export function selectRelevantGrounding(
     .filter((s) => s.score > 0);
 
   if (scoredConcepts.length === 0) {
-    if (unitTopicCount === 1) {
-      // Sole Topic under this Unit — the Unit's whole grounding IS this
-      // Topic's grounding, unambiguously. Never applied when a Unit has
-      // 2+ Topics (see doc comment above).
-      return {
-        matchedViaHint: false,
-        matchedVia: "SINGLE_TOPIC_UNIT",
-        learningObjectives: groundingNotesJson.learningObjectives,
-        concepts: groundingNotesJson.concepts,
-        facts: groundingNotesJson.facts,
-        vocabulary: groundingNotesJson.vocabulary,
-      };
-    }
     // Nothing recognizably related to this Topic's title anywhere in the
     // Unit's grounding, and this Unit has other Topics too — safer to
     // report "no relevant slice" than to guess and hand generation an

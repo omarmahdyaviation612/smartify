@@ -70,7 +70,9 @@ describe("dryRunOne — pure classification, zero writes/provider calls by const
     const report = emptyReport();
     dryRunOne(makeTopic({ groundingAssignment: { unitGroundingVersion: 1, unitSourceFingerprint: "OLD-fp", assignmentVersion: 1, method: "HINT_MATCH", mapperPromptVersion: null, status: "READY" } }), report);
     expect(report.staleRecomputed).toBe(1);
-    expect(report.deterministicAssigned["HINT_MATCH"]).toBe(1);
+    // makeTopic's Unit has exactly ONE Topic, so since 2026-10-03 the whole-Unit
+    // rule takes precedence over its hint match.
+    expect(report.deterministicAssigned["SINGLE_TOPIC_FALLBACK"]).toBe(1);
   });
 
   it("an existing valid AI_MAPPER row is counted under alreadyReady and NOT recomputed when only the deterministic axis is stale (production bug regression)", () => {

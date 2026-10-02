@@ -117,15 +117,28 @@ describe("selectRelevantGrounding — single-Topic Unit fallback (2026-09-26)", 
     scopeNotes: [],
   };
 
-  it("one Topic + a descriptive, matching name: the existing narrow hint-matched selector still wins (fallback never triggers)", () => {
+  // 2026-10-03: the sole-Topic rule now takes PRECEDENCE over hint and
+  // keyword matching (Wave B "Planet Earth": a one-word title overlap narrowed
+  // a Unit's only Topic to 1 of its 21 concepts). Replaces the 2026-09-26
+  // expectation that a sole Topic's hint match still won.
+  it("2: one Topic + an exact topicHints match: the WHOLE Unit (SINGLE_TOPIC_UNIT), not the hint's narrow slice", () => {
     const slice = selectRelevantGrounding(singleTopicUnit, "Character Interactions", 1);
-    expect(slice).not.toBeNull();
-    expect(slice!.matchedViaHint).toBe(true);
-    expect(slice!.concepts.map((c) => c.name)).toEqual(["Character Description"]);
-    expect(slice!.concepts.map((c) => c.name)).not.toContain("Dolphins");
+    expect(slice!.matchedVia).toBe("SINGLE_TOPIC_UNIT");
+    expect(slice!.matchedViaHint).toBe(false);
+    expect(slice!.concepts).toEqual(singleTopicUnit.concepts);
+    expect(slice!.facts).toEqual(singleTopicUnit.facts);
+    expect(slice!.vocabulary).toEqual(singleTopicUnit.vocabulary);
   });
 
-  it("one Topic + zero lexical match (e.g. a generic 'Chapter 1' name): falls back to the Unit's FULL grounding rather than blocking", () => {
+  it("1: one Topic + keyword overlap with a single concept: the WHOLE Unit (SINGLE_TOPIC_UNIT), not the overlapping concept", () => {
+    const slice = selectRelevantGrounding(singleTopicUnit, "Friendly Dolphins", 1);
+    expect(slice!.matchedVia).toBe("SINGLE_TOPIC_UNIT");
+    expect(slice!.concepts.map((c) => c.name)).toEqual(["Character Description", "Dolphins"]);
+    expect(slice!.facts).toEqual(singleTopicUnit.facts);
+    expect(slice!.vocabulary).toEqual(singleTopicUnit.vocabulary);
+  });
+
+  it("3: one Topic + zero lexical match (e.g. a generic 'Chapter 1' name): falls back to the Unit's FULL grounding rather than blocking", () => {
     const slice = selectRelevantGrounding(singleTopicUnit, "Chapter 1", 1);
     expect(slice).not.toBeNull();
     expect(slice!.matchedViaHint).toBe(false);
