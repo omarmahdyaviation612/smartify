@@ -133,8 +133,12 @@ export interface StagedReplacement {
 export interface StageDeps {
   /** Generates + persists a pending_review LessonDraft against `gate` (normal accounting). */
   generateLesson(topicId: string, gate: ReadyGate): Promise<{ draftId: string; objectivesEn: string[]; metadata: AutoLessonGenerationMetadata }>;
-  /** Generates + persists at most `count` pending_review QuestionDrafts against `gate` (normal validation/accounting). */
-  generateQuestions(topicId: string, count: number, gate: ReadyGate, lessonObjectives: string[]): Promise<string[]>;
+  /**
+   * Generates + persists at most `count` pending_review QuestionDrafts against `gate` (normal validation/accounting).
+   * `acceptedPoolPrompts`: prompts of the Questions already accepted into THIS staged pool — grounding
+   * consistency is judged on the final candidate pool (see generateAutoQuestionBatch's `staged`).
+   */
+  generateQuestions(topicId: string, count: number, gate: ReadyGate, lessonObjectives: string[], acceptedPoolPrompts: string[]): Promise<string[]>;
   /** Re-reads staged drafts by id. */
   loadQuestionDrafts(ids: string[]): Promise<any[]>;
 }
@@ -142,20 +146,71 @@ export interface StageDeps {
 const stagedForCandidate = (d: any, topicId: string, prov: TopicContentProvenance) =>
   d.topicId === topicId && d.status === "pending_review" && !d.publishedQuestionId && d.groundingSourceFingerprint === prov.groundingSourceFingerprint && d.groundingAssignmentFingerprint === prov.groundingAssignmentFingerprint;
 
+/** A staged draft that may count toward THIS plan's pool: same Topic, candidate provenance, unpublished, individually valid. */
+const acceptableStaged = (d: any, plan: StagedRepairPlan) =>
+  stagedForCandidate(d, plan.topicId, plan.candidate.gate.provenance) && validateQuestionDraft(d, { topicExists: true, topicIsPlaceholder: false, requireReviewedContent: true }).valid;
+
+export interface StagedLeftovers {
+  /** Pending staged QuestionDrafts provably belonging to THIS candidate (reusable). */
+  reusableQuestionDraftIds: string[];
+  /** Pending, unpublished LessonDrafts for this Unit. Never reusable: LessonDraft stores no provenance, so membership in this candidate cannot be proven. */
+  pendingLessonDraftIds: string[];
+  /** Anything that makes reuse unsafe — reported, never reused or deleted. */
+  ambiguous: string[];
+}
+
+/**
+ * Pure: classifies leftover staged rows from an earlier, failed staging run of
+ * the SAME repair. Only pending, unpublished, individually valid QuestionDrafts
+ * of this Topic stamped with exactly this plan's candidate provenance are
+ * reusable. Any other pending draft for the Topic (another candidate, no
+ * provenance, invalid), duplicates, or more than the target count make the
+ * leftovers ambiguous.
+ */
+export function discoverStagedLeftovers(plan: StagedRepairPlan, pendingQuestionDrafts: any[], pendingLessonDrafts: any[]): StagedLeftovers {
+  const ambiguous: string[] = [];
+  const reusable: any[] = [];
+  for (const d of pendingQuestionDrafts) {
+    if (d.topicId !== plan.topicId || d.status !== "pending_review" || d.publishedQuestionId) continue;
+    if (acceptableStaged(d, plan)) reusable.push(d);
+    else ambiguous.push(`${d.id}: pending draft for this Topic that does not belong to this candidate or fails validation`);
+  }
+  const prompts = new Set<string>();
+  for (const d of reusable) {
+    if (prompts.has(d.promptEn)) ambiguous.push(`${d.id}: duplicate staged prompt`);
+    prompts.add(d.promptEn);
+  }
+  if (reusable.length > STAGED_POOL_TARGET) ambiguous.push(`${reusable.length} reusable staged drafts exceed the target ${STAGED_POOL_TARGET}`);
+  return {
+    reusableQuestionDraftIds: reusable.map((d) => d.id).sort(),
+    pendingLessonDraftIds: pendingLessonDrafts.filter((l) => l.targetUnitId === plan.unitId && l.status === "pending_review" && !l.publishedTopicId).map((l) => l.id).sort(),
+    ambiguous,
+  };
+}
+
 /** Provider work happens HERE, before any live write. Failures leave live state untouched (staged drafts stay non-servable). */
-export async function stageReplacement(plan: StagedRepairPlan, deps: StageDeps): Promise<StagedReplacement> {
+export async function stageReplacement(plan: StagedRepairPlan, deps: StageDeps, opts: { reuseQuestionDraftIds?: string[] } = {}): Promise<StagedReplacement> {
   const gate = plan.candidate.gate;
+  // Reused staged Questions are re-validated here, never trusted blindly.
+  const reuse = opts.reuseQuestionDraftIds ?? [];
+  if (reuse.length > STAGED_POOL_TARGET) throw new StagedRepairError("STAGED_REUSE", `${plan.topicId}: ${reuse.length} reusable drafts exceed the target`);
+  const reusedRows = reuse.length ? await deps.loadQuestionDrafts(reuse) : [];
+  if (reusedRows.length !== reuse.length || !reusedRows.every((d) => acceptableStaged(d, plan))) {
+    throw new StagedRepairError("STAGED_REUSE", `${plan.topicId}: a reused staged draft is not a valid pending draft of this candidate`);
+  }
   const lesson = await deps.generateLesson(plan.topicId, gate);
   if (lesson.metadata.provenance?.groundingAssignmentFingerprint !== plan.candidateAssignmentFingerprint) {
     throw new StagedRepairError("STAGED_PROVENANCE", `${plan.topicId}: staged lesson not stamped with the candidate assignment`);
   }
-  const ids: string[] = [];
+  const ids: string[] = [...reuse];
   const batchErrors: string[] = [];
   let batches = 0;
   while (ids.length < STAGED_POOL_TARGET && batches < MAX_STAGED_QUESTION_BATCHES) {
     batches++;
+    // The pool accepted so far — ONLY this plan's valid staged drafts (never live, LEGACY, MISMATCH or foreign rows).
+    const accepted = (await deps.loadQuestionDrafts(ids)).filter((d) => acceptableStaged(d, plan));
     try {
-      const created = await deps.generateQuestions(plan.topicId, STAGED_POOL_TARGET - ids.length, gate, lesson.objectivesEn);
+      const created = await deps.generateQuestions(plan.topicId, STAGED_POOL_TARGET - ids.length, gate, lesson.objectivesEn, accepted.map((d) => d.promptEn));
       ids.push(...created);
     } catch (err) {
       batchErrors.push(err instanceof Error ? err.message : String(err));

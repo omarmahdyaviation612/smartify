@@ -8,7 +8,7 @@ import { PracticeService } from "../../practice/practice.service";
 import { QuizzesService } from "../../quizzes/quizzes.service";
 import { QuestionDraftGeneratorService } from "../../question-bank/question-draft-generator/question-draft-generator.service";
 import { LessonDraftGeneratorService } from "../../interactive-lesson/lesson-draft-generator/lesson-draft-generator.service";
-import { flipStagedReplacement, planStagedRepair, stageReplacement, StagedRepairError, type StageDeps, type StagedRepairPlan } from "./staged-assignment-repair";
+import { discoverStagedLeftovers, flipStagedReplacement, planStagedRepair, stageReplacement, StagedRepairError, type StageDeps, type StagedRepairPlan } from "./staged-assignment-repair";
 import { runStagedRepair, scopeFromPlan, parseArgs, verifyCommitted } from "../../scripts/repair-sole-topic-staged";
 import { canServeTopicSteps, classifyContentProvenance, evaluateTopicGroundingGate, questionServabilityByTopic } from "./topic-content-provenance.util";
 import { DETERMINISTIC_ASSIGNMENT_VERSION } from "./topic-grounding-assignment.util";
@@ -124,6 +124,10 @@ function stageDeps(state: { s: State }, opts: { lessonThrows?: boolean; yields?:
   return deps;
 }
 const SCOPE = new Set([UNIT]);
+const pendingOf = (state: { s: State }) => async () => ({
+  questionDrafts: clone(state.s.questionDrafts.filter((d: any) => d.topicId === TOPIC && d.status === "pending_review" && !d.publishedQuestionId)),
+  lessonDrafts: clone(state.s.lessonDrafts.filter((d: any) => d.targetUnitId === UNIT && d.status === "pending_review" && !d.publishedTopicId)),
+});
 const liveOnly = (s: State) => clone({ unit: s.unit, assignment: s.assignment, topic: s.topic, lessons: s.lessons, objectives: s.objectives, questions: s.questions, publishedDrafts: s.questionDrafts.filter((d: any) => d.status === "published"), claimedLessonDrafts: s.lessonDrafts.filter((d: any) => d.status === "published") });
 
 /** REAL student services over the store's current state, with a provider spy. */
@@ -276,7 +280,7 @@ describe("STAGED REPAIR — aborts leave live state untouched", () => {
 });
 
 describe("STAGED REPAIR — staging failures (provider work before any live write)", () => {
-  const baseDeps = (state: { s: State }, opts: any, flip = jest.fn()) => ({ ...stageDeps(state, opts), loadTopic: async () => clone(view(state.s)), loadLessonDraft: async (id: string) => clone(state.s.lessonDrafts.find((d: any) => d.id === id)), flip });
+  const baseDeps = (state: { s: State }, opts: any, flip = jest.fn()) => ({ ...stageDeps(state, opts), loadTopic: async () => clone(view(state.s)), loadLessonDraft: async (id: string) => clone(state.s.lessonDrafts.find((d: any) => d.id === id)), loadPendingStaged: pendingOf(state), flip });
   it.each([
     ["9/10: lesson generation failure", { lessonThrows: true }],
     ["11: Question generation fails in both bounded batches", { yields: [new Error("failed validation"), new Error("failed validation")] }],
@@ -326,7 +330,8 @@ describe("STAGED REPAIR — scope and eligibility refusals", () => {
     for (const method of ["AI_MAPPER", "SINGLE_TOPIC_FALLBACK"]) { const s = freshState(); s.assignment.method = method; expect(() => planStagedRepair(view(s) as any, SCOPE)).toThrow(); }
   });
   it("tool args: explicit bounded allowlist + required plan scope; scope comes from the plan's Unit ids", () => {
-    expect(parseArgs(["--plan=p.json", "--topicIds=cmucxctf800092qd5centl3fq"])).toEqual({ plan: "p.json", topicIds: ["cmucxctf800092qd5centl3fq"], apply: false });
+    expect(parseArgs(["--plan=p.json", "--topicIds=cmucxctf800092qd5centl3fq"])).toEqual({ plan: "p.json", topicIds: ["cmucxctf800092qd5centl3fq"], apply: false, reuseStaged: false });
+    expect(parseArgs(["--plan=p.json", "--topicIds=cmucxctf800092qd5centl3fq", "--apply", "--reuse-staged"]).reuseStaged).toBe(true);
     for (const bad of [["--topicIds=cmucxctf800092qd5centl3fq"], ["--plan=p.json"], ["--plan=p.json", "--unitIds=cmucxctf300072qd5jelu3k9c"]]) expect(() => parseArgs(bad)).toThrow();
     expect(scopeFromPlan({ books: [{ expectedUnits: [{ unitId: "a" }, { unitId: "b" }] }] })).toEqual(new Set(["a", "b"]));
   });
@@ -377,5 +382,186 @@ describe("STAGED REPAIR — generators honour the staged gate and keep normal ac
     expect(topicFind).not.toHaveBeenCalled();
     expect(r.provenance).toEqual(gate.provenance);
     expect(usage.reconcileBudget).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * 2026-10-03 ACCUMULATED POOL VALIDATION — grounding consistency for a staged
+ * completion batch is judged on the FINAL candidate pool (already-accepted
+ * staged Questions of THIS plan + the new batch), never on the batch alone;
+ * every other rule is unchanged.
+ */
+describe("ACCUMULATED POOL — generator (real QuestionDraftGeneratorService)", () => {
+  const gate = () => planStagedRepair(view(freshState()) as any, SCOPE).candidate.gate;
+  const ANCHORED = (i: number) => ({ ...QV, promptEn: `Which of these is one of the types of rocks? (${i})` });
+  const PLAIN = (i: number) => ({ ...QV, promptEn: `What is 15 minus ${i}?` });
+  function harness(batches: any[][], live: any = { ...view(freshState()), nameEn: "Planet Earth", lessons: [{ isPlaceholder: false, objectives: [] }], unit: { ...view(freshState()).unit, _count: { topics: 1 } } }) {
+    let call = 0;
+    const generate = jest.fn().mockImplementation(async () => ({ content: JSON.stringify({ questions: batches[Math.min(call++, batches.length - 1)] }), inputTokens: 5, outputTokens: 5 }));
+    const usage = { assertWithinBudget: jest.fn(), estimateMaxChatCostUsd: jest.fn().mockResolvedValue(0.01), reserveBudget: jest.fn().mockResolvedValue({ ok: true, reservationId: "r" }), reconcileBudget: jest.fn().mockResolvedValue(undefined), releaseBudget: jest.fn().mockResolvedValue(undefined) };
+    const prisma = { client: { topic: { findUnique: jest.fn().mockResolvedValue(live) }, question: { findMany: jest.fn().mockResolvedValue([]) }, questionDraft: { create: jest.fn().mockImplementation(async ({ data }: any) => ({ id: `qd-${Math.random()}`, ...data })) }, aIUsage: { create: jest.fn().mockResolvedValue(undefined) } } } as any;
+    const svc = new QuestionDraftGeneratorService(prisma, { getActiveProvider: jest.fn().mockResolvedValue({ provider: { generate }, providerKey: "openai", model: "m" }), getCostRates: jest.fn().mockResolvedValue({ costPerInputToken: 0, costPerOutputToken: 0 }) } as any, { buildAutoQuestionBatchGenerationPrompt: jest.fn().mockReturnValue("p") } as any, usage as any, { autoPublish: jest.fn() } as any, { ensureTopicHasLesson: jest.fn() } as any);
+    return { svc, generate, usage, prisma };
+  }
+  const anchored7 = Array.from({ length: 7 }, (_, i) => ANCHORED(i).promptEn);
+  const plain7 = Array.from({ length: 7 }, (_, i) => PLAIN(i).promptEn);
+
+  it("1/19: an initial anchored 8-Question batch passes exactly as before (no pool)", async () => {
+    const h = harness([Array.from({ length: 8 }, (_, i) => ANCHORED(i))]);
+    expect((await h.svc.generateAutoQuestionBatch(TOPIC, 8, "actor", { gate: gate() })).drafts).toHaveLength(8);
+  });
+  it("2: an initial completely ungrounded batch still fails, with no draft written", async () => {
+    const h = harness([Array.from({ length: 8 }, (_, i) => PLAIN(i))]);
+    await expect(h.svc.generateAutoQuestionBatch(TOPIC, 8, "actor", { gate: gate() })).rejects.toThrow(/failed validation/);
+    expect(h.prisma.client.questionDraft.create).not.toHaveBeenCalled();
+  });
+  it("3: 7 grounded staged + 1 curriculum-valid non-anchor Question: the final pool passes", async () => {
+    const h = harness([[PLAIN(99)]]);
+    const r = await h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPoolPrompts: anchored7 });
+    expect(r.drafts).toHaveLength(1);
+  });
+  it("3b: the SAME single non-anchor Question without the pool fails (the batch boundary was the only difference)", async () => {
+    const h = harness([[PLAIN(99)]]);
+    await expect(h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate() })).rejects.toThrow(/failed validation/);
+  });
+  it("4: 7 ungrounded staged + 1 non-anchor Question: the final pool fails", async () => {
+    const h = harness([[PLAIN(99)]]);
+    await expect(h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPoolPrompts: plain7 })).rejects.toThrow(/failed validation/);
+    expect(h.prisma.client.questionDraft.create).not.toHaveBeenCalled();
+  });
+  it("5: 7 ungrounded staged + 1 anchored Question: passes exactly because the combined pool satisfies the unchanged anchor rule", async () => {
+    const h = harness([[ANCHORED(99)]]);
+    expect((await h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPoolPrompts: plain7 })).drafts).toHaveLength(1);
+  });
+  it("6: verbatim-copy protection is still enforced on the final pool", async () => {
+    const h = harness([[{ ...QV, promptEn: "Earth is made up of soil, rocks and water. True or False?" }]]);
+    await expect(h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPoolPrompts: anchored7 })).rejects.toThrow(/failed validation/);
+  });
+  it("7: a structurally invalid new Question cannot be rescued by the accepted pool", async () => {
+    const h = harness([[{ ...ANCHORED(99), optionsJson: ["a", "b"] }]]);
+    await expect(h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPoolPrompts: anchored7 })).rejects.toThrow(/failed validation/);
+    expect(h.prisma.client.questionDraft.create).not.toHaveBeenCalled();
+  });
+  it("13: a one-Question completion persists at most the one requested Question even if the model returns more", async () => {
+    const h = harness([[PLAIN(1), PLAIN(2), PLAIN(3)]]);
+    expect((await h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPoolPrompts: anchored7 })).drafts).toHaveLength(1);
+    expect(h.prisma.client.questionDraft.create).toHaveBeenCalledTimes(1);
+  });
+  it("14/15: retries stay bounded at 2 provider calls, each reserved and reconciled; nothing released", async () => {
+    const h = harness([[PLAIN(1)]]);
+    await expect(h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPoolPrompts: plain7 })).rejects.toThrow();
+    expect(h.generate).toHaveBeenCalledTimes(2);
+    expect(h.usage.reserveBudget).toHaveBeenCalledTimes(2);
+    expect(h.usage.reconcileBudget).toHaveBeenCalledTimes(2);
+    expect(h.usage.releaseBudget).not.toHaveBeenCalled();
+  });
+  it("20: the student lazy top-up never uses a pool — grounded Questions already stored do not rescue an ungrounded new batch", async () => {
+    const cur = gate().provenance;
+    const live = { ...view(freshState()), nameEn: "Planet Earth", lessons: [{ isPlaceholder: false, objectives: [] }], unit: { ...view(freshState()).unit, _count: { topics: 1 } } };
+    const h = harness([[PLAIN(1)]], live);
+    h.prisma.client.question.findMany = jest.fn().mockResolvedValue([]);
+    await h.svc.ensurePoolForTopic(TOPIC, "student");
+    expect(h.prisma.client.questionDraft.create).not.toHaveBeenCalled(); // per-batch rule, exactly as before
+    expect(cur).toBeDefined();
+  });
+});
+
+describe("ACCUMULATED POOL — staging, leftovers and reuse", () => {
+  /** Stage a 7-Question failed run's leftovers exactly like production: 7 candidate drafts + 1 pending lesson draft. */
+  function withLeftovers() {
+    const state = { s: freshState() };
+    const plan = planStagedRepair(view(state.s) as any, SCOPE);
+    state.s.lessonDrafts.push({ id: "ld-leftover", status: "pending_review", publishedTopicId: null, targetUnitId: UNIT, topicNameEn: "Planet Earth", topicNameAr: "كوكب الأرض", teachingStepsJson: [{ id: "x", type: "INTRO", order: 1, objective: "x" }], learningObjectivesJson: [{ objectiveEn: "a", objectiveAr: "ب" }] });
+    for (let i = 0; i < 7; i++) state.s.questionDrafts.push({ id: `qd-left-${i}`, topicId: TOPIC, status: "pending_review", publishedQuestionId: null, ...QV, promptEn: `Leftover rocks question ${i}`, ...plan.candidate.gate.provenance });
+    return { state, plan };
+  }
+  const deps = (state: { s: State }, opts: any = {}) => ({ ...stageDeps(state, opts), loadTopic: async () => clone(view(state.s)), loadLessonDraft: async (id: string) => clone(state.s.lessonDrafts.find((d: any) => d.id === id)), loadPendingStaged: pendingOf(state) });
+
+  it("leftover discovery: exactly the 7 candidate drafts are reusable; the LessonDraft is reported but never reusable", async () => {
+    const { state, plan } = withLeftovers();
+    const p = await pendingOf(state)();
+    const lo = discoverStagedLeftovers(plan, p.questionDrafts, p.lessonDrafts);
+    expect(lo.reusableQuestionDraftIds).toHaveLength(7);
+    expect(lo.pendingLessonDraftIds).toEqual(["ld-leftover"]);
+    expect(lo.ambiguous).toEqual([]);
+  });
+  it.each([
+    ["8: a foreign-candidate pending draft", (s: State) => s.questionDrafts.push({ id: "qd-foreign", topicId: TOPIC, status: "pending_review", publishedQuestionId: null, ...QV, promptEn: "f", groundingSourceFingerprint: FP, groundingAssignmentFingerprint: "tga1:other" })],
+    ["a provenance-less pending draft", (s: State) => s.questionDrafts.push({ id: "qd-null", topicId: TOPIC, status: "pending_review", publishedQuestionId: null, ...QV, promptEn: "n", groundingSourceFingerprint: null, groundingAssignmentFingerprint: null })],
+    ["an invalid candidate draft", (s: State) => Object.assign(s.questionDrafts.find((d: any) => d.id === "qd-left-0"), { optionsJson: ["a"] })],
+    ["a duplicate staged prompt", (s: State) => Object.assign(s.questionDrafts.find((d: any) => d.id === "qd-left-1"), { promptEn: "Leftover rocks question 0" })],
+    ["12: more reusable drafts than the target", (s: State) => { const prov = planStagedRepair(view(s) as any, SCOPE).candidate.gate.provenance; for (let i = 7; i < 10; i++) s.questionDrafts.push({ id: `qd-left-${i}`, topicId: TOPIC, status: "pending_review", publishedQuestionId: null, ...QV, promptEn: `Leftover rocks question ${i}`, ...prov }); }],
+  ])("ambiguous leftovers stop the tool before any provider call (%s) — nothing reused or deleted", async (_n, mutate) => {
+    const { state } = withLeftovers();
+    mutate(state.s);
+    const before = clone(state.s);
+    const d = deps(state);
+    const out = await runStagedRepair({ topicIds: [TOPIC], apply: true, reuseStaged: true }, SCOPE, { ...d, flip: jest.fn() } as any);
+    expect(out.results[0].error.code).toBe("STAGED_LEFTOVERS_AMBIGUOUS");
+    expect(d.calls).toEqual({ lesson: 0, questions: 0 });
+    expect(state.s).toEqual(before);
+  });
+  it("reuse requires the explicit --reuse-staged flag", async () => {
+    const { state } = withLeftovers();
+    const d = deps(state);
+    const out = await runStagedRepair({ topicIds: [TOPIC], apply: true }, SCOPE, { ...d, flip: jest.fn() } as any);
+    expect(out.results[0].error.code).toBe("STAGED_LEFTOVERS_PRESENT");
+    expect(d.calls).toEqual({ lesson: 0, questions: 0 });
+  });
+  it("dry run with leftovers: plans ONLY 1 new Question, reports the lesson as not reusable, zero calls and writes", async () => {
+    const { state } = withLeftovers();
+    const before = clone(state.s);
+    const d = deps(state);
+    const out = await runStagedRepair({ topicIds: [TOPIC], apply: false, reuseStaged: true }, SCOPE, { ...d, flip: jest.fn() } as any);
+    expect(out.results[0]).toMatchObject({ status: "PLANNED", expectedProviderWork: { questionsReused: 7, questionsToStage: 1, lessonGenerations: 1 }, stagedLeftovers: { reusableQuestionDrafts: expect.arrayContaining(["qd-left-0"]), pendingLessonDrafts: ["ld-leftover"] } });
+    expect(out.results[0].stagedLeftovers.lessonReuse).toMatch(/NOT_REUSED/);
+    expect(d.calls).toEqual({ lesson: 0, questions: 0 });
+    expect(state.s).toEqual(before);
+  });
+  it("9/10/11: the accepted pool passed to completion contains ONLY this plan's staged drafts — never LEGACY, old live CURRENT or MISMATCH rows", async () => {
+    const { state, plan } = withLeftovers();
+    const d = deps(state, { yields: [1] });
+    const spy = jest.spyOn(d, "generateQuestions");
+    await stageReplacement(plan, d, { reuseQuestionDraftIds: Array.from({ length: 7 }, (_, i) => `qd-left-${i}`) });
+    const pool = spy.mock.calls[0][4] as string[];
+    expect(pool.sort()).toEqual(Array.from({ length: 7 }, (_, i) => `Leftover rocks question ${i}`).sort());
+    expect(pool.some((p) => /Old current|Legacy/.test(p))).toBe(false);
+    expect(spy.mock.calls[0][1]).toBe(1); // only the missing Question is requested
+  });
+  it("8: a foreign draft id passed for reuse is refused (cannot contribute)", async () => {
+    const { state, plan } = withLeftovers();
+    state.s.questionDrafts.push({ id: "qd-foreign", topicId: TOPIC, status: "pending_review", publishedQuestionId: null, ...QV, promptEn: "f", groundingSourceFingerprint: FP, groundingAssignmentFingerprint: "tga1:other" });
+    await expect(stageReplacement(plan, deps(state), { reuseQuestionDraftIds: ["qd-left-0", "qd-foreign"] })).rejects.toMatchObject({ code: "STAGED_REUSE" });
+  });
+  it("12: the staged pool never exceeds the target: reusing 8 makes zero Question calls", async () => {
+    const { state, plan } = withLeftovers();
+    state.s.questionDrafts.push({ id: "qd-left-7", topicId: TOPIC, status: "pending_review", publishedQuestionId: null, ...QV, promptEn: "Leftover rocks question 7", ...plan.candidate.gate.provenance });
+    const d = deps(state);
+    const staged = await stageReplacement(plan, d, { reuseQuestionDraftIds: Array.from({ length: 8 }, (_, i) => `qd-left-${i}`) });
+    expect(d.calls.questions).toBe(0);
+    expect(staged.questionDraftIds).toHaveLength(8);
+  });
+  it("16: a failed completion (both bounded batches fail) leaves live assignment and content unchanged and flips nothing", async () => {
+    const { state } = withLeftovers();
+    const before = liveOnly(state.s);
+    const flip = jest.fn();
+    const out = await runStagedRepair({ topicIds: [TOPIC], apply: true, reuseStaged: true }, SCOPE, { ...deps(state, { yields: [new Error("failed validation"), new Error("failed validation")] }), flip } as any);
+    expect(out.results[0].error.code).toBe("STAGED_INCOMPLETE");
+    expect(flip).not.toHaveBeenCalled();
+    expect(liveOnly(state.s)).toEqual(before);
+  });
+  it("17/18: reuse 7 + generate 1 -> atomic flip -> exactly 8 CURRENT servable, the old leftover LessonDraft untouched, zero student top-up", async () => {
+    const { state } = withLeftovers();
+    const d = deps(state, { yields: [1] });
+    const out = await runStagedRepair({ topicIds: [TOPIC], apply: true, reuseStaged: true }, SCOPE, { ...d, flip: (plan: StagedRepairPlan, staged: any) => flipStagedReplacement(store(state), plan, staged) } as any);
+    expect(out.results[0].status).toBe("COMPLETED");
+    expect(d.calls).toEqual({ lesson: 1, questions: 1 });
+    const v = view(state.s);
+    const servable = questionServabilityByTopic([v as any], v.questions);
+    expect(v.questions.filter(servable)).toHaveLength(8);
+    expect(state.s.lessonDrafts.find((l: any) => l.id === "ld-leftover")).toMatchObject({ status: "pending_review", publishedTopicId: null });
+    const st = students(state);
+    expect((await st.practice.getAdaptiveQuestions("u", SUBJECT, TOPIC, 100)).questions).toHaveLength(8);
+    expect(st.generate).not.toHaveBeenCalled();
   });
 });

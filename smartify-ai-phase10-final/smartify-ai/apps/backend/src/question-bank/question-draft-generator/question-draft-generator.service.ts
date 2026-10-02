@@ -281,7 +281,15 @@ export class QuestionDraftGeneratorService {
     // READY gate for a CANDIDATE assignment not yet live, plus the staged
     // lesson's objectives in place of the live Lesson's. Validation, budget
     // and accounting are unchanged. Never passed by any student or lazy path.
-    staged?: { gate: Extract<TopicGroundingGate, { state: "READY" }>; lessonObjectives?: string[] },
+    //
+    // `acceptedPoolPrompts` (staged completion only): the English prompts of
+    // the Questions ALREADY accepted into this same staged replacement pool
+    // (same Topic, same candidate provenance, already individually validated —
+    // the caller guarantees this). The grounding-consistency rule then judges
+    // the FINAL candidate pool (accepted + this batch), so a batch boundary
+    // cannot change whether identical final content passes. Omitted, the rule
+    // judges this batch alone exactly as before.
+    staged?: { gate: Extract<TopicGroundingGate, { state: "READY" }>; lessonObjectives?: string[]; acceptedPoolPrompts?: string[] },
   ) {
     // 2026-10-03 Wave B runtime safety: READY_CURRENT_NON_EMPTY is REQUIRED —
     // checked before any budget check, provider call or write. There is no
@@ -431,9 +439,11 @@ export class QuestionDraftGeneratorService {
       validDrafts.splice(count);
       if (validDrafts.length > 0) {
         // §10: grounding-consistency check on the accepted subset as a
-        // whole. Feeds the SAME retry loop as structural validation.
+        // whole — for a staged completion batch, on the final candidate pool
+        // (already-accepted staged prompts + this batch). Feeds the SAME retry
+        // loop as structural validation.
         const consistencyErrors = checkGroundingConsistency(
-          validDrafts.map((q) => q.promptEn as string),
+          [...(staged?.acceptedPoolPrompts ?? []), ...validDrafts.map((q) => q.promptEn as string)],
           groundingSlice,
         );
         if (consistencyErrors.length > 0) {
