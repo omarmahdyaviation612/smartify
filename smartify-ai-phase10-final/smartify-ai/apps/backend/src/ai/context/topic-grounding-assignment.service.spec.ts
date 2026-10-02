@@ -444,6 +444,7 @@ describe("TopicGroundingAssignmentService.assignGroundingForTopic", () => {
       unitGroundingVersion: 1,
       unitSourceFingerprint: "fp",
       assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION,
+      matchedConceptNames: ["Roots"], // a genuinely valid READY row (non-empty runtime slice)
     };
     const { service, upsert, prisma } = buildService({ id: "t1", nameEn: "Parts of a Plant", order: 1, groundingAssignment: existing, unit: groundedUnit });
     const outcome = await service.assignGroundingForTopic("t1");
@@ -497,7 +498,7 @@ describe("TopicGroundingAssignmentService.assignGroundingForTopic", () => {
   });
 
   it("reuses an existing valid assignment even when new READY evidence is present", async () => {
-    const existing = { method: "HINT_MATCH", status: "READY", unitGroundingVersion: 1, unitSourceFingerprint: "fp", assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION };
+    const existing = { method: "HINT_MATCH", status: "READY", unitGroundingVersion: 1, unitSourceFingerprint: "fp", assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION, matchedConceptNames: ["Roots"] };
     const evidence = { topicId: "t1", unitId: "u1", sourceFingerprint: "fp", status: "READY", evidenceJson: [{ type: "concept", label: "New Evidence", sourcePages: [4] }] };
     const { service, upsert, prisma } = buildService({ id: "t1", nameEn: "Parts of a Plant", order: 1, groundingAssignment: existing, topicSourceEvidence: [evidence], unit: groundedUnit });
     expect(await service.assignGroundingForTopic("t1")).toEqual({ outcome: "UNCHANGED", method: "HINT_MATCH", status: "READY" });
@@ -537,6 +538,7 @@ describe("TopicGroundingAssignmentService.assignGroundingForTopic", () => {
       unitSourceFingerprint: "fp",
       assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION - 1, // stale on the deterministic axis only
       mapperPromptVersion: MAPPER_PROMPT_VERSION, // current on the mapper axis
+      matchedConceptNames: ["Roots and Stem"], // a validated, slice-usable mapper selection
     };
     const { service, upsert } = buildService({
       id: "t3",
@@ -657,5 +659,97 @@ describe("TopicGroundingAssignmentService.assignGroundingForTopic", () => {
     expect(outcome).toEqual({ outcome: "ASSIGNED", method: "REVIEW_FULL_UNIT", status: "READY" });
     expect(upsert).toHaveBeenCalledTimes(1);
     expect(upsert.mock.calls[0][0].create.method).toBe("REVIEW_FULL_UNIT");
+  });
+});
+
+describe("read-side READY invariant: an identity-valid READY row is authoritative only if its runtime slice is non-empty", () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { TopicGroundingMapperService } = require("./topic-grounding-mapper.service");
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const compact = require("./compact-grounding-mapper.util");
+  function build(topicRow: any) {
+    const upsert = jest.fn().mockResolvedValue({});
+    const prisma = { client: { topic: { findUnique: jest.fn().mockResolvedValue(topicRow) }, topicGroundingAssignment: { findMany: jest.fn().mockResolvedValue([]), upsert }, aIUsage: { create: jest.fn().mockResolvedValue({}) } } } as any;
+    return { service: new TopicGroundingAssignmentService(prisma), upsert, prisma };
+  }
+  const plantUnit = { id: "u1", groundingNotesJson: hintUnit, groundingVersion: 1, groundingSourceFingerprint: "fp", topics: [{ id: "t1", nameEn: "Parts of a Plant", order: 1 }, { id: "t2", nameEn: "Plant Life Cycle", order: 2 }] };
+  const kiteUnit = { id: "u2", groundingNotesJson: keywordUnit, groundingVersion: 1, groundingSourceFingerprint: "fp", topics: [{ id: "t1", nameEn: "Roots and Stem", order: 1 }, { id: "t2", nameEn: "Volcanoes", order: 2 }, { id: "t3", nameEn: "The Lost Kite (Reading)", order: 3 }] };
+  const emptyMapperRow = { method: "AI_MAPPER", status: "READY", confidence: "HIGH", unitGroundingVersion: 1, unitSourceFingerprint: "fp", assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION, mapperPromptVersion: MAPPER_PROMPT_VERSION, matchedConceptNames: [], matchedHintTitles: [], mapperModel: "m" };
+  const sliceState = (row: any, unit: any) => resolveAssignedGroundingSlice(row, unit, []).state;
+
+  it("1/9/10: a current READY row with a NON-EMPTY slice stays authoritative (UNCHANGED, no write)", async () => {
+    const cases: Array<[string, string[], string[] | null]> = [["HINT_MATCH", ["Roots"], null], ["KEYWORD_OVERLAP", ["Root"], null]];
+    for (const [method, names, hints] of cases) {
+      const row = { method, status: "READY", unitGroundingVersion: 1, unitSourceFingerprint: "fp", assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION, mapperPromptVersion: null, matchedConceptNames: names, matchedHintTitles: hints };
+      expect(sliceState(row, plantUnit)).toBe("READY");
+      const { service, upsert } = build({ id: "t1", nameEn: "Parts of a Plant", order: 1, groundingAssignment: row, unit: plantUnit });
+      expect(await service.assignGroundingForTopic("t1")).toEqual({ outcome: "UNCHANGED", method, status: "READY" });
+      expect(upsert).not.toHaveBeenCalled();
+    }
+  });
+  it("9/10: a legitimate AI_MAPPER READY row (concept, vocabulary, or topicHint reference) is not rewritten by the new validation", async () => {
+    const refs: Array<[string[], string[] | null]> = [[["Roots and Stem"], null]];
+    for (const [names, hints] of refs) {
+      const row = { ...emptyMapperRow, matchedConceptNames: names, matchedHintTitles: hints };
+      expect(sliceState(row, kiteUnit)).toBe("READY");
+      const { service, upsert } = build({ id: "t3", nameEn: "The Lost Kite (Reading)", order: 3, groundingAssignment: row, unit: kiteUnit });
+      expect(await service.assignGroundingForTopic("t3")).toEqual({ outcome: "UNCHANGED", method: "AI_MAPPER", status: "READY" });
+      expect(upsert).not.toHaveBeenCalled();
+    }
+    for (const row of [{ ...emptyMapperRow, matchedConceptNames: ["Root"] }, { ...emptyMapperRow, matchedHintTitles: ["Plant Life Cycle"] }]) {
+      expect(sliceState(row, plantUnit)).toBe("READY");
+    }
+  });
+  it("2/3: READY + EMPTY is not authoritative; deterministic recovery writes READY with a NON-EMPTY slice (no mapper needed)", async () => {
+    expect(sliceState(emptyMapperRow, plantUnit)).toBe("EMPTY");
+    const { service, upsert } = build({ id: "t1", nameEn: "Parts of a Plant", order: 1, groundingAssignment: emptyMapperRow, unit: plantUnit });
+    expect(await service.assignGroundingForTopic("t1")).toEqual({ outcome: "ASSIGNED", method: "HINT_MATCH", status: "READY" });
+    expect(upsert).toHaveBeenCalledTimes(1);
+    const row = upsert.mock.calls[0][0].create;
+    expect(row.status).toBe("READY"); expect(sliceState(row, plantUnit)).toBe("READY");
+  });
+  it("2/5/6: READY + EMPTY with deterministic unresolved is invalidated to BLOCKED and handed to the mapper as UNRESOLVED", async () => {
+    const { service, upsert } = build({ id: "t3", nameEn: "The Lost Kite (Reading)", order: 3, groundingAssignment: emptyMapperRow, unit: kiteUnit });
+    expect((await service.assignGroundingForTopic("t3")).outcome).toBe("UNRESOLVED");
+    expect(upsert).toHaveBeenCalledTimes(1);
+    const row = upsert.mock.calls[0][0].create;
+    expect(row.status).toBe("BLOCKED"); expect(row.matchedConceptNames).toEqual([]); expect(row.reason).toMatch(/EMPTY slice/);
+    expect(sliceState(row, kiteUnit)).toBe("BLOCKED");
+  });
+  it("4/5/6: end-to-end through the fixed mapper — usable match -> READY non-empty; unusable selection -> BLOCKED; never READY EMPTY", async () => {
+    const cases: Array<[string, string]> = [[JSON.stringify({ supported: true, matches: [{ type: "concept", index: 0 }] }), "READY"], [JSON.stringify({ supported: true, matches: [{ type: "skill", index: 0 }] }), "BLOCKED"]];
+    for (const [content, expected] of cases) {
+      const store: any = { row: emptyMapperRow };
+      const upsert = jest.fn(async ({ create }: any) => { store.row = create; return {}; });
+      const unit = { ...kiteUnit, groundingNotesJson: { ...keywordUnit, skills: ["kite reading skill"] } };
+      const prisma = { client: { topic: { findUnique: jest.fn(async () => ({ id: "t3", nameEn: "The Lost Kite (Reading)", order: 3, groundingAssignment: store.row, topicSourceEvidence: [], unit })) }, topicGroundingAssignment: { findMany: jest.fn().mockResolvedValue([]), upsert }, aIUsage: { create: jest.fn().mockResolvedValue({}) } } } as any;
+      const assignment = new TopicGroundingAssignmentService(prisma);
+      const spy = jest.spyOn(compact, "prefilterCompactCandidates").mockReturnValue([{ type: "concept", index: 0, label: "Roots and Stem" }, { type: "skill", index: 0, label: "kite reading skill" }]);
+      const generate = jest.fn().mockResolvedValue({ content, inputTokens: 1, outputTokens: 1 });
+      const mapper = new TopicGroundingMapperService(prisma, { getActiveProvider: jest.fn().mockResolvedValue({ provider: { generate }, providerKey: "openai", model: "m" }), getCostRates: jest.fn().mockResolvedValue({ costPerInputToken: 0, costPerOutputToken: 0 }) } as any, { estimateMaxChatCostUsd: jest.fn().mockResolvedValue(0.01), reserveBudget: jest.fn().mockResolvedValue({ ok: true, reservationId: "r" }), reconcileBudget: jest.fn().mockResolvedValue(undefined), releaseBudget: jest.fn().mockResolvedValue(undefined) } as any, assignment);
+      expect((await assignment.assignGroundingForTopic("t3")).outcome).toBe("UNRESOLVED");
+      await mapper.mapTopic("t3");
+      expect(generate).toHaveBeenCalledTimes(1);
+      expect(store.row.status).toBe(expected);
+      expect(resolveAssignedGroundingSlice(store.row, unit, []).state).toBe(expected === "READY" ? "READY" : "BLOCKED");
+      spy.mockRestore();
+    }
+  });
+  it("6: with no mapper candidates at all, the invalidated row stays BLOCKED (never READY EMPTY)", async () => {
+    const { service, upsert } = build({ id: "t3", nameEn: "The Lost Kite (Reading)", order: 3, groundingAssignment: emptyMapperRow, unit: kiteUnit });
+    await service.assignGroundingForTopic("t3");
+    expect(upsert.mock.calls[0][0].create.status).toBe("BLOCKED");
+  });
+  it("7: stale fingerprint behavior is unchanged (recomputed exactly as before)", async () => {
+    const stale = { ...emptyMapperRow, unitSourceFingerprint: "old" };
+    const { service, upsert } = build({ id: "t1", nameEn: "Parts of a Plant", order: 1, groundingAssignment: stale, unit: plantUnit });
+    expect(await service.assignGroundingForTopic("t1")).toEqual({ outcome: "ASSIGNED", method: "HINT_MATCH", status: "READY" });
+    expect(upsert).toHaveBeenCalledTimes(1);
+  });
+  it("8: an existing current BLOCKED row is unchanged (never invalidated by this rule)", async () => {
+    const blocked = { ...emptyMapperRow, status: "BLOCKED" };
+    const { service, upsert } = build({ id: "t3", nameEn: "The Lost Kite (Reading)", order: 3, groundingAssignment: blocked, unit: kiteUnit });
+    expect(await service.assignGroundingForTopic("t3")).toEqual({ outcome: "UNCHANGED", method: "AI_MAPPER", status: "BLOCKED" });
+    expect(upsert).not.toHaveBeenCalled();
   });
 });

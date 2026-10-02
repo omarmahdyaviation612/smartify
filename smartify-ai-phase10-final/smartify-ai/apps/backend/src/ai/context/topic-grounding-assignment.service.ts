@@ -2,7 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { GroundingNotes } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
 import { selectRelevantGrounding } from "./grounding-selector.util";
-import { DETERMINISTIC_ASSIGNMENT_VERSION, MAPPER_PROMPT_VERSION } from "./topic-grounding-assignment.util";
+import { DETERMINISTIC_ASSIGNMENT_VERSION, MAPPER_PROMPT_VERSION, resolveAssignedGroundingSlice } from "./topic-grounding-assignment.util";
 
 /**
  * The WRITE side of the persisted Topic->grounding assignment (2026-09-27) —
@@ -380,7 +380,15 @@ export class TopicGroundingAssignmentService {
     const factualIdentityMatches =
       !!existing && existing.unitGroundingVersion === unit.groundingVersion && existing.unitSourceFingerprint === unit.groundingSourceFingerprint;
 
-    if (existing && factualIdentityMatches && existing.method === "AI_MAPPER") {
+    // Read-side READY invariant (2026-10-02): an identity-valid READY row is authoritative only if
+    // the SAME runtime slice resolver yields a non-empty slice. A READY row resolving EMPTY is not a
+    // valid cached decision, so it skips both authoritative branches below and is recomputed through
+    // the existing path (deterministic first; UNRESOLVED -> bounded mapper). Nothing else changes.
+    const readyResolvesEmpty =
+      !!existing && factualIdentityMatches && existing.status === "READY" &&
+      resolveAssignedGroundingSlice(existing as any, { id: unit.id, groundingVersion: unit.groundingVersion, groundingSourceFingerprint: unit.groundingSourceFingerprint, groundingNotesJson: unit.groundingNotesJson as unknown as GroundingNotes }, (topic as any).topicSourceEvidence).state === "EMPTY";
+
+    if (existing && factualIdentityMatches && existing.method === "AI_MAPPER" && !readyResolvesEmpty) {
       // AI_MAPPER rows are governed by their OWN mapperPromptVersion axis, not
       // by DETERMINISTIC_ASSIGNMENT_VERSION — see assignmentIdentityMatches in
       // topic-grounding-assignment.util.ts for why conflating the two axes
@@ -422,7 +430,7 @@ export class TopicGroundingAssignmentService {
       // pass below, exactly as if there were no existing row — if Steps 1-5
       // still decline, this Topic becomes UNRESOLVED and is correctly
       // eligible for the (corrected) mapper to re-run.
-    } else if (existing && factualIdentityMatches && existing.assignmentVersion === DETERMINISTIC_ASSIGNMENT_VERSION) {
+    } else if (existing && factualIdentityMatches && existing.assignmentVersion === DETERMINISTIC_ASSIGNMENT_VERSION && !readyResolvesEmpty) {
       // Idempotent no-op for a deterministic-method row: identity matches on
       // both axes, so the persisted decision is still valid. Nothing is
       // recomputed and nothing is written.
@@ -433,6 +441,11 @@ export class TopicGroundingAssignmentService {
 
     const assignment = computeDeterministicAssignment(notes, { id: topic.id, nameEn: topic.nameEn, order: topic.order }, siblings, prior);
     if (!assignment) {
+      if (readyResolvesEmpty) {
+        // Never leave an invalid READY in place: persist BLOCKED before handing over to the mapper
+        // (which overwrites it with READY+non-empty or BLOCKED, and writes nothing when it has no candidates).
+        await this.upsert({ topicId, unitGroundingVersion: unit.groundingVersion, unitSourceFingerprint: unit.groundingSourceFingerprint, method: existing!.method as DeterministicMethod | "AI_MAPPER", confidence: "LOW", status: "BLOCKED", matchedConceptNames: [], matchedHintTitles: null, mapperModel: (existing as any).mapperModel ?? null, mapperPromptVersion: existing!.mapperPromptVersion, reason: "Existing READY assignment resolved to an EMPTY slice; invalidated for recomputation." });
+      }
       this.logger.log(
         JSON.stringify({ event: "TOPIC_GROUNDING_ASSIGNMENT_UNRESOLVED", topicId, unitId: unit.id, topicTitle: topic.nameEn, assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION }),
       );
