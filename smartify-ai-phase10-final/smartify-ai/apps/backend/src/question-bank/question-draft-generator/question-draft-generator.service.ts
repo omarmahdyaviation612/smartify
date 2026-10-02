@@ -273,12 +273,21 @@ export class QuestionDraftGeneratorService {
    * validateQuestionDraft/approve() already enforce for the human
    * pipeline) — generate the lesson first.
    */
-  async generateAutoQuestionBatch(topicId: string, count: number, requestingUserId: string) {
+  async generateAutoQuestionBatch(
+    topicId: string,
+    count: number,
+    requestingUserId: string,
+    // ADMIN-ONLY staged generation (staged-assignment-repair.ts): an explicit
+    // READY gate for a CANDIDATE assignment not yet live, plus the staged
+    // lesson's objectives in place of the live Lesson's. Validation, budget
+    // and accounting are unchanged. Never passed by any student or lazy path.
+    staged?: { gate: Extract<TopicGroundingGate, { state: "READY" }>; lessonObjectives?: string[] },
+  ) {
     // 2026-10-03 Wave B runtime safety: READY_CURRENT_NON_EMPTY is REQUIRED —
     // checked before any budget check, provider call or write. There is no
     // title-only fallback: a missing/stale/BLOCKED/EMPTY assignment means zero
     // provider calls, zero QuestionDraft rows and zero Question rows.
-    const gate = await this.readGroundingGate(topicId);
+    const gate: TopicGroundingGate = staged?.gate ?? (await this.readGroundingGate(topicId));
     if (gate.state !== "READY") {
       this.logger.warn(`TEXTBOOK_TOPIC_GENERATION_BLOCKED topicId=${topicId} kind=questions reason=assignment-${gate.reason.toLowerCase()}`);
       throw new ServiceUnavailableException("Questions are not available for this topic yet.");
@@ -288,7 +297,10 @@ export class QuestionDraftGeneratorService {
     await this.usageService.assertWithinBudget(requestingUserId);
 
     const topicContext = await this.resolveTopicContext(topicId);
-    if (topicContext.isPlaceholder) {
+    // A staged run's lesson is itself staged and installed in the same atomic
+    // transaction as these Questions, so the live-Lesson requirement does not
+    // apply to it (staged-assignment-repair.ts).
+    if (topicContext.isPlaceholder && !staged) {
       throw new ServiceUnavailableException("This topic has no real lesson yet — generate the lesson before questions.");
     }
 
@@ -325,7 +337,7 @@ export class QuestionDraftGeneratorService {
         count,
         attempt > 1 ? lastErrors : undefined,
         groundingSlice,
-        topicContext.lessonObjectives,
+        staged?.lessonObjectives ?? topicContext.lessonObjectives,
       );
 
       const { provider, providerKey, model } = await this.providerFactory.getActiveProvider();

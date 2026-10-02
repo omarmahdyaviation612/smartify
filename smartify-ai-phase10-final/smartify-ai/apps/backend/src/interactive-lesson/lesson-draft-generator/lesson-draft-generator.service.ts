@@ -249,6 +249,11 @@ export class LessonDraftGeneratorService {
     topic: { id: string; nameEn: string; nameAr: string; unitId: string },
     opts: { preferredLang: "ar" | "en"; studentAgeRange: string },
     requestingUserId: string,
+    // ADMIN-ONLY staged generation (staged-assignment-repair.ts): generate
+    // against an explicitly supplied READY gate — a CANDIDATE assignment not
+    // yet live — instead of reading the live one. Never passed by any student
+    // or lazy path; omitted, behavior is exactly as before.
+    staged?: { gate: Extract<TopicGroundingGate, { state: "READY" }> },
   ) {
     const unitContext = await this.resolveUnitContext(topic.unitId);
     // 2026-09-27: the Topic's grounding slice is no longer re-inferred from its
@@ -259,7 +264,7 @@ export class LessonDraftGeneratorService {
     // mismatch) or BLOCKED row yields null and takes exactly the same safe
     // failure path a "no relevant grounding" selection always took — there is
     // no live fallback to title inference and no path to the AI mapper here.
-    const gate = await this.readGroundingGate(topic.id);
+    const gate: TopicGroundingGate = staged?.gate ?? (await this.readGroundingGate(topic.id));
     const groundingSlice = gate.state === "READY" ? gate.slice : null;
     const provenance: TopicContentProvenance | null = gate.state === "READY" ? gate.provenance : null;
     const groundingNotes = unitContext.groundingNotesJson;
