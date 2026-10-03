@@ -185,8 +185,24 @@ export function canServeTopicSteps(topic: GateTopic & TopicStepsProvenanceFields
   return isProvenanceServable(classifyContentProvenance(topicStepsProvenance(topic), gate.provenance), enforcementForUnit(topic.unit));
 }
 
-/** One stored Question as the servability rule sees it (provenance + owning Topic). */
-export type PoolQuestion = { topicId: string; isPlaceholder?: boolean } & StoredProvenance;
+/** One stored Question as the servability rule sees it (provenance + owning Topic + retirement). */
+export type PoolQuestion = { topicId: string; isPlaceholder?: boolean; retiredAt?: Date | string | null } & StoredProvenance;
+
+/**
+ * Question retirement (2026-10-03): a Question with `retiredAt` set is
+ * historical — never servable, gradeable, revealable or counted, and it never
+ * influences CURRENT-vs-LEGACY precedence. Its provenance is unchanged (a
+ * retired CURRENT Question still classifies CURRENT). Every consumer loads
+ * `retiredAt` through QUESTION_PROVENANCE_SELECT (or a full row).
+ */
+export function isRetired(question: { retiredAt?: Date | string | null }): boolean {
+  return question.retiredAt != null;
+}
+
+/** An active (non-placeholder, non-retired) Question whose provenance is CURRENT — the unit every CURRENT pool count uses. */
+export function isActiveCurrentQuestion(question: StoredProvenance & { isPlaceholder?: boolean; retiredAt?: Date | string | null }, current: TopicContentProvenance): boolean {
+  return !question.isPlaceholder && !isRetired(question) && classifyContentProvenance(question, current) === "CURRENT";
+}
 
 /**
  * Builds a per-Topic predicate deciding whether one stored Question may be
@@ -202,17 +218,20 @@ export type PoolQuestion = { topicId: string; isPlaceholder?: boolean } & Stored
  *   - LEGACY   -> servable only in TRANSITION AND only while the Topic has
  *                 zero CURRENT Questions
  *   - MISMATCH -> never servable
+ *   - RETIRED (any provenance) -> never servable, and never counts as the
+ *                 Topic's CURRENT (so it cannot hide LEGACY in TRANSITION)
  */
-export function questionServabilityByTopic(topics: Array<GateTopic & { id: string }>, pool: PoolQuestion[]): (question: { topicId: string } & StoredProvenance) => boolean {
+export function questionServabilityByTopic(topics: Array<GateTopic & { id: string }>, pool: PoolQuestion[]): (question: { topicId: string; retiredAt?: Date | string | null } & StoredProvenance) => boolean {
   const byTopic = new Map<string, { gate: TopicGroundingGate; enforcement: ProvenanceEnforcement; hasCurrent: boolean }>();
   for (const t of topics) byTopic.set(t.id, { gate: evaluateTopicGroundingGate(t), enforcement: enforcementForUnit(t.unit), hasCurrent: false });
   for (const q of pool) {
     const entry = byTopic.get(q.topicId);
-    if (entry && entry.gate.state === "READY" && !q.isPlaceholder && classifyContentProvenance(q, entry.gate.provenance) === "CURRENT") entry.hasCurrent = true;
+    if (entry && entry.gate.state === "READY" && isActiveCurrentQuestion(q, entry.gate.provenance)) entry.hasCurrent = true;
   }
   return (question) => {
     const entry = byTopic.get(question.topicId);
     if (!entry || entry.gate.state !== "READY") return false;
+    if (isRetired(question)) return false;
     const state = classifyContentProvenance(question, entry.gate.provenance);
     if (state === "LEGACY" && entry.hasCurrent) return false;
     return isProvenanceServable(state, entry.enforcement);
@@ -236,4 +255,5 @@ export const UNIT_GATE_SELECT = {
 export const QUESTION_PROVENANCE_SELECT = {
   groundingSourceFingerprint: true,
   groundingAssignmentFingerprint: true,
+  retiredAt: true,
 } as const;

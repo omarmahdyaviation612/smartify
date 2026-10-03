@@ -166,7 +166,7 @@ async function main() {
           where: { id },
           select: {
             id: true, nameEn: true, order: true, teachingStepsJson: true, groundingSourceFingerprintUsed: true, groundingAssignmentFingerprintUsed: true, groundingAssignment: true, topicSourceEvidence: true,
-            questions: { select: { topicId: true, isPlaceholder: true, groundingSourceFingerprint: true, groundingAssignmentFingerprint: true } },
+            questions: { select: { topicId: true, isPlaceholder: true, groundingSourceFingerprint: true, groundingAssignmentFingerprint: true, retiredAt: true } },
             unit: { select: { id: true, groundingVersion: true, groundingSourceFingerprint: true, groundingNotesJson: true, sourcePageStart: true, sourcePageEnd: true, contentProvenanceEnforcedAt: true, topics: { select: { id: true, nameEn: true, order: true }, orderBy: { order: "asc" } } } },
           },
         })) as any,

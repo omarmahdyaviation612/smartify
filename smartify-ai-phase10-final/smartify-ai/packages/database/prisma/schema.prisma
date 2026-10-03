@@ -818,6 +818,16 @@ model Question {
   // QuestionDraft this Question was published from. Null = LEGACY.
   groundingSourceFingerprint     String?
   groundingAssignmentFingerprint String?
+  // Explicit retirement (2026-10-03). A retired Question is historical and
+  // never servable, gradeable or counted (questionServabilityByTopic /
+  // isActiveCurrentQuestion in topic-content-provenance.util.ts). Its content
+  // and provenance are never changed. Set only by the atomic admin
+  // replacement (scripts/replace-current-questions.ts); null = active.
+  retiredAt            DateTime?
+  retiredReason        String?
+  replacedByQuestionId String?   @unique
+  replacedBy           Question? @relation("QuestionReplacement", fields: [replacedByQuestionId], references: [id])
+  replaces             Question? @relation("QuestionReplacement")
 
   attempts           QuestionAttempt[]
   publishedFromDraft QuestionDraft?

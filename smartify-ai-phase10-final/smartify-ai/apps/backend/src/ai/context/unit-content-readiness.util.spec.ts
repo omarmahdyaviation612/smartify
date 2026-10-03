@@ -31,14 +31,14 @@ describe("classifyUnitContentReadiness — historical non-servable content", () 
     const r = classify([topic([...qs(8, CURRENT), ...qs(8, MISMATCH)])], STRICT);
     expect(r.class).toBe("ALREADY_STRICT");
     expect(r.issues).toEqual([]);
-    expect(r.historicalNonServable).toEqual({ legacyQuestions: 0, mismatchQuestions: 8 });
+    expect(r.historicalNonServable).toEqual({ legacyQuestions: 0, mismatchQuestions: 8, retiredQuestions: 0 });
     expect(r.topics[0]).toMatchObject({ servable: { CURRENT: 8 }, historicalNonServable: { MISMATCH: 8 }, lazyLessonRequired: false, topUpRequired: false });
   });
 
   it("2. same with historical LEGACY => ALREADY_STRICT", () => {
     const r = classify([topic([...qs(8, CURRENT), ...qs(8, LEGACY)])], STRICT);
     expect(r.class).toBe("ALREADY_STRICT");
-    expect(r.historicalNonServable).toEqual({ legacyQuestions: 8, mismatchQuestions: 0 });
+    expect(r.historicalNonServable).toEqual({ legacyQuestions: 8, mismatchQuestions: 0, retiredQuestions: 0 });
   });
 
   it("3. same with both LEGACY and MISMATCH historical rows => ALREADY_STRICT (the production 29-Unit shape)", () => {
@@ -183,7 +183,7 @@ describe("buildReadinessPlan — read-only", () => {
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(rows.map((r) => r.unitId)).toEqual(["u1", "u2"]);
       expect(rows.map((r) => r.issues)).toEqual([["GROUNDING_IDENTITY_MISMATCH: grounding fingerprint not canonical for range"], ["GROUNDING_IDENTITY_MISMATCH: grounding fingerprint not canonical for range"]]);
-      expect(rows[0].historicalNonServable).toEqual({ legacyQuestions: 0, mismatchQuestions: 8 });
+      expect(rows[0].historicalNonServable).toEqual({ legacyQuestions: 0, mismatchQuestions: 8, retiredQuestions: 0 });
       expect(summary.units).toBe(2);
     } finally {
       fetchSpy.mockRestore();

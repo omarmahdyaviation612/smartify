@@ -7,7 +7,9 @@ import {
   canServeTopicSteps,
   classifyContentProvenance,
   evaluateTopicGroundingGate,
+  isRetired,
   questionServabilityByTopic,
+  QUESTION_PROVENANCE_SELECT,
   topicStepsProvenance,
   type TopicContentProvenance,
   type TopicGroundingGate,
@@ -93,7 +95,7 @@ export function planStagedRepair(topic: RepairTopic, scopeUnitIds: ReadonlySet<s
   const candidateRow = { ...a, method: reassign.next.method, matchedConceptNames: reassign.next.matchedConceptNames, matchedHintTitles: reassign.next.matchedHintTitles, mapperPromptVersion: null, assignmentVersion: DETERMINISTIC_ASSIGNMENT_VERSION };
   const gate = evaluateTopicGroundingGate({ ...topic, groundingAssignment: candidateRow } as any);
   if (oldGate.state !== "READY" || gate.state !== "READY") throw new StagedRepairError("GATE", `${topic.id}: old or candidate gate not READY`);
-  const qs = topic.questions.filter((q) => !q.isPlaceholder);
+  const qs = topic.questions.filter((q: any) => !q.isPlaceholder && !isRetired(q));
   const cls = (x: any) => classifyContentProvenance(x, oldGate.provenance);
   return {
     topicId: topic.id,
@@ -290,7 +292,7 @@ export async function flipStagedReplacement(prisma: { $transaction: (fn: (tx: an
       // transaction's own view, must see the new state as fully CURRENT.
       const after = await tx.topic.findUnique({
         where: { id: plan.topicId },
-        select: { id: true, teachingStepsJson: true, groundingSourceFingerprintUsed: true, groundingAssignmentFingerprintUsed: true, groundingAssignment: true, topicSourceEvidence: true, questions: { select: { topicId: true, isPlaceholder: true, groundingSourceFingerprint: true, groundingAssignmentFingerprint: true } } },
+        select: { id: true, teachingStepsJson: true, groundingSourceFingerprintUsed: true, groundingAssignmentFingerprintUsed: true, groundingAssignment: true, topicSourceEvidence: true, questions: { select: { topicId: true, isPlaceholder: true, ...QUESTION_PROVENANCE_SELECT } } },
       });
       const gateAfter = evaluateTopicGroundingGate({ ...after, unit } as any);
       if (gateAfter.state !== "READY" || gateAfter.provenance.groundingAssignmentFingerprint !== plan.candidateAssignmentFingerprint || gateAfter.provenance.groundingSourceFingerprint !== prov.groundingSourceFingerprint) {

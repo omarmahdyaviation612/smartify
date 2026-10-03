@@ -122,7 +122,7 @@ export class QuizzesService {
     // a BLOCKED Topic contributes no Questions to any quiz type, including a
     // whole-subject mock_exam, and no Topic mixes LEGACY with CURRENT.
     const isServable = questionServabilityByTopic(topics as any, candidates);
-    const eligible = candidates.filter(isServable).map(({ groundingSourceFingerprint: _s, groundingAssignmentFingerprint: _a, ...q }) => q);
+    const eligible = candidates.filter(isServable).map(({ groundingSourceFingerprint: _s, groundingAssignmentFingerprint: _a, retiredAt: _r, ...q }) => q);
 
     const questions = shuffleQuestionPool(eligible, rng).slice(0, requestedCount);
 

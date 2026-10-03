@@ -131,7 +131,7 @@ export class PracticeService {
     // to practice yet" response), never its old Questions; a Topic with any
     // CURRENT Question never mixes in its LEGACY ones.
     const isServable = questionServabilityByTopic(topics as any, candidateQuestions);
-    const allQuestions = candidateQuestions.filter(isServable).map(({ groundingSourceFingerprint: _s, groundingAssignmentFingerprint: _a, ...q }) => q);
+    const allQuestions = candidateQuestions.filter(isServable).map(({ groundingSourceFingerprint: _s, groundingAssignmentFingerprint: _a, retiredAt: _r, ...q }) => q);
 
     // Weighted random sample without replacement, honoring difficulty weights loosely.
     const byDifficulty: Record<string, typeof allQuestions> = { EASY: [], MEDIUM: [], HARD: [] };

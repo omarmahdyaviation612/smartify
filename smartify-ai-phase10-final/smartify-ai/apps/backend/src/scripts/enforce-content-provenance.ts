@@ -22,7 +22,7 @@
  * Usage:
  *   node dist/scripts/enforce-content-provenance.js --unitIds=<id>[,<id>] [--apply] [--disable]
  */
-import { classifyContentProvenance, evaluateTopicGroundingGate, topicStepsProvenance, type GateTopic, type StoredProvenance, type TopicStepsProvenanceFields } from "../ai/context/topic-content-provenance.util";
+import { classifyContentProvenance, evaluateTopicGroundingGate, isActiveCurrentQuestion, topicStepsProvenance, type GateTopic, type StoredProvenance, type TopicStepsProvenanceFields } from "../ai/context/topic-content-provenance.util";
 import { POOL_TARGET } from "./regenerate-topic-content";
 
 const ID = /^[a-z0-9]{20,40}$/;
@@ -39,7 +39,7 @@ export function parseArgs(argv: string[]): EnforceArgs {
   return { unitIds, apply: argv.includes("--apply"), disable: argv.includes("--disable") };
 }
 
-export type EnforcementTopic = GateTopic & TopicStepsProvenanceFields & { id: string; teachingStepsJson: unknown; questions: Array<StoredProvenance & { isPlaceholder?: boolean }> };
+export type EnforcementTopic = GateTopic & TopicStepsProvenanceFields & { id: string; teachingStepsJson: unknown; questions: Array<StoredProvenance & { isPlaceholder?: boolean; retiredAt?: Date | string | null }> };
 
 /** Pure: the reasons STRICT would withhold content that TRANSITION currently serves. Empty = safe to enable. */
 export function strictReadinessBlockers(topics: EnforcementTopic[]): string[] {
@@ -48,7 +48,7 @@ export function strictReadinessBlockers(topics: EnforcementTopic[]): string[] {
     const gate = evaluateTopicGroundingGate(t);
     if (gate.state !== "READY") continue;
     if (!t.teachingStepsJson || classifyContentProvenance(topicStepsProvenance(t), gate.provenance) !== "CURRENT") blockers.push(`${t.id}: teachingSteps not CURRENT`);
-    const current = t.questions.filter((q) => !q.isPlaceholder && classifyContentProvenance(q, gate.provenance) === "CURRENT").length;
+    const current = t.questions.filter((q) => isActiveCurrentQuestion(q, gate.provenance)).length; // retired rows never satisfy readiness
     if (current < POOL_TARGET) blockers.push(`${t.id}: only ${current}/${POOL_TARGET} CURRENT Questions`);
   }
   return blockers;

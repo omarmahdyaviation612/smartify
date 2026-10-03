@@ -3,6 +3,7 @@ import {
   classifyContentProvenance,
   enforcementForUnit,
   evaluateTopicGroundingGate,
+  isRetired,
   questionServabilityByTopic,
   topicStepsProvenance,
   type ContentProvenanceState,
@@ -89,7 +90,7 @@ export interface UnitReadiness {
   qLegacy: number;
   qMismatch: number;
   readyUnder8: number;
-  historicalNonServable: { legacyQuestions: number; mismatchQuestions: number };
+  historicalNonServable: { legacyQuestions: number; mismatchQuestions: number; retiredQuestions: number };
   activity: number;
   readyTopicIds: string[];
   blockedTopicIds: string[];
@@ -114,7 +115,7 @@ export function classifyUnitContentReadiness(unit: ReadinessUnit, opts: { expect
   const r: UnitReadiness = {
     unitId: unit.id, mode, class: "INVALID_STATE", issues: [],
     ready: 0, blocked: 0, stepsCurrent: 0, stepsLegacy: 0, stepsMissing: 0, stepsMismatch: 0, qCurrent: 0, qLegacy: 0, qMismatch: 0, readyUnder8: 0,
-    historicalNonServable: { legacyQuestions: 0, mismatchQuestions: 0 }, activity: 0, readyTopicIds: [], blockedTopicIds: [], topics: [],
+    historicalNonServable: { legacyQuestions: 0, mismatchQuestions: 0, retiredQuestions: 0 }, activity: 0, readyTopicIds: [], blockedTopicIds: [], topics: [],
   };
   if (opts.expectedSourceFingerprint !== undefined && unit.groundingSourceFingerprint !== opts.expectedSourceFingerprint) {
     r.issues.push("GROUNDING_IDENTITY_MISMATCH: grounding fingerprint not canonical for range");
@@ -149,6 +150,8 @@ export function classifyUnitContentReadiness(unit: ReadinessUnit, opts: { expect
     const servable: StateCounts = {};
     const historical: StateCounts = {};
     for (const q of pool) {
+      // A retired Question is history only: it never counts toward any stored/servable pool.
+      if (isRetired(q)) { r.historicalNonServable.retiredQuestions++; continue; }
       const s = classifyContentProvenance(q, gate.provenance);
       bump(stored, s);
       bump(isServable(q) ? servable : historical, s);

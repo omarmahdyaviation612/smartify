@@ -41,6 +41,7 @@ export function summarize(rows: UnitReadiness[]) {
     historicalNonServable: {
       legacyQuestions: rows.reduce((s, r) => s + r.historicalNonServable.legacyQuestions, 0),
       mismatchQuestions: rows.reduce((s, r) => s + r.historicalNonServable.mismatchQuestions, 0),
+      retiredQuestions: rows.reduce((s, r) => s + r.historicalNonServable.retiredQuestions, 0),
     },
     activity: sum("activity"),
     unitsWithoutReady: rows.filter((r) => r.ready === 0).map((r) => r.unitId),

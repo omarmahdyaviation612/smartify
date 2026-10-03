@@ -8,7 +8,7 @@ import { QuestionPublishService } from "./question-publish.service";
 import { LessonDraftGeneratorService } from "../../interactive-lesson/lesson-draft-generator/lesson-draft-generator.service";
 import type { QuestionGenerationInput, ResolvedTopicContext } from "./question-draft.types";
 import type { GroundingNotes } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
-import { classifyContentProvenance, evaluateTopicGroundingGate, questionServabilityByTopic, QUESTION_PROVENANCE_SELECT, TOPIC_GATE_INCLUDE, UNIT_GATE_SELECT, type TopicGroundingGate } from "../../ai/context/topic-content-provenance.util";
+import { evaluateTopicGroundingGate, isActiveCurrentQuestion, questionServabilityByTopic, QUESTION_PROVENANCE_SELECT, TOPIC_GATE_INCLUDE, UNIT_GATE_SELECT, type TopicGroundingGate } from "../../ai/context/topic-content-provenance.util";
 import { checkGroundingConsistency } from "../../ai/context/grounding-consistency-validator";
 import { checkArithmeticConsistency, type ArithmeticResult } from "./arithmetic-consistency";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
@@ -128,14 +128,14 @@ export class QuestionDraftGeneratorService {
     return evaluateTopicGroundingGate(row as any);
   }
 
-  /** This Topic's published, non-placeholder Questions that are CURRENT under `gate` (English prompt + explanation) — the accepted pool for a current-pool completion. */
+  /** This Topic's published, active (non-placeholder, non-retired) Questions that are CURRENT under `gate` (English prompt + explanation) — the accepted pool for a current-pool completion. */
   private async currentPool(topicId: string, gate: Extract<TopicGroundingGate, { state: "READY" }>): Promise<AcceptedPoolQuestion[]> {
     const rows = await this.prisma.client.question.findMany({
       where: { topicId, isPlaceholder: false },
       select: { topicId: true, isPlaceholder: true, promptEn: true, explanationEn: true, ...QUESTION_PROVENANCE_SELECT },
     });
     return rows
-      .filter((q) => q.topicId === topicId && !q.isPlaceholder && classifyContentProvenance(q, gate.provenance) === "CURRENT")
+      .filter((q) => q.topicId === topicId && isActiveCurrentQuestion(q, gate.provenance))
       .map((q) => ({ promptEn: q.promptEn, explanationEn: q.explanationEn }));
   }
 

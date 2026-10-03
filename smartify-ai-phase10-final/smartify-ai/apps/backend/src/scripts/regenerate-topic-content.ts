@@ -39,7 +39,7 @@
  * Usage (via the root `content:regenerate` script — see root package.json):
  *   pnpm content:regenerate --topicIds=<id>[,<id>] [--apply] [--lesson-only | --questions-only]
  */
-import { classifyContentProvenance, evaluateTopicGroundingGate, topicStepsProvenance, type ContentProvenanceState, type GateTopic, type StoredProvenance, type TopicStepsProvenanceFields } from "../ai/context/topic-content-provenance.util";
+import { classifyContentProvenance, evaluateTopicGroundingGate, isRetired, topicStepsProvenance, type ContentProvenanceState, type GateTopic, type StoredProvenance, type TopicStepsProvenanceFields } from "../ai/context/topic-content-provenance.util";
 
 export const MAX_TOPICS_PER_RUN = 25;
 export const POOL_TARGET = 8;
@@ -72,7 +72,7 @@ export type RegenerationTopic = GateTopic & TopicStepsProvenanceFields & {
   nameAr: string;
   unitId: string;
   teachingStepsJson: unknown;
-  questions: Array<StoredProvenance & { isPlaceholder?: boolean }>;
+  questions: Array<StoredProvenance & { isPlaceholder?: boolean; retiredAt?: Date | string | null }>;
 };
 
 export interface TopicPlan {
@@ -91,7 +91,8 @@ export function planTopic(topic: RegenerationTopic, args: Pick<RegenerationArgs,
   if (gate.state !== "READY") {
     return { topicId: topic.id, gate: `UNAVAILABLE:${gate.reason}`, steps: topic.teachingStepsJson ? "LEGACY" : "NONE", questions, lessonAction: "REFUSE", questionsToGenerate: 0 };
   }
-  for (const q of topic.questions.filter((x) => !x.isPlaceholder)) questions[classifyContentProvenance(q, gate.provenance)]++;
+  // Retired Questions are historical: they never count toward any pool (topic-content-provenance.util.ts).
+  for (const q of topic.questions.filter((x) => !x.isPlaceholder && !isRetired(x))) questions[classifyContentProvenance(q, gate.provenance)]++;
   const steps = topic.teachingStepsJson ? classifyContentProvenance(topicStepsProvenance(topic), gate.provenance) : "NONE";
   const lessonAction = !args.lesson ? "SKIP_NOT_REQUESTED" : steps === "CURRENT" ? "SKIP_CURRENT" : "REGENERATE";
   return { topicId: topic.id, gate: "READY", steps, questions, lessonAction, questionsToGenerate: args.questions ? Math.max(0, POOL_TARGET - questions.CURRENT) : 0 };
