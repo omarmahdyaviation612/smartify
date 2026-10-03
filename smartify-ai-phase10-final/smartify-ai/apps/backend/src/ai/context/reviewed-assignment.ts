@@ -94,6 +94,19 @@ export function validateReferences(notes: GroundingNotes, manifest: ReviewedMani
         if (other.length) errors.push(`AMBIGUOUS_POOL ${kind} "${name}" would also resolve into ${other.join(",")}`);
       }
       if (exact.length !== declared) errors.push(`AMBIGUOUS_DUPLICATE ${kind} "${name}" occurs ${exact.length}x in the grounding (declared ${declared})`);
+      // A hint also pulls in every concept NAMED in its relevantConcepts (by name, any page), so each of
+      // those names must identify exactly one concept — otherwise the hint silently drags in a
+      // same-named concept from elsewhere in the Unit — unless the manifest itself selects that concept
+      // with exactly that acknowledged occurrence count.
+      if (kind === "hints") {
+        for (const h of (notes.topicHints ?? []).filter((x) => x.topicTitle === name)) {
+          for (const rc of h.relevantConcepts ?? []) {
+            const n = notes.concepts.filter((c) => c.name.toLowerCase() === rc.toLowerCase());
+            const acknowledged = (manifest.concepts ?? []).some((r) => typeof r !== "string" && r.name === rc && r.occurrences === n.length);
+            if (n.length > 1 && !acknowledged) errors.push(`AMBIGUOUS_HINT_CONCEPT hints "${name}" names concept "${rc}", which occurs ${n.length}x (pages ${n.map((c) => c.sourcePages.join(",")).join(" | ")})`);
+          }
+        }
+      }
       references.push({ kind, name, occurrences: exact.length, pages: exact.map((x) => x.pages) });
     }
   }

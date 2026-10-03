@@ -254,6 +254,11 @@ describe("10-12: evidence must be exact, from this Unit, and non-empty", () => {
     expect(errs({ concepts: [{ name: "Cultural Diversity", occurrences: 2 }] })).toEqual([]);
     expect(errs({ concepts: ["Friendship"] })[0]).toMatch(/^AMBIGUOUS_POOL .* vocabulary/);
     expect(errs({ concepts: ["Beauty of Diversity", "Beauty of Diversity"] })[0]).toMatch(/^DUPLICATE_REFERENCE/);
+    // a hint whose relevantConcepts name a duplicated concept would drag in the other occurrence
+    const dupHint = { ...NOTES, topicHints: [...NOTES.topicHints, { topicTitle: "Cultures Hint", relevantConcepts: ["Cultural Diversity"], sourcePages: [2] }] };
+    expect(validateReferences(dupHint, parseManifest({ hints: ["Cultures Hint"] })).errors[0]).toMatch(/^AMBIGUOUS_HINT_CONCEPT .* occurs 2x \(pages 2,3 \| 4\)/);
+    expect(validateReferences(dupHint, parseManifest({ hints: ["Understanding Beauty in Diversity"] })).errors).toEqual([]);
+    expect(validateReferences(dupHint, parseManifest({ concepts: [{ name: "Cultural Diversity", occurrences: 2 }], hints: ["Cultures Hint"] })).errors).toEqual([]);
     expect(() => parseManifest({ concepts: ["x"], pages: [1] })).toThrow(/unknown manifest key/);
     expect(() => parseManifest({ concepts: [""] })).toThrow(/invalid/);
   });
