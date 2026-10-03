@@ -14,7 +14,7 @@ import { installAutoQuestionDraft } from "../../question-bank/question-draft-gen
 import { planTopic, runRegeneration } from "../../scripts/regenerate-topic-content";
 import { strictReadinessBlockers } from "../../scripts/enforce-content-provenance";
 import { verifyCommitted } from "../../scripts/repair-sole-topic-staged";
-import { atomicReplace, parseArgs, planReplacement, RETIRED_REASON, validateCandidate, MAX_REPLACEMENTS_PER_RUN } from "../../scripts/replace-current-questions";
+import { atomicRepair, atomicReplace, groupByTopic, parseArgs, planRepair, planReplacement, RETIRED_REASON, validateCandidate, MAX_REPLACEMENTS_PER_RUN } from "../../scripts/replace-current-questions";
 import { classifyUnitContentReadiness } from "./unit-content-readiness.util";
 import { classifyContentProvenance, isActiveCurrentQuestion, questionServabilityByTopic, QUESTION_PROVENANCE_SELECT } from "./topic-content-provenance.util";
 import { currentGateProvenance, gateAssignment, gateUnit, withReadyGate } from "./topic-content-gate.fixtures.testspec";
@@ -214,7 +214,7 @@ function replacementStore(opts: { strict?: boolean; attemptsOnOld?: number; draf
 
 describe("atomic single-Question replacement", () => {
   it("parses only an explicit, bounded allowlist; dry-run by default", () => {
-    expect(parseArgs(["--questionIds=cmusd8alg001712ghcwl8fnm9"])).toEqual({ questionIds: ["cmusd8alg001712ghcwl8fnm9"], apply: false });
+    expect(parseArgs(["--questionIds=cmusd8alg001712ghcwl8fnm9"])).toEqual({ questionIds: ["cmusd8alg001712ghcwl8fnm9"], apply: false, stage: false, commit: null });
     const many = Array.from({ length: MAX_REPLACEMENTS_PER_RUN + 1 }, (_, i) => `cmusd8alg001712ghcwl8fn${String(i).padStart(3, "0")}`).join(",");
     for (const bad of [[], ["--questionIds=x"], [`--questionIds=${many}`], ["--topicIds=cmusd8alg001712ghcwl8fnm9"]]) expect(() => parseArgs(bad)).toThrow();
   });
@@ -271,5 +271,82 @@ describe("atomic single-Question replacement", () => {
     const st2 = replacementStore();
     Object.assign(st2.holder.s.questions[3], LEG);
     expect(() => planReplacement(st2.view(), "current-3")).toThrow(/not an active CURRENT/);
+  });
+});
+
+/** A Topic with `n` active CURRENT Questions (two of them wrong) and pending staged drafts. */
+function repairStore(opts: { n: number; strict?: boolean; drafts: Array<Record<string, unknown>>; wrongKept?: boolean }) {
+  const unit = { ...gateUnit({ contentProvenanceEnforcedAt: opts.strict ? STRICT_AT : null }), id: "unit-gate" };
+  const qs = active(opts.n).map((q: any) => ({ ...q, retiredReason: null, replacedByQuestionId: null, _count: { attempts: 0 } }));
+  qs[1] = { ...qs[1], promptEn: "Total perimeter of three rectangles?", explanationEn: "Add them: 10 + 18 + 6 = 34 cm.", correctAnswerJson: "28 cm", optionsJson: ["28 cm", "32 cm", "24 cm"] };
+  qs[2] = { ...qs[2], promptEn: "Total area of the composite shape?", explanationEn: "Adding them gives 15 plus 4, totaling 23 square units.", correctAnswerJson: "23 square units", optionsJson: ["23 square units", "15 square units", "10 square units"] };
+  if (opts.wrongKept) qs[0] = { ...qs[0], explanationEn: "Add: 3 + 4 = 8.", correctAnswerJson: "8", optionsJson: ["8", "7", "6"] };
+  const drafts = opts.drafts.map((d, i) => ({ id: `draft-${i}`, topicId: TOPIC, status: "pending_review", publishedQuestionId: null, type: "MULTIPLE_CHOICE", difficulty: "EASY", promptAr: "س", explanationAr: "ل", optionsJson: ["9", "8", "10"], correctAnswerJson: "9", ...cur, ...d }));
+  const holder: any = { s: { topic: { id: TOPIC, unitId: "unit-gate", groundingAssignment: gateAssignment(), topicSourceEvidence: [], unit }, questions: qs, drafts, seq: 0 } };
+  const api = (s: any) => ({
+    topic: { findUnique: async () => structuredClone({ ...s.topic, questions: s.questions }) },
+    questionDraft: { findUnique: async ({ where }: any) => structuredClone(s.drafts.find((d: any) => d.id === where.id) ?? null), update: async ({ where, data }: any) => { Object.assign(s.drafts.find((d: any) => d.id === where.id), data); } },
+    question: {
+      create: async ({ data }: any) => { const q = { id: `q-new-${++s.seq}`, retiredAt: null, retiredReason: null, replacedByQuestionId: null, _count: { attempts: 0 }, ...data }; s.questions.push(q); return structuredClone(q); },
+      updateMany: async ({ where, data }: any) => { const q = s.questions.find((x: any) => x.id === where.id && x.topicId === where.topicId && x.retiredAt === where.retiredAt); if (!q) return { count: 0 }; Object.assign(q, data); return { count: 1 }; },
+    },
+  });
+  const prisma = { $transaction: async (fn: any) => { const draft = structuredClone(holder.s); const out = await fn(api(draft)); holder.s = draft; return out; } };
+  return { holder, prisma, view: () => ({ ...holder.s.topic, questions: holder.s.questions }) };
+}
+const GOOD = (i: number) => ({ promptEn: `Addition question staged-${i}: what is 5 + ${i}?`, explanationEn: `Add the numbers: 5 + ${i} = ${5 + i}.`, correctAnswerJson: String(5 + i), optionsJson: [String(5 + i), "1", "2"] });
+
+describe("generic atomic repair (k retire + fill to the target)", () => {
+  it.each([false, true])("7 active with 2 wrong -> retire 2, publish 3 -> exactly 8 (STRICT=%s), in ONE transaction", async (strict) => {
+    const st = repairStore({ n: 7, strict, drafts: [GOOD(1), GOOD(2), GOOD(3)] });
+    const plan = planRepair(st.view(), ["current-1", "current-2"]);
+    expect(plan.need).toBe(3);
+    expect(plan.keep).toHaveLength(5);
+    const out = await atomicRepair(st.prisma, plan, ["draft-0", "draft-1", "draft-2"], installAutoQuestionDraft as any, "Serializable");
+    expect(out.activeAfter).toHaveLength(8);
+    expect(out.activeAfter).not.toContain("current-1");
+    expect(out.activeAfter).not.toContain("current-2");
+    for (const id of out.published) expect(out.activeAfter).toContain(id);
+    const retiredRows = st.holder.s.questions.filter((q: any) => q.retiredAt);
+    expect(retiredRows.map((q: any) => [q.id, q.replacedByQuestionId, q.retiredReason])).toEqual([["current-1", out.published[0], RETIRED_REASON], ["current-2", out.published[1], RETIRED_REASON]]);
+    expect(String(st.holder.s.topic.unit.contentProvenanceEnforcedAt)).toBe(String(strict ? STRICT_AT : null));
+  });
+  it("any invalid candidate (arithmetic, duplicate) refuses the whole repair: nothing commits", async () => {
+    for (const bad of [{ ...GOOD(3), explanationEn: "Add the numbers: 5 + 3 = 9." }, { ...GOOD(3), promptEn: "Addition question current-0?" }]) {
+      const st = repairStore({ n: 7, drafts: [GOOD(1), GOOD(2), bad] });
+      const plan = planRepair(st.view(), ["current-1", "current-2"]);
+      const before = structuredClone(st.holder.s);
+      await expect(atomicRepair(st.prisma, plan, ["draft-0", "draft-1", "draft-2"], installAutoQuestionDraft as any, "Serializable")).rejects.toThrow(/CANDIDATE/);
+      expect(st.holder.s).toEqual(before);
+    }
+  });
+  it("a kept Question that is arithmetic-INVALID fails the final-pool postcondition: full rollback", async () => {
+    const st = repairStore({ n: 7, wrongKept: true, drafts: [GOOD(1), GOOD(2), GOOD(3)] });
+    const plan = planRepair(st.view(), ["current-1", "current-2"]);
+    const before = structuredClone(st.holder.s);
+    await expect(atomicRepair(st.prisma, plan, ["draft-0", "draft-1", "draft-2"], installAutoQuestionDraft as any, "Serializable")).rejects.toThrow(/POSTCONDITION.*arithmetic INVALID/);
+    expect(st.holder.s).toEqual(before);
+  });
+  it("the wrong number of drafts is refused before any write (never 7, 9 or 10)", async () => {
+    for (const ids of [["draft-0", "draft-1"], ["draft-0", "draft-1", "draft-2", "draft-3"]]) {
+      const st = repairStore({ n: 7, drafts: [GOOD(1), GOOD(2), GOOD(3), GOOD(4)] });
+      const plan = planRepair(st.view(), ["current-1", "current-2"]);
+      const before = structuredClone(st.holder.s);
+      await expect(atomicRepair(st.prisma, plan, ids, installAutoQuestionDraft as any, "Serializable")).rejects.toThrow(/needs exactly 3/);
+      expect(st.holder.s).toEqual(before);
+    }
+  });
+  it("a changed active set (a Question published after planning) refuses the commit", async () => {
+    const st = repairStore({ n: 7, drafts: [GOOD(1), GOOD(2), GOOD(3)] });
+    const plan = planRepair(st.view(), ["current-1", "current-2"]);
+    st.holder.s.questions.push({ ...active(1)[0], id: "late", promptEn: "late question", retiredReason: null, replacedByQuestionId: null, _count: { attempts: 0 } });
+    await expect(atomicRepair(st.prisma, plan, ["draft-0", "draft-1", "draft-2"], installAutoQuestionDraft as any, "Serializable")).rejects.toThrow(/active Question set changed/);
+  });
+  it("fill is bounded and modes are explicit", () => {
+    const st = repairStore({ n: 4, drafts: [] });
+    expect(() => planRepair(st.view(), ["current-1"])).toThrow(/fill Questions/);
+    expect(() => parseArgs(["--questionIds=cmusd8alg001712ghcwl8fnm9", "--stage", "--apply"])).toThrow(/mutually exclusive/);
+    expect(parseArgs(["--questionIds=cmusd8alg001712ghcwl8fnm9", "--commit=cmuseul3v0003id5mkki40h89"])).toMatchObject({ commit: ["cmuseul3v0003id5mkki40h89"], apply: false, stage: false });
+    expect([...groupByTopic([{ id: "a", topicId: "t1" }, { id: "b", topicId: "t2" }, { id: "c", topicId: "t1" }], ["a", "b", "c"])]).toEqual([["t1", ["a", "c"]], ["t2", ["b"]]]);
   });
 });
