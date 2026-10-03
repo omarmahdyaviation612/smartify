@@ -66,6 +66,12 @@ export class QuestionDraftGenerationError extends Error {
  * validateQuestionDraft's requireReviewedContent: false) QuestionDraft row
  * -> (separately, later) human bilingual review -> approve -> publish.
  */
+/** An already-accepted pool Question as the pool-level grounding rule reads it. */
+export type AcceptedPoolQuestion = { promptEn: string; explanationEn?: string | null };
+
+/** Pool-level grounding text of one Question for admin authoring: English prompt + English explanation (never answers, options or Arabic). */
+const poolTexts = (q: AcceptedPoolQuestion): string[] => [q.promptEn, q.explanationEn].filter((t): t is string => typeof t === "string" && t.length > 0);
+
 /** Exact-duplicate key for a Question prompt: case and whitespace only — never fuzzy. */
 function normalizePrompt(prompt: string | undefined | null): string {
   return (prompt ?? "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -121,15 +127,15 @@ export class QuestionDraftGeneratorService {
     return evaluateTopicGroundingGate(row as any);
   }
 
-  /** English prompts of this Topic's published, non-placeholder Questions that are CURRENT under `gate` — the accepted pool for a current-pool completion. */
-  private async currentPoolPrompts(topicId: string, gate: Extract<TopicGroundingGate, { state: "READY" }>): Promise<string[]> {
+  /** This Topic's published, non-placeholder Questions that are CURRENT under `gate` (English prompt + explanation) — the accepted pool for a current-pool completion. */
+  private async currentPool(topicId: string, gate: Extract<TopicGroundingGate, { state: "READY" }>): Promise<AcceptedPoolQuestion[]> {
     const rows = await this.prisma.client.question.findMany({
       where: { topicId, isPlaceholder: false },
-      select: { topicId: true, isPlaceholder: true, promptEn: true, ...QUESTION_PROVENANCE_SELECT },
+      select: { topicId: true, isPlaceholder: true, promptEn: true, explanationEn: true, ...QUESTION_PROVENANCE_SELECT },
     });
     return rows
       .filter((q) => q.topicId === topicId && !q.isPlaceholder && classifyContentProvenance(q, gate.provenance) === "CURRENT")
-      .map((q) => q.promptEn);
+      .map((q) => ({ promptEn: q.promptEn, explanationEn: q.explanationEn }));
   }
 
   async resolveTopicContext(topicId: string): Promise<ResolvedTopicContext & { topicId: string; isPlaceholder: boolean }> {
@@ -298,14 +304,13 @@ export class QuestionDraftGeneratorService {
     // lesson's objectives in place of the live Lesson's. Validation, budget
     // and accounting are unchanged. Never passed by any student or lazy path.
     //
-    // `acceptedPoolPrompts` (staged completion only): the English prompts of
-    // the Questions ALREADY accepted into this same staged replacement pool
-    // (same Topic, same candidate provenance, already individually validated —
-    // the caller guarantees this). The grounding-consistency rule then judges
-    // the FINAL candidate pool (accepted + this batch), so a batch boundary
-    // cannot change whether identical final content passes. Omitted, the rule
-    // judges this batch alone exactly as before.
-    staged?: { gate: Extract<TopicGroundingGate, { state: "READY" }>; lessonObjectives?: string[]; acceptedPoolPrompts?: string[] },
+    // `acceptedPool` (staged completion only): the Questions ALREADY accepted
+    // into this same staged replacement pool (same Topic, same candidate
+    // provenance, already individually validated — the caller guarantees
+    // this). The grounding-consistency rule then judges the FINAL candidate
+    // pool (accepted + this batch), so a batch boundary cannot change whether
+    // identical final content passes.
+    staged?: { gate: Extract<TopicGroundingGate, { state: "READY" }>; lessonObjectives?: string[]; acceptedPool?: AcceptedPoolQuestion[] },
     // ADMIN-ONLY normal regeneration (regenerate-topic-content.ts, 2026-10-03):
     // the same accumulated final-pool semantics as a staged completion, where
     // the accepted pool is this Topic's LIVE published CURRENT Questions. The
@@ -328,11 +333,18 @@ export class QuestionDraftGeneratorService {
     }
     const groundingSlice = gate.slice;
     const provenance = gate.provenance;
-    const acceptedPoolPrompts = staged?.acceptedPoolPrompts ?? (completion?.againstCurrentPool ? await this.currentPoolPrompts(topicId, gate) : []);
+    const acceptedPool = staged?.acceptedPool ?? (completion?.againstCurrentPool ? await this.currentPool(topicId, gate) : []);
     // Exact-duplicate guard, only when a pool context is supplied: a candidate
     // repeating an accepted Question (or an earlier candidate) adds nothing to
     // the pool and must not count toward it.
-    const poolContext = !!(staged?.acceptedPoolPrompts || completion?.againstCurrentPool);
+    const poolContext = !!(staged?.acceptedPool || completion?.againstCurrentPool);
+    // ADMIN authoring (staged or normal regeneration) judges pool-level
+    // grounding on each Question's English prompt AND explanation, with the
+    // verb-family word forms (grounding-consistency-validator.ts) — a natural
+    // story problem shows its operation in the explanation ("subtract 12 from
+    // 50"), not its prompt. The student lazy top-up keeps prompt-only,
+    // exact-form matching, unchanged.
+    const authoring = !!(staged || completion);
     await this.usageService.assertWithinBudget(requestingUserId);
 
     const topicContext = await this.resolveTopicContext(topicId);
@@ -449,7 +461,7 @@ export class QuestionDraftGeneratorService {
 
       const perItemErrors: string[] = [];
       const validDrafts: Array<Record<string, unknown>> = [];
-      const seenPrompts = new Set(acceptedPoolPrompts.map(normalizePrompt));
+      const seenPrompts = new Set(acceptedPool.map((q) => normalizePrompt(q.promptEn)));
       rawQuestions.forEach((q, index) => {
         const validation = validateQuestionDraft(
           { ...(q as Record<string, unknown>), topicId },
@@ -473,14 +485,13 @@ export class QuestionDraftGeneratorService {
       // (the extras' tokens are still logged and reconciled like any call).
       validDrafts.splice(count);
       if (validDrafts.length > 0) {
-        // §10: grounding-consistency check on the accepted subset as a
-        // whole — for a staged or current-pool completion batch, on the final
-        // pool (already-accepted prompts + this batch). Feeds the SAME retry
-        // loop as structural validation.
-        const consistencyErrors = checkGroundingConsistency(
-          [...acceptedPoolPrompts, ...validDrafts.map((q) => q.promptEn as string)],
-          groundingSlice,
-        );
+        // §10: grounding-consistency check (anchor + verbatim) on the accepted
+        // subset as a whole — for admin authoring, on the final pool
+        // (already-accepted Questions + this batch), prompts AND explanations.
+        // Feeds the SAME retry loop as structural validation.
+        const consistencyErrors = authoring
+          ? checkGroundingConsistency([...acceptedPool, ...(validDrafts as AcceptedPoolQuestion[])].flatMap(poolTexts), groundingSlice, { wordForms: true })
+          : checkGroundingConsistency(validDrafts.map((q) => q.promptEn as string), groundingSlice);
         if (consistencyErrors.length > 0) {
           lastErrors = consistencyErrors;
           this.logger.warn(`CONTENT_VALIDATION_FAILED topicId=${topicId} kind=questions attempt=${attempt}: ${consistencyErrors.join("; ")}`);

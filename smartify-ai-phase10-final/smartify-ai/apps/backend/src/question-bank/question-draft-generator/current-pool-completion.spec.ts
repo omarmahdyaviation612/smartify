@@ -145,7 +145,7 @@ describe("current-pool completion — generator (real QuestionDraftGeneratorServ
       const normal = harness([[candidate]], poolQs.map((q) => row(q, CUR())));
       const staged = harness([[candidate]]);
       const a = normal.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", undefined, COMPLETE).then(() => true, () => false);
-      const b = staged.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPoolPrompts: poolQs.map((q) => q.promptEn) }).then(() => true, () => false);
+      const b = staged.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPool: poolQs.map((q) => ({ promptEn: q.promptEn, explanationEn: q.explanationEn })) }).then(() => true, () => false);
       expect([await a, await b]).toEqual([ok, ok]);
     }
   });

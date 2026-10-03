@@ -179,8 +179,8 @@ async function main() {
           metadata: { generationSource: r.generationSource, groundingVersionUsed: r.groundingVersionUsed, generationPromptVersion: r.generationPromptVersion, provenance: r.provenance },
         };
       },
-      generateQuestions: async (topicId, count, gate, lessonObjectives, acceptedPoolPrompts) =>
-        (await questionGen.generateAutoQuestionBatch(topicId, count, CONTENT_AUTHORING_ACTOR_ID, { gate, lessonObjectives, acceptedPoolPrompts })).drafts.map((d: any) => d.id),
+      generateQuestions: async (topicId, count, gate, lessonObjectives, acceptedPool) =>
+        (await questionGen.generateAutoQuestionBatch(topicId, count, CONTENT_AUTHORING_ACTOR_ID, { gate, lessonObjectives, acceptedPool })).drafts.map((d: any) => d.id),
       loadPendingStaged: async (topicId, unitId) => ({
         questionDrafts: await prisma.questionDraft.findMany({ where: { topicId, status: "pending_review", publishedQuestionId: null } }),
         lessonDrafts: await prisma.lessonDraft.findMany({ where: { targetUnitId: unitId, status: "pending_review", publishedTopicId: null } }),

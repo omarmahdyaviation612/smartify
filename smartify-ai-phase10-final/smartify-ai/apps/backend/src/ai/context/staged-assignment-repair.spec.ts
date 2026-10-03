@@ -403,8 +403,8 @@ describe("ACCUMULATED POOL — generator (real QuestionDraftGeneratorService)", 
     const svc = new QuestionDraftGeneratorService(prisma, { getActiveProvider: jest.fn().mockResolvedValue({ provider: { generate }, providerKey: "openai", model: "m" }), getCostRates: jest.fn().mockResolvedValue({ costPerInputToken: 0, costPerOutputToken: 0 }) } as any, { buildAutoQuestionBatchGenerationPrompt: jest.fn().mockReturnValue("p") } as any, usage as any, { autoPublish: jest.fn() } as any, { ensureTopicHasLesson: jest.fn() } as any);
     return { svc, generate, usage, prisma };
   }
-  const anchored7 = Array.from({ length: 7 }, (_, i) => ANCHORED(i).promptEn);
-  const plain7 = Array.from({ length: 7 }, (_, i) => PLAIN(i).promptEn);
+  const anchored7 = Array.from({ length: 7 }, (_, i) => ({ promptEn: ANCHORED(i).promptEn, explanationEn: ANCHORED(i).explanationEn }));
+  const plain7 = Array.from({ length: 7 }, (_, i) => ({ promptEn: PLAIN(i).promptEn, explanationEn: PLAIN(i).explanationEn }));
 
   it("1/19: an initial anchored 8-Question batch passes exactly as before (no pool)", async () => {
     const h = harness([Array.from({ length: 8 }, (_, i) => ANCHORED(i))]);
@@ -417,7 +417,7 @@ describe("ACCUMULATED POOL — generator (real QuestionDraftGeneratorService)", 
   });
   it("3: 7 grounded staged + 1 curriculum-valid non-anchor Question: the final pool passes", async () => {
     const h = harness([[PLAIN(99)]]);
-    const r = await h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPoolPrompts: anchored7 });
+    const r = await h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPool: anchored7 });
     expect(r.drafts).toHaveLength(1);
   });
   it("3b: the SAME single non-anchor Question without the pool fails (the batch boundary was the only difference)", async () => {
@@ -426,30 +426,30 @@ describe("ACCUMULATED POOL — generator (real QuestionDraftGeneratorService)", 
   });
   it("4: 7 ungrounded staged + 1 non-anchor Question: the final pool fails", async () => {
     const h = harness([[PLAIN(99)]]);
-    await expect(h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPoolPrompts: plain7 })).rejects.toThrow(/failed validation/);
+    await expect(h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPool: plain7 })).rejects.toThrow(/failed validation/);
     expect(h.prisma.client.questionDraft.create).not.toHaveBeenCalled();
   });
   it("5: 7 ungrounded staged + 1 anchored Question: passes exactly because the combined pool satisfies the unchanged anchor rule", async () => {
     const h = harness([[ANCHORED(99)]]);
-    expect((await h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPoolPrompts: plain7 })).drafts).toHaveLength(1);
+    expect((await h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPool: plain7 })).drafts).toHaveLength(1);
   });
   it("6: verbatim-copy protection is still enforced on the final pool", async () => {
     const h = harness([[{ ...QV, promptEn: "Earth is made up of soil, rocks and water. True or False?" }]]);
-    await expect(h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPoolPrompts: anchored7 })).rejects.toThrow(/failed validation/);
+    await expect(h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPool: anchored7 })).rejects.toThrow(/failed validation/);
   });
   it("7: a structurally invalid new Question cannot be rescued by the accepted pool", async () => {
     const h = harness([[{ ...ANCHORED(99), optionsJson: ["a", "b"] }]]);
-    await expect(h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPoolPrompts: anchored7 })).rejects.toThrow(/failed validation/);
+    await expect(h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPool: anchored7 })).rejects.toThrow(/failed validation/);
     expect(h.prisma.client.questionDraft.create).not.toHaveBeenCalled();
   });
   it("13: a one-Question completion persists at most the one requested Question even if the model returns more", async () => {
     const h = harness([[PLAIN(1), PLAIN(2), PLAIN(3)]]);
-    expect((await h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPoolPrompts: anchored7 })).drafts).toHaveLength(1);
+    expect((await h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPool: anchored7 })).drafts).toHaveLength(1);
     expect(h.prisma.client.questionDraft.create).toHaveBeenCalledTimes(1);
   });
   it("14/15: retries stay bounded at 2 provider calls, each reserved and reconciled; nothing released", async () => {
     const h = harness([[PLAIN(1)]]);
-    await expect(h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPoolPrompts: plain7 })).rejects.toThrow();
+    await expect(h.svc.generateAutoQuestionBatch(TOPIC, 1, "actor", { gate: gate(), acceptedPool: plain7 })).rejects.toThrow();
     expect(h.generate).toHaveBeenCalledTimes(2);
     expect(h.usage.reserveBudget).toHaveBeenCalledTimes(2);
     expect(h.usage.reconcileBudget).toHaveBeenCalledTimes(2);
@@ -523,7 +523,7 @@ describe("ACCUMULATED POOL — staging, leftovers and reuse", () => {
     const d = deps(state, { yields: [1] });
     const spy = jest.spyOn(d, "generateQuestions");
     await stageReplacement(plan, d, { reuseQuestionDraftIds: Array.from({ length: 7 }, (_, i) => `qd-left-${i}`) });
-    const pool = spy.mock.calls[0][4] as string[];
+    const pool = (spy.mock.calls[0][4] as Array<{ promptEn: string }>).map((q) => q.promptEn);
     expect(pool.sort()).toEqual(Array.from({ length: 7 }, (_, i) => `Leftover rocks question ${i}`).sort());
     expect(pool.some((p) => /Old current|Legacy/.test(p))).toBe(false);
     expect(spy.mock.calls[0][1]).toBe(1); // only the missing Question is requested

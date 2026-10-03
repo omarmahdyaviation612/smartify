@@ -135,10 +135,10 @@ export interface StageDeps {
   generateLesson(topicId: string, gate: ReadyGate): Promise<{ draftId: string; objectivesEn: string[]; metadata: AutoLessonGenerationMetadata }>;
   /**
    * Generates + persists at most `count` pending_review QuestionDrafts against `gate` (normal validation/accounting).
-   * `acceptedPoolPrompts`: prompts of the Questions already accepted into THIS staged pool — grounding
-   * consistency is judged on the final candidate pool (see generateAutoQuestionBatch's `staged`).
+   * `acceptedPool`: the Questions (English prompt + explanation) already accepted into THIS staged pool —
+   * grounding consistency is judged on the final candidate pool (see generateAutoQuestionBatch's `staged`).
    */
-  generateQuestions(topicId: string, count: number, gate: ReadyGate, lessonObjectives: string[], acceptedPoolPrompts: string[]): Promise<string[]>;
+  generateQuestions(topicId: string, count: number, gate: ReadyGate, lessonObjectives: string[], acceptedPool: Array<{ promptEn: string; explanationEn?: string | null }>): Promise<string[]>;
   /** Re-reads staged drafts by id. */
   loadQuestionDrafts(ids: string[]): Promise<any[]>;
 }
@@ -210,7 +210,7 @@ export async function stageReplacement(plan: StagedRepairPlan, deps: StageDeps, 
     // The pool accepted so far — ONLY this plan's valid staged drafts (never live, LEGACY, MISMATCH or foreign rows).
     const accepted = (await deps.loadQuestionDrafts(ids)).filter((d) => acceptableStaged(d, plan));
     try {
-      const created = await deps.generateQuestions(plan.topicId, STAGED_POOL_TARGET - ids.length, gate, lesson.objectivesEn, accepted.map((d) => d.promptEn));
+      const created = await deps.generateQuestions(plan.topicId, STAGED_POOL_TARGET - ids.length, gate, lesson.objectivesEn, accepted.map((d) => ({ promptEn: d.promptEn, explanationEn: d.explanationEn })));
       ids.push(...created);
     } catch (err) {
       batchErrors.push(err instanceof Error ? err.message : String(err));
