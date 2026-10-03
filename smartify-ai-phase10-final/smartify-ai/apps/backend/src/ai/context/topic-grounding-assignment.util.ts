@@ -93,6 +93,27 @@ export const TOPIC_GROUNDING_ASSIGNMENT_VERSION = DETERMINISTIC_ASSIGNMENT_VERSI
  */
 export const MAPPER_PROMPT_VERSION = 1;
 
+/**
+ * REVIEWED (2026-10-04): an admin-approved selection of exact evidence already
+ * present in the Unit's current grounding, written only by the guarded admin
+ * tool (scripts/reassign-reviewed-topic-assignment.ts). It is not authored
+ * content: the persisted names are the same opaque references every other
+ * method persists, resolved by the same `sliceFromAssignment` below.
+ *
+ * Trust is governed by the Unit's factual identity ONLY — neither
+ * DETERMINISTIC_ASSIGNMENT_VERSION nor MAPPER_PROMPT_VERSION applies, because
+ * no algorithm produced the row, so improving an algorithm must never
+ * invalidate a human decision. On top of that, EVERY persisted reference must
+ * still resolve: a reviewed selection that has partly lost its evidence is
+ * not the selection that was reviewed, so it is STALE rather than a quietly
+ * smaller slice.
+ */
+export const REVIEWED_METHOD = "REVIEWED";
+
+export function isReviewedAssignment(assignment: { method: string } | null | undefined): boolean {
+  return assignment?.method === REVIEWED_METHOD;
+}
+
 /** The minimal persisted-row shape the read path needs (a structural subset of Prisma's TopicGroundingAssignment). */
 export interface PersistedTopicGroundingAssignment {
   unitGroundingVersion: number;
@@ -142,10 +163,30 @@ export function assignmentIdentityMatches(assignment: PersistedTopicGroundingAss
   if (assignment.unitGroundingVersion !== unit.groundingVersion || assignment.unitSourceFingerprint !== unit.groundingSourceFingerprint) {
     return false;
   }
+  if (assignment.method === REVIEWED_METHOD) return true;
   if (assignment.method === "AI_MAPPER") {
     return assignment.mapperPromptVersion === MAPPER_PROMPT_VERSION;
   }
   return assignment.assignmentVersion === DETERMINISTIC_ASSIGNMENT_VERSION;
+}
+
+/**
+ * The persisted references of an assignment that do NOT resolve against
+ * `notes`, using exactly the matching rule `sliceFromAssignment` uses
+ * (lowercase-verbatim against concept names, vocabulary terms and fact text;
+ * hint titles against topicHints). Hint references are reported as
+ * `hint:<title>`.
+ */
+export function unresolvedReviewedReferences(
+  notes: GroundingNotes,
+  assignment: Pick<PersistedTopicGroundingAssignment, "matchedConceptNames" | "matchedHintTitles">,
+): string[] {
+  const pool = new Set([...notes.concepts.map((c) => c.name), ...notes.vocabulary.map((v) => v.term), ...notes.facts.map((f) => f.fact)].map((x) => x.toLowerCase()));
+  const hints = new Set((notes.topicHints ?? []).map((h) => h.topicTitle.toLowerCase()));
+  return [
+    ...asStringArray(assignment.matchedConceptNames).filter((n) => !pool.has(n.toLowerCase())),
+    ...asStringArray(assignment.matchedHintTitles).filter((t) => !hints.has(t.toLowerCase())).map((t) => `hint:${t}`),
+  ];
 }
 
 /**
@@ -245,6 +286,7 @@ export function resolveAssignedGroundingSlice(
   if (assignment.status !== "READY") return { state: "BLOCKED" };
 
   const notes=mergeSourceEvidenceForRead(unit.groundingNotesJson,topicSourceEvidence,unit.groundingSourceFingerprint,unit.id);
+  if (notes && assignment.method === REVIEWED_METHOD && unresolvedReviewedReferences(notes, assignment).length > 0) return { state: "STALE" };
   const slice = sliceFromAssignment(notes, assignment);
   if (!slice) return { state: "MISSING" };
   if (slice.concepts.length === 0 && slice.facts.length === 0 && slice.vocabulary.length === 0) return { state: "EMPTY" };

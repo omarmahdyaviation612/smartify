@@ -191,6 +191,7 @@ export function buildMapperPrompt(input: {
 
 export type MapperOutcome =
   | { outcome: "SKIPPED_DETERMINISTIC"; reason: string }
+  | { outcome: "SKIPPED_REVIEWED"; reason: string }
   | { outcome: "NOT_GROUNDED"; reason: string }
   | { outcome: "READY"; matchedConceptNames: string[]; matchedHintTitles: string[] | null; model: string }
   | { outcome: "BLOCKED"; reason: string; code?: MapperValidationFailure["code"] | "BUDGET_UNAVAILABLE" | "NO_USABLE_SLICE_REFERENCE" | "NO_CANDIDATES" };
@@ -220,6 +221,7 @@ export class TopicGroundingMapperService {
     const topic = await this.prisma.client.topic.findUnique({
       where: { id: topicId },
       include: {
+        groundingAssignment: { select: { method: true } },
         topicSourceEvidence: { where: { status: "READY" } },
         unit: {
           select: {
@@ -233,6 +235,8 @@ export class TopicGroundingMapperService {
       },
     });
     if (!topic) return { outcome: "NOT_GROUNDED", reason: `Topic ${topicId} not found.` };
+    // A REVIEWED row is an admin decision: the mapper never runs for it (no provider call, no write).
+    if ((topic as any).groundingAssignment?.method === "REVIEWED") return { outcome: "SKIPPED_REVIEWED", reason: `Topic ${topicId} has a REVIEWED assignment.` };
 
     const unit = topic.unit;
     if (unit.groundingVersion === null || unit.groundingSourceFingerprint === null || !unit.groundingNotesJson) {

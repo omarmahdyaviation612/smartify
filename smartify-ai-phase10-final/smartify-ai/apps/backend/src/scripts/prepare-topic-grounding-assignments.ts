@@ -192,6 +192,7 @@ function identityValid(topic: ScopedTopic): boolean {
   const u = topic.unit;
   if (!a || u.groundingVersion === null || u.groundingSourceFingerprint === null) return false;
   if (a.unitGroundingVersion !== u.groundingVersion || a.unitSourceFingerprint !== u.groundingSourceFingerprint) return false;
+  if (a.method === "REVIEWED") return true;
   if (a.method === "AI_MAPPER") return a.mapperPromptVersion === MAPPER_PROMPT_VERSION;
   return a.assignmentVersion === DETERMINISTIC_ASSIGNMENT_VERSION;
 }
@@ -212,6 +213,11 @@ export function dryRunOne(topic: ScopedTopic, report: BackfillReport) {
     } else {
       bump(report.alreadyReady, existing.method);
     }
+    return;
+  }
+  // A stale REVIEWED row is only re-validated against the new grounding, never recomputed.
+  if (existing && existing.method === "REVIEWED") {
+    bump(report.alreadyReady, "REVIEWED(revalidate)");
     return;
   }
   if (existing && !identityValid(topic)) report.staleRecomputed++;
@@ -243,6 +249,10 @@ export async function applyOne(
     if (outcome.status === "BLOCKED") bump(report.alreadyReady, "AI_MAPPER(BLOCKED, unchanged)");
     else bump(report.alreadyReady, outcome.method);
     report.skippedIdempotent++;
+    return;
+  }
+  if (outcome.outcome === "REVIEWED_INVALIDATED") {
+    report.failures.push({ topicId: topic.id, error: outcome.reason });
     return;
   }
   if (outcome.outcome === "ASSIGNED") {

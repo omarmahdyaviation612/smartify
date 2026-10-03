@@ -522,6 +522,10 @@ enum TopicGroundingAssignmentMethod {
   REVIEW_FULL_UNIT
   PAGE_ORDER_GAP
   AI_MAPPER
+  // An admin-reviewed selection of exact evidence already present in the
+  // Unit's current grounding (2026-10-04). Never produced by any automatic
+  // step and never overwritten by one; see reviewed-assignment.ts.
+  REVIEWED
 }
 
 enum TopicGroundingAssignmentConfidence {

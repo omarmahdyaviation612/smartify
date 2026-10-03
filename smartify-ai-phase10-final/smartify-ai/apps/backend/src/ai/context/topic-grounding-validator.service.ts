@@ -117,6 +117,7 @@ export function parseValidatorResponse(raw: string): { supported: boolean; reaso
 
 export type ValidatorOutcome =
   | { outcome: "SKIPPED_DETERMINISTIC"; reason: string }
+  | { outcome: "SKIPPED_REVIEWED"; reason: string }
   | { outcome: "NOT_GROUNDED"; reason: string }
   | { outcome: "SKIPPED_ALREADY_READY"; reason: string }
   | { outcome: "SKIPPED_NO_SINGLE_CANDIDATE"; reason: string }
@@ -166,6 +167,8 @@ export class TopicGroundingValidatorService {
     }
 
     const existing = topic.groundingAssignment;
+    // A REVIEWED row is an admin decision: never re-validated (and never a provider call).
+    if (existing?.method === "REVIEWED") return { outcome: "SKIPPED_REVIEWED", reason: `Topic ${topicId} has a REVIEWED assignment.` };
     if (
       existing &&
       existing.status === "READY" &&

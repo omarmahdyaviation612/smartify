@@ -207,6 +207,7 @@ export function validateRefinementResponse(raw: string, notes: GroundingNotes): 
 
 export type RefinementOutcome =
   | { outcome: "SKIPPED_DETERMINISTIC"; reason: string }
+  | { outcome: "SKIPPED_REVIEWED"; reason: string }
   | { outcome: "NOT_GROUNDED"; reason: string }
   | { outcome: "SKIPPED_ALREADY_READY"; reason: string }
   /**
@@ -259,6 +260,8 @@ export class TopicGroundingRefinementService {
     }
 
     const existing = topic.groundingAssignment;
+    // A REVIEWED row is an admin decision: never refined (and never a provider call).
+    if (existing?.method === "REVIEWED") return { outcome: "SKIPPED_REVIEWED", reason: `Topic ${topicId} has a REVIEWED assignment.` };
     const existingFactualIdentityMatches =
       !!existing && existing.unitGroundingVersion === unit.groundingVersion && existing.unitSourceFingerprint === unit.groundingSourceFingerprint;
 

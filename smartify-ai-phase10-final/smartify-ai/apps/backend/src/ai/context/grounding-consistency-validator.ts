@@ -92,6 +92,11 @@ function referencesAnchor(generatedText: string, word: string, wordForms: boolea
  * (verbFamily above). Only the admin Question-authoring paths pass it; lesson
  * validation and the student lazy top-up keep the behavior they had before.
  */
+/** The anchor words the drift check accepts for a slice (concept names + vocabulary terms). */
+export function groundingAnchorWords(groundingSlice: Pick<GroundingSlice, "concepts" | "vocabulary">): string[] {
+  return [...groundingSlice.concepts.map((c) => c.name), ...groundingSlice.vocabulary.map((v) => v.term)].flatMap(significantWords);
+}
+
 export function checkGroundingConsistency(generatedTexts: string[], groundingSlice: GroundingSlice, opts: { wordForms?: boolean } = {}): string[] {
   const errors: string[] = [];
   const generatedText = generatedTexts.join(" \n ").toLowerCase();
@@ -105,7 +110,7 @@ export function checkGroundingConsistency(generatedTexts: string[], groundingSli
     }
   }
 
-  const groundingWords = [...groundingSlice.concepts.map((c) => c.name), ...groundingSlice.vocabulary.map((v) => v.term)].flatMap(significantWords);
+  const groundingWords = groundingAnchorWords(groundingSlice);
   if (groundingWords.length > 0 && !groundingWords.some((w) => referencesAnchor(generatedText, w, !!opts.wordForms))) {
     errors.push("Generated content does not reference any concept or term from the supplied grounding — it may have drifted from the intended curriculum scope.");
   }

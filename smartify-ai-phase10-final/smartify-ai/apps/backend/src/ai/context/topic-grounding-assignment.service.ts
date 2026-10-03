@@ -2,7 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { GroundingNotes } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
 import { selectRelevantGrounding } from "./grounding-selector.util";
-import { DETERMINISTIC_ASSIGNMENT_VERSION, MAPPER_PROMPT_VERSION, resolveAssignedGroundingSlice } from "./topic-grounding-assignment.util";
+import { DETERMINISTIC_ASSIGNMENT_VERSION, MAPPER_PROMPT_VERSION, REVIEWED_METHOD, resolveAssignedGroundingSlice, unresolvedReviewedReferences } from "./topic-grounding-assignment.util";
 
 /**
  * The WRITE side of the persisted Topic->grounding assignment (2026-09-27) —
@@ -323,17 +323,32 @@ export function computeDeterministicAssignment(
 }
 
 export type PrepareOutcome =
-  | { outcome: "UNCHANGED"; method: DeterministicMethod | "AI_MAPPER"; status: "READY" | "BLOCKED" }
-  | { outcome: "ASSIGNED"; method: DeterministicMethod; status: "READY" }
+  | { outcome: "UNCHANGED"; method: DeterministicMethod | "AI_MAPPER" | "REVIEWED"; status: "READY" | "BLOCKED" }
+  | { outcome: "ASSIGNED"; method: DeterministicMethod | "REVIEWED"; status: "READY" }
+  | { outcome: "REVIEWED_INVALIDATED"; reason: string }
   | { outcome: "UNRESOLVED"; reason: string }
   | { outcome: "NOT_GROUNDED"; reason: string };
+
+/**
+ * Thrown by `upsert` when an automatic writer would replace a REVIEWED row.
+ * Every automatic entry point already skips REVIEWED rows before doing any
+ * work (and before any provider call); this is the last line of defence, so
+ * a missed guard fails loudly instead of silently overwriting a human
+ * decision.
+ */
+export class ReviewedAssignmentProtectedError extends Error {
+  constructor(readonly topicId: string, readonly attemptedMethod: string) {
+    super(`Topic ${topicId} has a REVIEWED grounding assignment; ${attemptedMethod} may not overwrite it`);
+    this.name = "ReviewedAssignmentProtectedError";
+  }
+}
 
 /** Persisted-row payload shared by this service and the AI mapper. */
 export interface AssignmentUpsertInput {
   topicId: string;
   unitGroundingVersion: number;
   unitSourceFingerprint: string;
-  method: DeterministicMethod | "AI_MAPPER";
+  method: DeterministicMethod | "AI_MAPPER" | "REVIEWED";
   confidence: "HIGH" | "LOW";
   status: "READY" | "BLOCKED";
   matchedConceptNames: string[];
@@ -391,6 +406,12 @@ export class TopicGroundingAssignmentService {
 
     const factualIdentityMatches =
       !!existing && existing.unitGroundingVersion === unit.groundingVersion && existing.unitSourceFingerprint === unit.groundingSourceFingerprint;
+
+    // A REVIEWED row is never recomputed by Steps 1-5, the mapper or any
+    // version bump — see revalidateReviewed for the exact behavior.
+    if (existing && existing.method === REVIEWED_METHOD) {
+      return this.revalidateReviewed(topicId, existing as any, unit as any, (topic as any).topicSourceEvidence, factualIdentityMatches);
+    }
 
     // Read-side READY invariant (2026-10-02): an identity-valid READY row is authoritative only if
     // the SAME runtime slice resolver yields a non-empty slice. A READY row resolving EMPTY is not a
@@ -489,6 +510,48 @@ export class TopicGroundingAssignmentService {
     return { outcome: "ASSIGNED", method: assignment.method, status: "READY" };
   }
 
+  /**
+   * The ONLY automatic handling of a REVIEWED row:
+   *  - same Unit grounding identity: an authoritative READY row that still
+   *    resolves (every reviewed reference present, slice non-empty) is left
+   *    untouched (UNCHANGED); a BLOCKED one stays BLOCKED until re-reviewed;
+   *    a READY row that no longer resolves is persisted BLOCKED (still
+   *    REVIEWED, references kept for audit) — never remapped.
+   *  - changed Unit grounding identity (a re-grounded Unit): a READY row is
+   *    re-validated against the NEW grounding with the same exact-reference
+   *    rule. If every reviewed reference still resolves to a non-empty slice it
+   *    is re-stamped with the new identity (same references, still REVIEWED);
+   *    otherwise it is persisted BLOCKED. Either way the Topic's assignment
+   *    fingerprint changes with the grounding, so its old CURRENT content
+   *    becomes MISMATCH exactly as for any other re-grounded Topic.
+   * Nothing here ever falls through to Steps 1-5 or the mapper.
+   */
+  private async revalidateReviewed(
+    topicId: string,
+    existing: { status: string; matchedConceptNames: unknown; matchedHintTitles: unknown; unitGroundingVersion: number; unitSourceFingerprint: string; assignmentVersion: number; mapperPromptVersion: number | null; method: string },
+    unit: { id: string; groundingVersion: number; groundingSourceFingerprint: string; groundingNotesJson: unknown },
+    topicSourceEvidence: any[] | undefined,
+    factualIdentityMatches: boolean,
+  ): Promise<PrepareOutcome> {
+    if (existing.status !== "READY") return { outcome: "UNCHANGED", method: "REVIEWED", status: "BLOCKED" };
+    const names = Array.isArray(existing.matchedConceptNames) ? (existing.matchedConceptNames as unknown[]).filter((n): n is string => typeof n === "string") : [];
+    const hints = Array.isArray(existing.matchedHintTitles) ? (existing.matchedHintTitles as unknown[]).filter((n): n is string => typeof n === "string") : null;
+    const candidate = { ...existing, method: REVIEWED_METHOD, unitGroundingVersion: unit.groundingVersion, unitSourceFingerprint: unit.groundingSourceFingerprint, status: "READY" as const };
+    const resolved = resolveAssignedGroundingSlice(candidate as any, { id: unit.id, groundingVersion: unit.groundingVersion, groundingSourceFingerprint: unit.groundingSourceFingerprint, groundingNotesJson: unit.groundingNotesJson as GroundingNotes }, topicSourceEvidence);
+    const identity = { topicId, unitGroundingVersion: unit.groundingVersion, unitSourceFingerprint: unit.groundingSourceFingerprint, method: "REVIEWED" as const, matchedConceptNames: names, matchedHintTitles: hints, mapperModel: null, mapperPromptVersion: null };
+    if (resolved.state === "READY") {
+      if (factualIdentityMatches) return { outcome: "UNCHANGED", method: "REVIEWED", status: "READY" };
+      await this.upsert({ ...identity, confidence: "HIGH", status: "READY", reason: `[REVIEWED:REVALIDATED] every reviewed reference re-resolved against grounding ${unit.groundingSourceFingerprint.slice(0, 12)} (was ${existing.unitSourceFingerprint.slice(0, 12)}).` });
+      this.logger.log(JSON.stringify({ event: "TOPIC_GROUNDING_REVIEWED_REVALIDATED", topicId, unitId: unit.id }));
+      return { outcome: "ASSIGNED", method: "REVIEWED", status: "READY" };
+    }
+    const missing = unresolvedReviewedReferences(unit.groundingNotesJson as GroundingNotes, { matchedConceptNames: names, matchedHintTitles: hints });
+    const reason = `[REVIEWED:INVALIDATED] reviewed evidence no longer resolves (${resolved.state}${missing.length ? `; missing: ${missing.slice(0, 5).join(" | ")}` : ""}); requires re-review.`;
+    await this.upsert({ ...identity, confidence: "LOW", status: "BLOCKED", reason });
+    this.logger.warn(JSON.stringify({ event: "TOPIC_GROUNDING_REVIEWED_INVALIDATED", topicId, unitId: unit.id, state: resolved.state, missing: missing.length }));
+    return { outcome: "REVIEWED_INVALIDATED", reason };
+  }
+
   /** Sibling Topics' still-valid persisted concept names, for Step 5's page windows. */
   private async loadPriorAssignments(unitId: string, groundingVersion: number, fingerprint: string, excludeTopicId: string): Promise<Map<string, string[]>> {
     const rows = await this.prisma.client.topicGroundingAssignment.findMany({
@@ -525,10 +588,22 @@ export class TopicGroundingAssignmentService {
       mapperPromptVersion: input.mapperPromptVersion ?? null,
       reason: input.reason ?? null,
     };
-    await this.prisma.client.topicGroundingAssignment.upsert({
-      where: { topicId: input.topicId },
-      create: { topicId: input.topicId, ...data },
-      update: data,
-    });
+    // A non-REVIEWED write may never replace a REVIEWED row. The guard is part of the
+    // write itself: the extended unique filter does not match a REVIEWED row, so the
+    // upsert falls through to create and fails on the unique topicId — atomically,
+    // with no read-then-write window.
+    try {
+      await this.prisma.client.topicGroundingAssignment.upsert({
+        where: input.method === REVIEWED_METHOD ? { topicId: input.topicId } : { topicId: input.topicId, method: { not: REVIEWED_METHOD as any } },
+        create: { topicId: input.topicId, ...data },
+        update: data,
+      });
+    } catch (err) {
+      if (input.method !== REVIEWED_METHOD && (err as { code?: string })?.code === "P2002") {
+        const current = await this.prisma.client.topicGroundingAssignment.findUnique({ where: { topicId: input.topicId }, select: { method: true } });
+        if (current?.method === REVIEWED_METHOD) throw new ReviewedAssignmentProtectedError(input.topicId, input.method);
+      }
+      throw err;
+    }
   }
 }
