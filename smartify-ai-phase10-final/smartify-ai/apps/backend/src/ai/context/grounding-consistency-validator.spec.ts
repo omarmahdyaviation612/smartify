@@ -1,4 +1,4 @@
-import { checkGroundingConsistency } from "./grounding-consistency-validator";
+import { checkGroundingConsistency, singularVariant } from "./grounding-consistency-validator";
 import type { GroundingSlice } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
 
 const slice: GroundingSlice = {
@@ -37,5 +37,83 @@ describe("checkGroundingConsistency", () => {
     const emptySlice: GroundingSlice = { matchedViaHint: false, learningObjectives: [], concepts: [], facts: [], vocabulary: [] };
     const errors = checkGroundingConsistency(["Anything at all."], emptySlice);
     expect(errors).toEqual([]);
+  });
+});
+
+describe("checkGroundingConsistency — conservative English plural anchors (2026-10-03)", () => {
+  const anchorSlice = (names: string[], terms: string[] = []): GroundingSlice => ({
+    matchedViaHint: false,
+    learningObjectives: [],
+    concepts: names.map((name) => ({ name, description: "", sourcePages: [1], importance: "core" as const })),
+    facts: [],
+    vocabulary: terms.map((term) => ({ term, meaning: "", sourcePages: [1] })),
+  });
+  const DRIFT = "does not reference any concept";
+
+  // The real production case: Grade 5 Maths "Decimals to the Thousandths" — slice = concept "Decimals",
+  // vocabulary "Fraction"/"Decimals"; the stored, on-topic lesson plan never says "decimals" or "fraction".
+  const decimalsSlice = anchorSlice(["Decimals"], ["Fraction", "Decimals", "Fraction"]);
+  const decimalsPlan = [
+    "Introduce the topic of decimal numbers and their place values, focusing on the thousandths place.",
+    "Explain the concept of place value in decimal numbers, emphasizing the significance of each digit, especially in the thousandths.",
+    "Check student understanding of place value in decimal numbers through a conceptual question.",
+    "Provide examples of adding and subtracting decimal numbers, demonstrating alignment of decimal points.",
+    "Assess student ability to add and subtract decimal numbers with a practical exercise.",
+    "Summarize the key points about decimal place value and operations, including rounding techniques.",
+    "Conclude the lesson and encourage students to practice rounding decimal numbers.",
+  ];
+
+  it("accepts the production Decimals lesson plan that uses the singular 'decimal'", () => {
+    expect(checkGroundingConsistency(decimalsPlan, decimalsSlice)).toEqual([]);
+  });
+
+  it.each([
+    ["Operations", "Practise each operation step by step."],
+    ["Methods", "Choose a method to solve the problem."],
+    ["Properties", "Use the commutative property of addition."],
+    ["Matches", "Find the match for each picture."],
+    ["Boxes", "Draw a box around the answer."],
+    ["Classes", "Sort the animals into one class."],
+    ["Phases", "Describe one phase of the Moon."],
+  ])("plural anchor %s accepts its regular singular as a whole word", (anchor, text) => {
+    expect(checkGroundingConsistency([text], anchorSlice([anchor]))).toEqual([]);
+  });
+
+  it("the singular variant must be a WHOLE word — never a fragment of an unrelated longer word", () => {
+    // "units" -> "unit" must not match inside "community"; "rates" -> "rate" must not match inside "separate".
+    expect(checkGroundingConsistency(["Our community works together."], anchorSlice(["Units"])).some((e) => e.includes(DRIFT))).toBe(true);
+    expect(checkGroundingConsistency(["Keep the groups separate."], anchorSlice(["Rates"])).some((e) => e.includes(DRIFT))).toBe(true);
+  });
+
+  it("unrelated content still fails", () => {
+    expect(checkGroundingConsistency(["Let's learn about the planets in our solar system!"], decimalsSlice).some((e) => e.includes(DRIFT))).toBe(true);
+    expect(checkGroundingConsistency(["Count the apples and add them together."], anchorSlice(["Fractions"])).some((e) => e.includes(DRIFT))).toBe(true);
+  });
+
+  it("no fuzzy matching: a different word sharing a prefix does not count", () => {
+    // "decimals" -> "decimal" only; "decimate" / "decimeter" are not references.
+    expect(checkGroundingConsistency(["The storm will decimate the crops.", "Measure in decimeters."], anchorSlice(["Decimals"])).some((e) => e.includes(DRIFT))).toBe(true);
+  });
+
+  it("verbatim-copy protection is unchanged", () => {
+    const s = { ...decimalsSlice, facts: [{ fact: "A decimal point separates the whole number part from the fractional part.", sourcePages: [1], importance: "core" as const }] };
+    const errors = checkGroundingConsistency(["A decimal point separates the whole number part from the fractional part."], s);
+    expect(errors.some((e) => e.includes("verbatim"))).toBe(true);
+  });
+
+  it("existing substring behavior is unchanged (singular anchor still accepts plural text)", () => {
+    expect(checkGroundingConsistency(["We study many fractions today."], anchorSlice(["Fraction"]))).toEqual([]);
+  });
+
+  it("singularVariant is limited to regular English plurals of ASCII words with 5+ letters", () => {
+    expect(singularVariant("decimals")).toBe("decimal");
+    expect(singularVariant("operations")).toBe("operation");
+    expect(singularVariant("methods")).toBe("method");
+    expect(singularVariant("properties")).toBe("property");
+    expect(singularVariant("matches")).toBe("match");
+    expect(singularVariant("classes")).toBe("class");
+    expect(singularVariant("houses")).toBe("house");
+    // never: non-plurals, short words, non-ASCII scripts
+    for (const w of ["analysis", "status", "glass", "decimal", "sums", "maps", "صفات", "zakat", "élèves"]) expect(singularVariant(w)).toBeNull();
   });
 });

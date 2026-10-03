@@ -30,6 +30,32 @@ function significantWords(phrase: string): string[] {
     .filter((w) => w.length > 2 && !STOPWORDS.has(w));
 }
 
+/**
+ * 2026-10-03 (Wave B "Decimals to the Thousandths"): a correct lesson that
+ * says "decimal" was rejected against the anchor "decimals" — the substring
+ * check already accepts a plural in the text for a singular anchor, but not
+ * the reverse. This returns the regular English SINGULAR of a plural anchor
+ * word ("decimals" -> "decimal", "properties" -> "property", "matches" ->
+ * "match"), or null. Deliberately narrow: ASCII-letter words of 5+ characters
+ * only (Arabic and every other script untouched), regular plural endings only,
+ * no fuzzy/semantic matching. The variant is matched as a WHOLE word, so a
+ * short stem can never hit inside an unrelated longer word.
+ */
+export function singularVariant(word: string): string | null {
+  if (!/^[a-z]{5,}$/.test(word)) return null;
+  if (word.endsWith("ies")) return `${word.slice(0, -3)}y`;
+  if (/(ches|shes|sses|xes|zes)$/.test(word)) return word.slice(0, -2);
+  if (/(ss|us|is)$/.test(word)) return null;
+  if (word.endsWith("s")) return word.slice(0, -1);
+  return null;
+}
+
+function referencesAnchor(generatedText: string, word: string): boolean {
+  if (generatedText.includes(word)) return true;
+  const singular = singularVariant(word);
+  return !!singular && new RegExp(`(^|[^a-z])${singular}([^a-z]|$)`).test(generatedText);
+}
+
 export function checkGroundingConsistency(generatedTexts: string[], groundingSlice: GroundingSlice): string[] {
   const errors: string[] = [];
   const generatedText = generatedTexts.join(" \n ").toLowerCase();
@@ -44,7 +70,7 @@ export function checkGroundingConsistency(generatedTexts: string[], groundingSli
   }
 
   const groundingWords = [...groundingSlice.concepts.map((c) => c.name), ...groundingSlice.vocabulary.map((v) => v.term)].flatMap(significantWords);
-  if (groundingWords.length > 0 && !groundingWords.some((w) => generatedText.includes(w))) {
+  if (groundingWords.length > 0 && !groundingWords.some((w) => referencesAnchor(generatedText, w))) {
     errors.push("Generated content does not reference any concept or term from the supplied grounding — it may have drifted from the intended curriculum scope.");
   }
 
