@@ -10,6 +10,7 @@ import type { QuestionGenerationInput, ResolvedTopicContext } from "./question-d
 import type { GroundingNotes } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
 import { classifyContentProvenance, evaluateTopicGroundingGate, questionServabilityByTopic, QUESTION_PROVENANCE_SELECT, TOPIC_GATE_INCLUDE, UNIT_GATE_SELECT, type TopicGroundingGate } from "../../ai/context/topic-content-provenance.util";
 import { checkGroundingConsistency } from "../../ai/context/grounding-consistency-validator";
+import { checkArithmeticConsistency, type ArithmeticResult } from "./arithmetic-consistency";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
 
 const AUTO_BATCH_MAX_ATTEMPTS = 2;
@@ -462,6 +463,7 @@ export class QuestionDraftGeneratorService {
       const perItemErrors: string[] = [];
       const validDrafts: Array<Record<string, unknown>> = [];
       const seenPrompts = new Set(acceptedPool.map((q) => normalizePrompt(q.promptEn)));
+      let arithmetic: ArithmeticResult;
       rawQuestions.forEach((q, index) => {
         const validation = validateQuestionDraft(
           { ...(q as Record<string, unknown>), topicId },
@@ -471,6 +473,10 @@ export class QuestionDraftGeneratorService {
           perItemErrors.push(`questions[${index}]: ${validation.errors.join("; ")}`);
         } else if (poolContext && seenPrompts.has(normalizePrompt((q as Record<string, unknown>).promptEn as string))) {
           perItemErrors.push(`questions[${index}]: duplicates a Question already in the pool.`);
+        } else if (authoring && (arithmetic = checkArithmeticConsistency(q as Record<string, unknown>)).status === "INVALID") {
+          // Deterministic arithmetic guard (admin authoring only): dropped like any other invalid
+          // candidate when exact arithmetic PROVES a contradiction; UNKNOWN is never a rejection.
+          perItemErrors.push(`questions[${index}]: arithmetic inconsistency — ${arithmetic.findings.map((f) => `${f.code}: ${f.detail}`).join("; ")}`);
         } else {
           if (poolContext) seenPrompts.add(normalizePrompt((q as Record<string, unknown>).promptEn as string));
           validDrafts.push(q as Record<string, unknown>);
