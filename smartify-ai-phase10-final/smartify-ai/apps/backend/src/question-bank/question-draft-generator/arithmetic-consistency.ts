@@ -36,7 +36,7 @@
  */
 
 export type ArithmeticStatus = "VALID" | "INVALID" | "UNKNOWN";
-export type ArithmeticReasonCode = "EXPLANATION_ARITHMETIC_MISMATCH" | "MARKED_ANSWER_MISMATCH" | "NO_CORRECT_OPTION";
+export type ArithmeticReasonCode = "EXPLANATION_ARITHMETIC_MISMATCH" | "EXPLANATION_RESULT_MISMATCH" | "MARKED_ANSWER_MISMATCH" | "NO_CORRECT_OPTION";
 export interface ArithmeticFinding { code: ArithmeticReasonCode; detail: string }
 export interface ArithmeticResult { status: ArithmeticStatus; findings: ArithmeticFinding[]; verified: string[] }
 export interface ArithmeticQuestion { type?: unknown; promptEn?: unknown; optionsJson?: unknown; correctAnswerJson?: unknown; explanationEn?: unknown }
@@ -90,7 +90,7 @@ function tokenize(text: string): Tok[] {
       if (/^[a-z0-9%²³°]/.test(after)) { out.push({ k: "OTHER" }); i += nm[0].length; continue; }
       out.push({ k: "NUM", v: parseNumber(nm[1])!, raw: nm[1] }); i += nm[0].length; continue;
     }
-    const eqm = /^(=|equals\b|is equal to\b)/.exec(rest);
+    const eqm = /^(=|equals\b|is equal to\b|equal to\b|results in\b|result is\b|a total of\b|totaling\b|totalling\b|totals\b|gives\b|giving\b|is\b)/.exec(rest);
     if (eqm) { out.push({ k: "EQ" }); i += eqm[0].length; continue; }
     const opm = OP_WORDS.find(([re]) => re.test(rest));
     if (opm) { out.push({ k: "OP", op: opm[1] }); i += opm[0].exec(rest)![0].length; continue; }
@@ -115,7 +115,7 @@ type Claim = { text: string; value: Rat; rhs: Rat; rhsRaw: string; hasDivision: 
 function claimsIn(tokens: Tok[], whole = false): Claim[] {
   const out: Claim[] = [];
   for (let i = 0; i < tokens.length; i++) {
-    if (tokens[i].k !== "NUM" || (i > 0 && (tokens[i - 1].k === "OP" || tokens[i - 1].k === "EQ"))) continue;
+    if (tokens[i].k !== "NUM" || (i > 0 && (tokens[i - 1].k === "OP" || (tokens[i - 1].k === "EQ" && tokens[i - 2]?.k === "NUM")))) continue;
     const nums: Rat[] = [(tokens[i] as any).v], ops: Array<"+" | "-" | "*" | "/"> = [];
     let j = i + 1;
     while (tokens[j]?.k === "OP" && tokens[j + 1]?.k === "NUM") { ops.push((tokens[j] as any).op); nums.push((tokens[j + 1] as any).v); j += 2; }
@@ -141,6 +141,73 @@ function judge(c: Claim): boolean | null {
 
 const SKIP_CUES = /\b(not|no|never|incorrect|wrong|false|mistake\w*|error\w*|instead|rather|think|thinks|thought|say|says|said|claim\w*|believe\w*|estimat\w*|approximately|approx|about|roughly|round\w*|nearest|close to|if)\b|n't|≈|~/i;
 const sentences = (t: string) => t.split(/(?<=[.!?;])\s+|\n+/).filter(Boolean);
+/** V1.1: fold result-connector phrasing onto the tokenizer's connectors ("15 plus 4, totaling 23" -> "15 plus 4 totaling 23"). */
+function normalizeConnectors(sentence: string): string {
+  return sentence
+    .replace(/\b(?:giving|for|to make|with) a total of\b/gi, "a total of")
+    .replace(/\b(gives|giving) us\b/gi, "$1")
+    .replace(/\bwhich (is|equals|gives|totals)\b/gi, "$1")
+    .replace(/,\s*(?=(?:a total of|totaling|totalling|totals|equals|is equal to|gives|giving|results in|is)\b)/gi, " ");
+}
+// Negation / hypothetical cues only (estimation words are NOT here): a final answer stated after rounding is still compared.
+const FINAL_SKIP_CUES = /\b(not|no|never|incorrect|wrong|false|mistake\w*|error\w*|instead|rather|think|thinks|thought|say|says|said|claim\w*|believe\w*|if)\b|n't/i;
+const UNIT_ALIASES: Record<string, string> = { cm: "centimeter", centimetre: "centimeter", mm: "millimeter", millimetre: "millimeter", m: "meter", metre: "meter", km: "kilometer", kilometre: "kilometer", kg: "kilogram", g: "gram", l: "liter", litre: "liter", ml: "milliliter", millilitre: "milliliter", min: "minute", mins: "minute", h: "hour", hr: "hour", hrs: "hour", sec: "second", secs: "second" };
+/** Same-unit key ("cm" == "centimeters"); never a conversion between different units. */
+function unitKey(u: string | undefined | null): string | null {
+  if (!u) return null;
+  const w = u.toLowerCase().trim().replace(/\s+/g, " ");
+  const prefix = /^(square|sq) /.test(w) ? "square " : /^cubic /.test(w) ? "cubic " : "";
+  const base = w.replace(/^(square|sq|cubic) /, "");
+  const single = UNIT_ALIASES[base] ?? (base.endsWith("s") && base.length > 3 ? base.slice(0, -1) : base);
+  return prefix + single;
+}
+const FINAL_NOUN = "(?:final |estimated )?(?:answer|total|sum|difference|product|result|perimeter|area|estimate|value)";
+const FINAL_LINK = "(?:is|=|equals|will be|would be)";
+const UNIT_SRC = "(?: ((?:square |sq |cubic )?[a-z]+))?";
+type FinalResult = { value: Rat; raw: string; unit: string | null; how: string };
+/** A whole clause that is exactly one claim, optionally followed by a unit ("1500 + 400 = 1900", "10 + 18 + 6 = 34 cm"). */
+function clauseClaim(text: string, how: string): FinalResult | null {
+  const um = /^(.*\d)((?: (?:square |sq |cubic )?[a-z]+)?)$/i.exec(text.trim());
+  if (!um) return null;
+  const [c] = claimsIn(tokenize(normalizeConnectors(um[1])), true);
+  return c ? { value: c.rhs, raw: c.rhsRaw, unit: um[2].trim() || null, how } : null;
+}
+/**
+ * V1.1: the explanation's FINAL stated result, only from high-confidence cues in its LAST sentence:
+ *   "So/Therefore/Thus/Hence, the answer|total|sum|... is R [unit]" (also as the sentence's final clause)
+ *   "The answer|total|... is R [unit]."                             (the whole last sentence)
+ *   "Thus, R [unit]."
+ *   "... so a op b = R [unit]."                                     (final clause is exactly one claim)
+ *   a last sentence with a total cue ("a total of", "totaling", "in total", "altogether") and exactly one claim.
+ * Never "the last number in the explanation". Null when not identifiable.
+ */
+function finalResult(explanation: string): FinalResult | null {
+  const all = sentences(explanation.trim());
+  const last = (all[all.length - 1] ?? "").trim().replace(/[.!]+$/, "");
+  if (!last || FINAL_SKIP_CUES.test(last)) return null;
+  const N = NUMBER_SRC;
+  for (const re of [
+    new RegExp(`(?:^|,\\s*)(?:so|therefore|thus|hence),? (?:the )?${FINAL_NOUN} ${FINAL_LINK} [$£€]?(${N})${UNIT_SRC}$`, "i"),
+    new RegExp(`^the ${FINAL_NOUN} ${FINAL_LINK} [$£€]?(${N})${UNIT_SRC}$`, "i"),
+    new RegExp(`^(?:so|therefore|thus|hence),? [$£€]?(${N})${UNIT_SRC}$`, "i"),
+  ]) {
+    const m = re.exec(last);
+    if (m) return { value: parseNumber(m[1])!, raw: m[1], unit: m[2] ?? null, how: last };
+  }
+  const so = /(?:^|,\s*|\s)(?:so|therefore|thus|hence),? (.+)$/i.exec(last);
+  if (so) {
+    const r = clauseClaim(so[1], last);
+    if (r) return r;
+  }
+  if (/\b(a total of|in total|totaling|totalling|totals|the total is|altogether)\b/i.test(last)) {
+    const claims = claimsIn(tokenize(normalizeConnectors(last)));
+    if (claims.length === 1) {
+      const um = new RegExp(`${claims[0].rhsRaw.replace(/[.,]/g, "\\$&")} ((?:square |sq |cubic )?[a-z]+)`, "i").exec(last);
+      return { value: claims[0].rhs, raw: claims[0].rhsRaw, unit: um ? um[1] : null, how: last };
+    }
+  }
+  return null;
+}
 
 /** Expression of a direct-computation prompt, or null when the prompt is not one. */
 function directValue(prompt: string): { value: Rat; how: string } | null {
@@ -163,13 +230,18 @@ function directValue(prompt: string): { value: Rat; how: string } | null {
 }
 // Unit words that change a number's value ("4 hundreds", "3 tenths") — such an option is never read as its bare number.
 const VALUE_CHANGING_UNITS = /^(hundreds?|thousands?|tens?|ones?|millions?|billions?|dozens?|half|halves|quarters?|thirds?|percent|tenths?|hundredths?|thousandths?|times|units?|digits?|place|squared|cubed)$/i;
-/** Numeric value of an option/answer: a number with optional leading currency and ONE trailing unit word. */
-function optionValue(o: unknown): Rat | null {
-  if (typeof o === "number") return parseNumber(String(o));
+/** Numeric value (+ unit) of an option/answer: a number with optional leading currency and ONE trailing unit word ("square/cubic <unit>" allowed). */
+function optionParts(o: unknown): { value: Rat; unit: string | null } | null {
+  if (typeof o === "number") { const v = parseNumber(String(o)); return v ? { value: v, unit: null } : null; }
   if (typeof o !== "string") return null;
-  const m = new RegExp(`^\\s*[$£€]?\\s*(${NUMBER_SRC})(?:\\s+([a-z]+))?\\s*$`, "i").exec(o);
-  if (!m || (m[2] && VALUE_CHANGING_UNITS.test(m[2]))) return null;
-  return parseNumber(m[1]);
+  const m = new RegExp(`^\\s*[$£€]?\\s*(${NUMBER_SRC})(?:\\s+((?:square |sq |cubic )?[a-z]+))?\\s*$`, "i").exec(o);
+  if (!m) return null;
+  const unit = m[2] ?? null;
+  if (unit && !/^(square|sq|cubic) /i.test(unit) && VALUE_CHANGING_UNITS.test(unit)) return null;
+  return { value: parseNumber(m[1])!, unit };
+}
+function optionValue(o: unknown): Rat | null {
+  return optionParts(o)?.value ?? null;
 }
 function pairSum(o: unknown): Rat | null {
   if (typeof o !== "string") return null;
@@ -188,7 +260,7 @@ export function checkArithmeticConsistency(q: ArithmeticQuestion): ArithmeticRes
   // 1. explicit arithmetic claims in the explanation
   for (const sentence of sentences(explanation)) {
     if (SKIP_CUES.test(sentence)) continue;
-    for (const c of claimsIn(tokenize(sentence))) {
+    for (const c of claimsIn(tokenize(normalizeConnectors(sentence)))) {
       const ok = judge(c);
       if (ok === true) verified.push(`explanation: ${c.text}`);
       else if (ok === false) findings.push({ code: "EXPLANATION_ARITHMETIC_MISMATCH", detail: `explanation claims ${c.text}; exact value is ${show(c.value)}` });
@@ -232,6 +304,19 @@ export function checkArithmeticConsistency(q: ArithmeticQuestion): ArithmeticRes
         else findings.push({ code: "MARKED_ANSWER_MISMATCH", detail: `marked ${marked} but ${c!.text} is ${ok}` });
       }
     }
+  }
+
+  // 5. V1.1: the explanation's stated FINAL result must agree with the marked answer and an option.
+  //    Never for missing-number prompts (the answer is an operand, not the result); never across unit words.
+  const missingNumber = /\bmissing\b|\bblank\b|_{2,}|\?\s*[=+\-×x÷*/]|[=+\-×x÷*/]\s*\?/i.test(prompt);
+  const fin = missingNumber ? null : finalResult(explanation);
+  const mp = optionParts(marked);
+  if (fin && mp && (!fin.unit || !mp.unit || unitKey(fin.unit) === unitKey(mp.unit))) {
+    const parts = options.map(optionParts);
+    const unitsAgree = parts.every((x) => x !== null && (!x.unit || !fin.unit || unitKey(x.unit) === unitKey(fin.unit)));
+    if (!eq(mp.value, fin.value)) findings.push({ code: "EXPLANATION_RESULT_MISMATCH", detail: `explanation concludes ${fin.raw}${fin.unit ? ` ${fin.unit}` : ""} ("${fin.how}") but the marked answer is ${JSON.stringify(marked)}` });
+    else verified.push(`final result: ${fin.raw} matches the marked answer`);
+    if (parts.length > 0 && unitsAgree && !parts.some((x) => eq(x!.value, fin.value))) findings.push({ code: "NO_CORRECT_OPTION", detail: `no option equals the explanation's final result ${fin.raw}` });
   }
 
   return { status: findings.length ? "INVALID" : verified.length ? "VALID" : "UNKNOWN", findings, verified };
