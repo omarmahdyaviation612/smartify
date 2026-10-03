@@ -21,6 +21,9 @@
  *     MAX_QUESTION_BATCHES_PER_TOPIC batches. LEGACY Questions are never
  *     copied, restamped or deleted; a Topic with any CURRENT Question no
  *     longer serves its LEGACY ones (topic-content-provenance.util.ts).
+ *     Each batch's pool-level grounding check judges the FINAL pool — the
+ *     Topic's already-accepted CURRENT Questions plus the new batch — so a
+ *     one-Question completion is not judged in isolation (2026-10-03).
  *   - A Topic is COMPLETED only when, re-read after all writes, its steps are
  *     CURRENT and it holds >= POOL_TARGET CURRENT Questions; otherwise it is
  *     INCOMPLETE and the run stops there (exit code 1).
@@ -156,6 +159,25 @@ export async function runRegeneration(
   return { mode: args.apply ? "APPLY" : "DRY_RUN", results, stoppedOnFailure: false };
 }
 
+/**
+ * `RegenerationDeps.generateQuestions` for the real services. Accumulated
+ * final-pool validation (2026-10-03): every batch is judged together with this
+ * Topic's already-accepted CURRENT Questions — the same semantics as a staged
+ * completion (staged-assignment-repair.ts); the generator reads that pool
+ * itself under the batch's own gate.
+ */
+export function currentPoolQuestionGenerator(
+  questionGenerator: { generateAutoQuestionBatch(topicId: string, count: number, actor: string, staged?: undefined, completion?: { againstCurrentPool: true }): Promise<{ drafts: Array<{ id: string }> }> },
+  questionPublisher: { autoPublish(draftId: string): Promise<unknown> },
+  actorId: string,
+): RegenerationDeps["generateQuestions"] {
+  return async (topicId, count) => {
+    const { drafts } = await questionGenerator.generateAutoQuestionBatch(topicId, count, actorId, undefined, { againstCurrentPool: true });
+    for (const d of drafts) await questionPublisher.autoPublish(d.id);
+    return drafts.length;
+  };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   await import("reflect-metadata");
@@ -191,11 +213,7 @@ async function main() {
         );
         await lessonPublisher.autoPublishIntoTopic(draft.id, topic.id, { generationSource, groundingVersionUsed, generationPromptVersion, provenance });
       },
-      generateQuestions: async (topicId, count) => {
-        const { drafts } = await questionGenerator.generateAutoQuestionBatch(topicId, count, CONTENT_AUTHORING_ACTOR_ID);
-        for (const d of drafts) await questionPublisher.autoPublish(d.id);
-        return drafts.length;
-      },
+      generateQuestions: currentPoolQuestionGenerator(questionGenerator, questionPublisher, CONTENT_AUTHORING_ACTOR_ID),
     });
     console.log(JSON.stringify(out, null, 2));
     if (out.stoppedOnFailure) process.exitCode = 1;
