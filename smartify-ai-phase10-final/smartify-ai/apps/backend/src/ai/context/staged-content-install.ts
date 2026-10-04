@@ -259,3 +259,71 @@ export async function installStagedContent(
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 10000, timeout: 30000 },
   );
 }
+
+/**
+ * SURGICAL QUESTION RE-STAGE (2026-10-04): keep an already-staged LessonDraft
+ * and the good QuestionDrafts of an earlier --stage, reject explicitly listed
+ * bad QuestionDrafts, and generate only the missing count so the staged pool is
+ * exactly 8 again. Everything except the Question generation is reused:
+ * stageReplacement (existing lesson + reuseQuestionDraftIds -> acceptedPool),
+ * validateStaged / validateStagedContent (final 8 judged together),
+ * stagedIdentity (fresh identity), and the unchanged installer for commit.
+ *
+ * Provenance of the kept lesson: a LessonDraft stores no provenance, so the
+ * caller must present the PREVIOUS staged identity. It is recomputed from the
+ * current plan over the kept lesson and the full original set (keep + reject);
+ * a match proves the lesson and every draft were staged against exactly this
+ * assignment row, gate, grounding identity, live-lesson baseline and deployed
+ * prompt version, and that none of them has been edited since.
+ */
+export interface SurgicalSpec { topicId: string; lessonDraftId: string; keepQuestionDraftIds: string[]; rejectQuestionDraftIds: string[]; previousIdentity: string }
+
+/** Pure preflight. Every check happens before any rejection or provider call. Throws StagedRepairError on refusal. */
+export function planSurgicalRestage(
+  topic: any,
+  spec: SurgicalSpec,
+  rows: { lessonDraft: any; drafts: any[]; pendingQuestionDraftIds: string[]; pendingLessonDraftIds: string[]; activity: number },
+): { plan: ContentPlan; objectivesEn: string[] } {
+  const plan = planContentStaging(topic); // gate READY + no CURRENT content
+  const { keepQuestionDraftIds: keep, rejectQuestionDraftIds: reject } = spec;
+  if (!keep.length || !reject.length) throw new StagedRepairError("SPEC", `${spec.topicId}: at least one keep and one reject draft are required`);
+  if (keep.some((id) => reject.includes(id))) throw new StagedRepairError("SPEC", `${spec.topicId}: a draft is listed both to keep and to reject`);
+  if (new Set([...keep, ...reject]).size !== keep.length + reject.length) throw new StagedRepairError("SPEC", `${spec.topicId}: duplicate draft ids`);
+  if (keep.length + reject.length !== STAGED_POOL_TARGET) throw new StagedRepairError("SPEC", `${spec.topicId}: keep + reject must be the full original staged set of ${STAGED_POOL_TARGET}`);
+  if (rows.activity !== 0) throw new StagedRepairError("ACTIVITY", `${spec.topicId}: Topic has ${rows.activity} student activity row(s)`);
+  const original = [...keep, ...reject];
+  const byId = new Map(rows.drafts.map((d) => [d.id, d]));
+  const missing = original.filter((id) => !byId.has(id));
+  if (missing.length) throw new StagedRepairError("DRAFT_MISSING", `${spec.topicId}: drafts not found`, missing);
+  const originalDrafts = original.map((id) => byId.get(id));
+  // The full original set must still be exactly the reviewed one (pending, unpublished, this provenance, individually valid, unedited).
+  const errors = validateStaged(asStagedPlan(plan), rows.lessonDraft, originalDrafts);
+  if (errors.length) throw new StagedRepairError("ORIGINAL_SET_INVALID", `${spec.topicId}: the original staged set is not intact`, errors);
+  if (stagedIdentity(plan, rows.lessonDraft, originalDrafts) !== spec.previousIdentity) {
+    throw new StagedRepairError("PREVIOUS_IDENTITY", `${spec.topicId}: the original staged set (lesson + ${STAGED_POOL_TARGET} drafts) or the Topic baseline changed since it was staged`);
+  }
+  const keptPrompts = keep.map((id) => norm(byId.get(id).promptEn));
+  if (new Set(keptPrompts).size !== keptPrompts.length) throw new StagedRepairError("KEEP_DUPLICATE", `${spec.topicId}: kept drafts duplicate each other`);
+  const extraQ = rows.pendingQuestionDraftIds.filter((id) => !original.includes(id));
+  const extraL = rows.pendingLessonDraftIds.filter((id) => id !== spec.lessonDraftId);
+  if (extraQ.length || extraL.length) throw new StagedRepairError("STAGED_LEFTOVERS_PRESENT", `${spec.topicId}: other pending drafts exist for this Topic/Unit; nothing is touched`, { questionDrafts: extraQ, lessonDrafts: extraL });
+  return { plan, objectivesEn: parseBilingualObjectives(rows.lessonDraft.learningObjectivesJson).map((o) => o.objectiveEn) };
+}
+
+/**
+ * Rejects the listed drafts (only after planSurgicalRestage passed), then stages the missing count with the
+ * kept lesson and kept drafts as the accepted pool. Never touches serving content; a later failure leaves the
+ * rejected drafts rejected (audit history), the kept drafts pending, and any partial new drafts non-servable.
+ */
+export async function surgicalRestage(
+  plan: ContentPlan,
+  spec: SurgicalSpec,
+  objectivesEn: string[],
+  deps: StageDeps & { rejectQuestionDraft(id: string, reason: string): Promise<unknown> },
+): Promise<StagedReplacement> {
+  for (const id of spec.rejectQuestionDraftIds) await deps.rejectQuestionDraft(id, `Surgical re-stage: rejected after manual review of staged identity ${spec.previousIdentity.slice(0, 16)}; replaced by a newly staged Question.`);
+  return stageReplacement(asStagedPlan(plan), deps, {
+    reuseQuestionDraftIds: spec.keepQuestionDraftIds,
+    existingLesson: { draftId: spec.lessonDraftId, objectivesEn, metadata: lessonMetadataFor(plan) },
+  });
+}

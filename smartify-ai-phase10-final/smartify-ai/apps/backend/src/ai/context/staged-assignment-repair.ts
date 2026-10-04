@@ -190,8 +190,18 @@ export function discoverStagedLeftovers(plan: StagedRepairPlan, pendingQuestionD
   };
 }
 
-/** Provider work happens HERE, before any live write. Failures leave live state untouched (staged drafts stay non-servable). */
-export async function stageReplacement(plan: StagedRepairPlan, deps: StageDeps, opts: { reuseQuestionDraftIds?: string[] } = {}): Promise<StagedReplacement> {
+/**
+ * Provider work happens HERE, before any live write. Failures leave live state untouched (staged drafts stay non-servable).
+ *
+ * `existingLesson` (2026-10-04, surgical Question re-stage): an already-staged, already-verified pending LessonDraft to
+ * keep instead of generating a new one — the caller proves it belongs to this exact candidate (see
+ * staged-content-install.ts planSurgicalRestage). Absent, behaviour is unchanged.
+ */
+export async function stageReplacement(
+  plan: StagedRepairPlan,
+  deps: StageDeps,
+  opts: { reuseQuestionDraftIds?: string[]; existingLesson?: { draftId: string; objectivesEn: string[]; metadata: AutoLessonGenerationMetadata } } = {},
+): Promise<StagedReplacement> {
   const gate = plan.candidate.gate;
   // Reused staged Questions are re-validated here, never trusted blindly.
   const reuse = opts.reuseQuestionDraftIds ?? [];
@@ -200,7 +210,7 @@ export async function stageReplacement(plan: StagedRepairPlan, deps: StageDeps, 
   if (reusedRows.length !== reuse.length || !reusedRows.every((d) => acceptableStaged(d, plan))) {
     throw new StagedRepairError("STAGED_REUSE", `${plan.topicId}: a reused staged draft is not a valid pending draft of this candidate`);
   }
-  const lesson = await deps.generateLesson(plan.topicId, gate);
+  const lesson = opts.existingLesson ?? (await deps.generateLesson(plan.topicId, gate));
   if (lesson.metadata.provenance?.groundingAssignmentFingerprint !== plan.candidateAssignmentFingerprint) {
     throw new StagedRepairError("STAGED_PROVENANCE", `${plan.topicId}: staged lesson not stamped with the candidate assignment`);
   }
