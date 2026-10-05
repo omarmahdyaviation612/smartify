@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const ts = require('typescript');
 const React = require('react');
 
-exports.mount = async function mount(file, apiFetch, locale = 'en') {
+exports.mount = async function mount(file, apiFetch, locale = 'en', options = {}) {
   const slots = [], effects = [], cleanups = [];
   let cursor = 0, dirty = true, tree;
   const hooks = {
@@ -37,8 +37,9 @@ exports.mount = async function mount(file, apiFetch, locale = 'en') {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
     } }).outputText;
     const importer = name => {
+      if (options.modules?.[name]) return options.modules[name];
       if (name === 'react') return hooks;
-      if (name === 'next/navigation') return { useParams: () => ({ locale }), useRouter: () => ({ push() {}, replace() {}, back() {} }) };
+      if (name === 'next/navigation') return { useParams: () => ({ locale }), useRouter: () => options.router ?? ({ push() {}, replace() {}, back() {} }), useSearchParams: () => new URLSearchParams(options.searchParams) };
       if (name === 'next/link') return { __esModule: true, default: 'a' };
       if (name === '@clerk/nextjs') return { useAuth: () => ({ isLoaded: true, isSignedIn: true }) };
       if (name === '@smartify/ui') return { SmartifyButton: 'button', SmartifyContainer: 'div' };

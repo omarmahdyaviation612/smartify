@@ -1,3 +1,4 @@
+import { subjectAccessFixture } from "../../common/subject-access.fixtures.testspec";
 /**
  * Wave B runtime safety + downstream provenance (2026-10-03) — service-level
  * guarantees across Practice, Quiz, question/lesson generation, publishing and
@@ -58,8 +59,8 @@ function questionHarness(topic: any, existingQuestions: any[] = []) {
   const lessonGenerator = { ensureTopicHasLesson: jest.fn().mockResolvedValue(topic) };
   const generator = new QuestionDraftGeneratorService(prisma, providerFactory as any, { buildAutoQuestionBatchGenerationPrompt: jest.fn().mockReturnValue("p") } as any, usage as any, publisher as any, lessonGenerator as any);
   const accuracy = { getPerTopicAccuracy: jest.fn().mockResolvedValue([]), getTopicAccuracy: jest.fn().mockResolvedValue(null) } as any;
-  const practice = new PracticeService(prisma, accuracy, generator);
-  const quizzes = new QuizzesService(prisma, accuracy, generator, { send: jest.fn() } as any);
+  const practice = new PracticeService(subjectAccessFixture(prisma), accuracy, generator);
+  const quizzes = new QuizzesService(subjectAccessFixture(prisma), accuracy, generator, { send: jest.fn() } as any);
   return { prisma, generate, usage, publisher, lessonGenerator, generator, practice, quizzes };
 }
 
@@ -342,8 +343,8 @@ describe("Pilot fix — no mixed LEGACY/CURRENT pools in any student selector (8
       const findMany = jest.fn().mockImplementation(async ({ where }: any) => (where.id ? [leak] : pool));
       const prisma = { client: { studentProfile: { findUnique: jest.fn().mockResolvedValue(STUDENT) }, question: { findMany }, questionAttempt: { createMany: jest.fn() }, quizResult: { create: jest.fn().mockResolvedValue({ id: "r" }) }, assessment: { create: jest.fn().mockResolvedValue({ id: "a" }) }, learningPlan: { create: jest.fn().mockResolvedValue({ id: "l" }) } } } as any;
       let out: any;
-      if (kind === "practice") out = await new PracticeService(prisma, {} as any, {} as any).submitPractice("u", [{ questionId: "legacy-0", answer: "4" }]);
-      if (kind === "quiz") out = await new QuizzesService(prisma, {} as any, {} as any, { send: jest.fn() } as any).submitQuiz("u", { subjectId: "subject-1", type: "topic_assessment", topicId: TOPIC, answers: [{ questionId: "legacy-0", answer: "4" }] }).catch((e: Error) => ({ error: e.message }));
+      if (kind === "practice") out = await new PracticeService(subjectAccessFixture(prisma), {} as any, {} as any).submitPractice("u", [{ questionId: "legacy-0", answer: "4" }]);
+      if (kind === "quiz") out = await new QuizzesService(subjectAccessFixture(prisma), {} as any, {} as any, { send: jest.fn() } as any).submitQuiz("u", { subjectId: "subject-1", type: "topic_assessment", topicId: TOPIC, answers: [{ questionId: "legacy-0", answer: "4" }] }).catch((e: Error) => ({ error: e.message }));
       if (kind === "diagnostic") out = await new OnboardingService(prisma, {} as any).submitDiagnostic("u", [{ questionId: "legacy-0", answer: "4" }]).catch((e: Error) => ({ error: e.message }));
       expect(JSON.stringify(out)).not.toContain("secret explanation");
       expect(JSON.stringify(out ?? {})).not.toMatch(/"correctAnswer":"4"/);

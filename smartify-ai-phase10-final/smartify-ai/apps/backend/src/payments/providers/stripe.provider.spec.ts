@@ -9,6 +9,24 @@ jest.mock("stripe", () => ({ __esModule: true, default: jest.fn().mockImplementa
 let mockEnv: any = { STRIPE_SECRET_KEY: "sk_test_fixture", STRIPE_WEBHOOK_SECRET: "fixture" };
 jest.mock("@smartify/config", () => ({ loadBackendEnv: () => mockEnv }));
 
+test("subject upgrade confirms an update to the same Stripe subscription without creating checkout", async () => {
+  mockEnv = {STRIPE_SECRET_KEY:"fixture"};
+  const provider = new StripeProvider();
+  const createCheckout = jest.fn();
+  const portal = jest.fn().mockResolvedValue({url:"https://billing.stripe.test/confirm"});
+  (provider as any).client = {
+    subscriptions: {retrieve:jest.fn().mockResolvedValue({id:"sub_existing",status:"active",customer:"cus_own",items:{data:[{id:"si_old",price:{id:"price_old",product:"prod_own"}}]}}),update:jest.fn()},
+    prices:{create:jest.fn().mockResolvedValue({id:"price_new"})},
+    billingPortal:{configurations:{create:jest.fn().mockResolvedValue({id:"config"})},sessions:{create:portal}},
+    checkout:{sessions:{create:createCheckout}},
+  };
+  expect(typeof (provider as any).createSubscriptionUpgrade).toBe("function");
+  const result = await (provider as any).createSubscriptionUpgrade({externalProviderSubscriptionId:"sub_existing",amountEGP:450,subscriptionId:"local",studentUserId:"user",description:"Math + English",successUrl:"https://smartify.test/success",cancelUrl:"https://smartify.test/billing"});
+  expect(result.externalSessionId).toBe("sfu:sub_existing:price_new");
+  expect(portal.mock.calls[0][0].flow_data.subscription_update_confirm).toEqual({subscription:"sub_existing",items:[{id:"si_old",price:"price_new",quantity:1}]});
+  expect(createCheckout).not.toHaveBeenCalled();
+});
+
 // Smartify is not launching with Stripe active — STRIPE_SECRET_KEY will
 // commonly be entirely absent in production. This must never crash the
 // Stripe SDK client construction, and every public method must fail with a

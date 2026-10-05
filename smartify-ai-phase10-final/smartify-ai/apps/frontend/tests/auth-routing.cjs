@@ -10,7 +10,7 @@ function load(file, imports) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 },
   }).outputText;
   const exports = {};
-  vm.runInNewContext(code, { exports, require: name => imports[name], URL });
+  vm.runInNewContext(code, { exports, require: name => imports[name], URL, process: { env: {} } });
   return exports;
 }
 const middleware = load('middleware.ts', {

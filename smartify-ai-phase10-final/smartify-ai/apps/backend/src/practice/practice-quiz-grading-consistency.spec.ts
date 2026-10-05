@@ -1,3 +1,4 @@
+import { subjectAccessFixture } from "../common/subject-access.fixtures.testspec";
 import { PracticeService } from "./practice.service";
 import { withReadyGate } from "../ai/context/topic-content-gate.fixtures.testspec";
 import { QuizzesService } from "../quizzes/quizzes.service";
@@ -32,7 +33,7 @@ describe("Practice vs Quiz grading consistency", () => {
         questionAttempt: { createMany: jest.fn().mockResolvedValue({ count: 1 }) },
       },
     } as any;
-    return new PracticeService(prisma, {} as any, {} as any);
+    return new PracticeService(subjectAccessFixture(prisma), {} as any, {} as any);
   }
 
   function makeQuizService() {
@@ -45,7 +46,7 @@ describe("Practice vs Quiz grading consistency", () => {
         parentStudentRelation: { findMany: jest.fn().mockResolvedValue([]) },
       },
     } as any;
-    return new QuizzesService(prisma, {} as any, { ensurePoolForTopic: jest.fn() } as any, { send: jest.fn() } as any);
+    return new QuizzesService(subjectAccessFixture(prisma), {} as any, { ensurePoolForTopic: jest.fn() } as any, { send: jest.fn() } as any);
   }
 
   it.each([

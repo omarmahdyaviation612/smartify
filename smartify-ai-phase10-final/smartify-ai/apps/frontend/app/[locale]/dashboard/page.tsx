@@ -52,7 +52,7 @@ interface DashboardSummary {
   fullName: string;
   curriculum: { nameEn: string; nameAr: string };
   grade: { nameEn: string; nameAr: string };
-  subjects: Array<{ id: string; nameEn: string; nameAr: string }>;
+  subjects: Array<{ id: string; nameEn: string; nameAr: string; entitlement: "ACTIVE" | "LOCKED" }>;
   diagnosticScore: Record<string, SubjectScore> | null;
   recommendedFocus: string[] | null;
   weakTopics: WeakTopic[];
@@ -100,7 +100,7 @@ export default function DashboardPage() {
     apiFetch<DashboardSummary>("/dashboard/summary")
       .then((data) => {
         setSummary(data);
-        if (data.subjects[0]) setSelectedSubjectId(data.subjects[0].id);
+        setSelectedSubjectId(data.subjects.find(s => s.entitlement === "ACTIVE")?.id ?? null);
       })
       .catch(() => setNotOnboarded(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -172,7 +172,7 @@ export default function DashboardPage() {
               Tutor, and the Practice/Quizzes quick links above), so moving
               from e.g. Math to Science is one click from the top of the
               page rather than buried inside a single card. */}
-          {summary.subjects.length > 1 && (
+          {summary.subjects.length > 0 && (
             <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-neutral-100 pt-6" role="tablist" aria-label={isAr ? "اختر مادة" : "Choose a subject"}>
               <span className="text-sm font-medium text-neutral-500">{isAr ? "المادة:" : "Subject:"}</span>
               {summary.subjects.map((s) => (
@@ -181,12 +181,13 @@ export default function DashboardPage() {
                   type="button"
                   role="tab"
                   aria-selected={selectedSubjectId === s.id}
-                  onClick={() => setSelectedSubjectId(s.id)}
+                  onClick={() => s.entitlement === "LOCKED" ? router.push(`/${locale}/billing?subjectId=${encodeURIComponent(s.id)}`) : setSelectedSubjectId(s.id)}
+                  aria-label={`${isAr ? s.nameAr : s.nameEn}${s.entitlement === "LOCKED" ? (isAr ? " — إضافة مادة" : " — Add subject") : ""}`}
                   className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
-                    selectedSubjectId === s.id ? "bg-ai-gradient text-white" : "border border-neutral-200 text-neutral-600 hover:border-neutral-300"
+                    s.entitlement === "LOCKED" ? "border border-amber-200 bg-amber-50 text-amber-900 hover:border-amber-400" : selectedSubjectId === s.id ? "bg-ai-gradient text-white" : "border border-neutral-200 text-neutral-600 hover:border-neutral-300"
                   }`}
                 >
-                  {isAr ? s.nameAr : s.nameEn}
+                  {s.entitlement === "LOCKED" && <span aria-hidden="true">🔒 </span>}{isAr ? s.nameAr : s.nameEn}
                 </button>
               ))}
             </div>
@@ -210,7 +211,7 @@ export default function DashboardPage() {
 
           {summary.aiTutorAvailable && summary.subjects.length > 0 ? (
             <Link
-              href={`/${locale}/tutor?subjectId=${selectedSubjectId ?? summary.subjects[0].id}`}
+              href={selectedSubjectId ? `/${locale}/tutor?subjectId=${selectedSubjectId}` : `/${locale}/billing`}
               className="rounded-sf-lg border border-neutral-200 bg-ai-gradient p-6 text-white transition-opacity hover:opacity-95"
             >
               <h2 className="font-semibold">{copy.sections.aiTutor.title}</h2>

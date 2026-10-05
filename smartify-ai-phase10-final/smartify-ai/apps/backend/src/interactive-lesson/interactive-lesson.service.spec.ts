@@ -1,3 +1,4 @@
+import { subjectAccessFixture } from "../common/subject-access.fixtures.testspec";
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { AIContextBuilderService } from "../ai/context/ai-context-builder.service";
 import { InteractiveLessonService } from "./interactive-lesson.service";
@@ -172,6 +173,7 @@ describe("InteractiveLessonService", () => {
     // in this file — none of which are actually about trial-subject
     // selection — keeps exercising the rest of the lesson engine unchanged.
     const trialService = {
+      isSubjectTrialBrowsable: jest.fn().mockResolvedValue(true),
       reserveLessonTrial: jest.fn().mockImplementation(async (studentId: string) => {
         reserveFreeTrialCalls++;
         state.freeTrials[studentId] = (state.freeTrials[studentId] ?? 0) + 1;
@@ -210,7 +212,7 @@ describe("InteractiveLessonService", () => {
     const questionGenerator = { ensurePoolForTopic: jest.fn().mockResolvedValue(undefined) } as any;
 
     const service = new InteractiveLessonService(
-      prisma,
+      subjectAccessFixture(prisma),
       providerFactory,
       new AIContextBuilderService(),
       usageService,

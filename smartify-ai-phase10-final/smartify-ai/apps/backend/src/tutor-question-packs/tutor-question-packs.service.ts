@@ -4,6 +4,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { AIUsageService } from "../ai/usage/ai-usage.service";
 import { PaymentProviderFactory } from "../payments/payment-provider.factory";
 import { loadBackendEnv } from "@smartify/config";
+import { resolveSubjectAccess } from "../common/subject-access";
 
 const PACK_SIZE = 10;
 const PACK_PRICE_EGP = 50;
@@ -26,10 +27,10 @@ export class TutorQuestionPacksService {
   private async getStudentSubject(userId: string, subjectId: string) {
     const profile = await this.prisma.client.studentProfile.findUnique({
       where: { userId },
-      include: { subjects: true },
+      include: { subjects: true, user: { select: { role: true, isTestStudent: true } } },
     });
     if (!profile) throw new NotFoundException("Complete onboarding before buying question packs.");
-    if (!profile.subjects.some((subject) => subject.subjectId === subjectId)) {
+    if (!(await resolveSubjectAccess(this.prisma, profile, subjectId)).active) {
       throw new ForbiddenException("This subject is not part of your selected subjects.");
     }
     return profile;

@@ -1,3 +1,4 @@
+import { subjectAccessFixture } from "../../common/subject-access.fixtures.testspec";
 /**
  * CONTENT-ONLY STAGED LEGACY -> CURRENT INSTALL — regression suite (2026-10-04).
  * In-memory store whose $transaction runs on a deep copy and commits only on
@@ -150,7 +151,7 @@ function students(state: { s: State }) {
   const usage = { assertWithinBudget: jest.fn(), estimateMaxChatCostUsd: jest.fn(), reserveBudget: jest.fn(), reconcileBudget: jest.fn(), releaseBudget: jest.fn() };
   const qgen = new QuestionDraftGeneratorService(prisma, { getActiveProvider: jest.fn().mockResolvedValue({ provider: { generate }, providerKey: "openai", model: "m" }), getCostRates: jest.fn() } as any, { buildAutoQuestionBatchGenerationPrompt: jest.fn() } as any, usage as any, { autoPublish: jest.fn() } as any, { ensureTopicHasLesson: jest.fn() } as any);
   const acc = { getPerTopicAccuracy: jest.fn().mockResolvedValue([]), getTopicAccuracy: jest.fn().mockResolvedValue(null) } as any;
-  return { practice: new PracticeService(prisma, acc, qgen), quizzes: new QuizzesService(prisma, acc, qgen, { send: jest.fn() } as any), generate, usage };
+  return { practice: new PracticeService(subjectAccessFixture(prisma), acc, qgen), quizzes: new QuizzesService(subjectAccessFixture(prisma), acc, qgen, { send: jest.fn() } as any), generate, usage };
 }
 const ids = (qs: any[]) => qs.map((q) => q.id).sort();
 const liveOnly = (s: State) => clone({ assignment: s.assignment, topic: s.topic, lessons: s.lessons, objectives: s.objectives, questions: s.questions, unit: s.unit });

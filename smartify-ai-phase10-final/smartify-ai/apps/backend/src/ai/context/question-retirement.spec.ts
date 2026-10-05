@@ -1,3 +1,4 @@
+import { subjectAccessFixture } from "../../common/subject-access.fixtures.testspec";
 /**
  * Question retirement + atomic single-Question replacement (2026-10-03).
  * A retired Question (retiredAt set) is historical: never served, graded,
@@ -60,7 +61,7 @@ function services(topic: any, pool: any[]) {
   const lessonGen = { ensureTopicHasLesson: jest.fn().mockResolvedValue(topic) };
   const generator = new QuestionDraftGeneratorService(prisma, { getActiveProvider: jest.fn().mockResolvedValue({ provider: { generate }, providerKey: "openai", model: "m" }), getCostRates: jest.fn().mockResolvedValue({ costPerInputToken: 0, costPerOutputToken: 0 }) } as any, { buildAutoQuestionBatchGenerationPrompt: jest.fn().mockReturnValue("p") } as any, usage as any, { autoPublish: jest.fn() } as any, lessonGen as any);
   const acc = { getPerTopicAccuracy: jest.fn().mockResolvedValue([]), getTopicAccuracy: jest.fn().mockResolvedValue(null) } as any;
-  return { prisma, generate, generator, practice: new PracticeService(prisma, acc, generator), quizzes: new QuizzesService(prisma, acc, generator, { send: jest.fn() } as any), onboarding: new OnboardingService(prisma, generator) };
+  return { prisma, generate, generator, practice: new PracticeService(subjectAccessFixture(prisma), acc, generator), quizzes: new QuizzesService(subjectAccessFixture(prisma), acc, generator, { send: jest.fn() } as any), onboarding: new OnboardingService(prisma, generator) };
 }
 const ids = (qs: any[]) => qs.map((q) => q.id);
 
@@ -155,8 +156,8 @@ describe("retirement — student runtime", () => {
       const findMany = jest.fn().mockImplementation(async ({ where }: any) => (where.id ? [{ ...secret, topic: t }] : [...active(8), secret]));
       const prisma = { client: { studentProfile: { findUnique: jest.fn().mockResolvedValue(STUDENT) }, question: { findMany }, questionAttempt: { createMany: jest.fn() }, quizResult: { create: jest.fn().mockResolvedValue({ id: "r" }) }, assessment: { create: jest.fn().mockResolvedValue({ id: "a" }) }, learningPlan: { create: jest.fn().mockResolvedValue({ id: "l" }) } } } as any;
       let out: any;
-      if (kind === "practice") out = await new PracticeService(prisma, {} as any, {} as any).submitPractice("u", [{ questionId: "retired-0", answer: "1" }]);
-      if (kind === "quiz") out = await new QuizzesService(prisma, {} as any, {} as any, { send: jest.fn() } as any).submitQuiz("u", { subjectId: "subject-1", type: "topic_assessment", topicId: TOPIC, answers: [{ questionId: "retired-0", answer: "1" }] }).catch((e: Error) => ({ error: e.message }));
+      if (kind === "practice") out = await new PracticeService(subjectAccessFixture(prisma), {} as any, {} as any).submitPractice("u", [{ questionId: "retired-0", answer: "1" }]);
+      if (kind === "quiz") out = await new QuizzesService(subjectAccessFixture(prisma), {} as any, {} as any, { send: jest.fn() } as any).submitQuiz("u", { subjectId: "subject-1", type: "topic_assessment", topicId: TOPIC, answers: [{ questionId: "retired-0", answer: "1" }] }).catch((e: Error) => ({ error: e.message }));
       if (kind === "diagnostic") out = await new OnboardingService(prisma, {} as any).submitDiagnostic("u", [{ questionId: "retired-0", answer: "1" }]).catch((e: Error) => ({ error: e.message }));
       expect(JSON.stringify(out ?? {})).not.toContain("secret explanation");
       expect(JSON.stringify(out ?? {})).not.toMatch(/"correctAnswer":"1"/);

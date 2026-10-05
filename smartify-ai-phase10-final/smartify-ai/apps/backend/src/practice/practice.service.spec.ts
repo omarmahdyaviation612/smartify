@@ -1,3 +1,4 @@
+import { subjectAccessFixture } from "../common/subject-access.fixtures.testspec";
 import { BadRequestException, ForbiddenException } from "@nestjs/common";
 import { withReadyGate } from "../ai/context/topic-content-gate.fixtures.testspec";
 import { PracticeService } from "./practice.service";
@@ -24,17 +25,17 @@ describe("PracticeService — authorization & ownership", () => {
   const questionGenerator = { ensurePoolForTopic: jest.fn() } as any;
 
   it("rejects listing topics for a subject the student never selected", async () => {
-    const service = new PracticeService(makePrismaMock(), topicAccuracy, questionGenerator);
+    const service = new PracticeService(subjectAccessFixture(makePrismaMock()), topicAccuracy, questionGenerator);
     await expect(service.getTopicsForSubject("user-1", "unrelated-subject")).rejects.toThrow(ForbiddenException);
   });
 
   it("rejects fetching adaptive practice questions for a subject the student never selected", async () => {
-    const service = new PracticeService(makePrismaMock(), topicAccuracy, questionGenerator);
+    const service = new PracticeService(subjectAccessFixture(makePrismaMock()), topicAccuracy, questionGenerator);
     await expect(service.getAdaptiveQuestions("user-1", "unrelated-subject", undefined)).rejects.toThrow(ForbiddenException);
   });
 
   it("allows listing topics for a subject the student genuinely selected", async () => {
-    const service = new PracticeService(makePrismaMock(), topicAccuracy, questionGenerator);
+    const service = new PracticeService(subjectAccessFixture(makePrismaMock()), topicAccuracy, questionGenerator);
     await expect(service.getTopicsForSubject("user-1", "subject-1")).resolves.toBeDefined();
   });
 });
@@ -58,7 +59,7 @@ describe("PracticeService — placeholder containment", () => {
         question: { findMany: questionFindMany },
       },
     } as any;
-    const service = new PracticeService(prisma, topicAccuracy, questionGenerator);
+    const service = new PracticeService(subjectAccessFixture(prisma), topicAccuracy, questionGenerator);
 
     await service.getAdaptiveQuestions("user-1", "subject-1", undefined);
 
@@ -77,7 +78,7 @@ describe("PracticeService — placeholder containment", () => {
         question: { findMany: jest.fn().mockImplementation(async ({ where }: any) => realQuestions.filter((q) => q.isPlaceholder === where.isPlaceholder)) },
       },
     } as any;
-    const service = new PracticeService(prisma, topicAccuracy, questionGenerator);
+    const service = new PracticeService(subjectAccessFixture(prisma), topicAccuracy, questionGenerator);
 
     const result = await service.getAdaptiveQuestions("user-1", "subject-1", undefined, 2);
     expect(result.questions.length).toBeGreaterThan(0);
@@ -119,7 +120,7 @@ describe("PracticeService.submitPractice — grading & persistence", () => {
 
   it("A: a correct answer grades isCorrect=true and persists a matching QuestionAttempt with source \"practice\"", async () => {
     const { prisma, attemptCreateMany } = makePrisma();
-    const service = new PracticeService(prisma, {} as any, {} as any);
+    const service = new PracticeService(subjectAccessFixture(prisma), {} as any, {} as any);
 
     const result = await service.submitPractice("user-1", [{ questionId: "q1", answer: "Paris" }]);
 
@@ -132,7 +133,7 @@ describe("PracticeService.submitPractice — grading & persistence", () => {
 
   it("B: an incorrect answer grades isCorrect=false and persists it as such", async () => {
     const { prisma, attemptCreateMany } = makePrisma();
-    const service = new PracticeService(prisma, {} as any, {} as any);
+    const service = new PracticeService(subjectAccessFixture(prisma), {} as any, {} as any);
 
     const result = await service.submitPractice("user-1", [{ questionId: "q1", answer: "Berlin" }]);
 
@@ -143,7 +144,7 @@ describe("PracticeService.submitPractice — grading & persistence", () => {
 
   it("C/D: multiple answers each map to and are graded against THEIR OWN Question's correctAnswerJson — not a neighboring question's key", async () => {
     const { prisma, attemptCreateMany } = makePrisma();
-    const service = new PracticeService(prisma, {} as any, {} as any);
+    const service = new PracticeService(subjectAccessFixture(prisma), {} as any, {} as any);
 
     // q1's real answer is "Paris"; the submitted answer for q1 is "London"
     // (q2's real answer) — a positional/index-based grading bug would
@@ -165,7 +166,7 @@ describe("PracticeService.submitPractice — grading & persistence", () => {
 
   it("E: the persisted attempt's studentId is always the server-resolved profile id, never anything client-supplied (there is no client studentId field at all)", async () => {
     const { prisma, attemptCreateMany } = makePrisma({ profile: { id: "student-9", subjects: [{ subjectId: "subject-1" }] } });
-    const service = new PracticeService(prisma, {} as any, {} as any);
+    const service = new PracticeService(subjectAccessFixture(prisma), {} as any, {} as any);
 
     await service.submitPractice("user-1", [{ questionId: "q1", answer: "Paris" }]);
 
@@ -174,7 +175,7 @@ describe("PracticeService.submitPractice — grading & persistence", () => {
 
   it("F: the persisted attempt references the real matched Question row by id, preserving the Question->Topic chain implicitly", async () => {
     const { prisma, attemptCreateMany } = makePrisma();
-    const service = new PracticeService(prisma, {} as any, {} as any);
+    const service = new PracticeService(subjectAccessFixture(prisma), {} as any, {} as any);
 
     await service.submitPractice("user-1", [{ questionId: "q2", answer: "London" }]);
 
@@ -183,7 +184,7 @@ describe("PracticeService.submitPractice — grading & persistence", () => {
 
   it("H: an empty submission is rejected explicitly with BadRequestException, after the onboarding/profile check", async () => {
     const { prisma, attemptCreateMany, questionFindMany } = makePrisma();
-    const service = new PracticeService(prisma, {} as any, {} as any);
+    const service = new PracticeService(subjectAccessFixture(prisma), {} as any, {} as any);
 
     await expect(service.submitPractice("user-1", [])).rejects.toThrow(BadRequestException);
     expect(questionFindMany).not.toHaveBeenCalled();
@@ -192,7 +193,7 @@ describe("PracticeService.submitPractice — grading & persistence", () => {
 
   it("I — CHARACTERIZATION (not a fix): an unknown/nonexistent questionId is silently dropped — no error, excluded from feedback/total/persistence, valid answers in the same submission are still processed normally", async () => {
     const { prisma, attemptCreateMany } = makePrisma({ questions: [Q1] }); // Prisma's own findMany would simply omit a nonexistent id from its result set — modeled here directly.
-    const service = new PracticeService(prisma, {} as any, {} as any);
+    const service = new PracticeService(subjectAccessFixture(prisma), {} as any, {} as any);
 
     const result = await service.submitPractice("user-1", [
       { questionId: "q1", answer: "Paris" },
@@ -238,7 +239,7 @@ describe("PracticeService.submitPractice — question-scope validation", () => {
 
   it("A: a Question from a Subject the student owns is accepted and persisted normally", async () => {
     const { prisma, attemptCreateMany } = makePrisma({ questions: [OWNED_Q1] });
-    const service = new PracticeService(prisma, {} as any, {} as any);
+    const service = new PracticeService(subjectAccessFixture(prisma), {} as any, {} as any);
 
     const result = await service.submitPractice("user-1", [{ questionId: "q1", answer: "Paris" }]);
 
@@ -248,7 +249,7 @@ describe("PracticeService.submitPractice — question-scope validation", () => {
 
   it("B: a Question from a Subject the student does NOT own is rejected with ForbiddenException, and NOTHING is persisted", async () => {
     const { prisma, attemptCreateMany } = makePrisma({ questions: [UNOWNED_Q] });
-    const service = new PracticeService(prisma, {} as any, {} as any);
+    const service = new PracticeService(subjectAccessFixture(prisma), {} as any, {} as any);
 
     await expect(service.submitPractice("user-1", [{ questionId: "q-foreign", answer: "42" }])).rejects.toThrow(ForbiddenException);
     expect(attemptCreateMany).not.toHaveBeenCalled();
@@ -256,7 +257,7 @@ describe("PracticeService.submitPractice — question-scope validation", () => {
 
   it("C: a mixed submission (one owned Question + one foreign Question) is rejected ATOMICALLY — the owned question's otherwise-valid attempt is NOT partially persisted", async () => {
     const { prisma, attemptCreateMany } = makePrisma({ questions: [OWNED_Q1, UNOWNED_Q] });
-    const service = new PracticeService(prisma, {} as any, {} as any);
+    const service = new PracticeService(subjectAccessFixture(prisma), {} as any, {} as any);
 
     await expect(
       service.submitPractice("user-1", [
@@ -269,7 +270,7 @@ describe("PracticeService.submitPractice — question-scope validation", () => {
 
   it("D: Questions spanning TWO subjects the student BOTH owns are accepted together — this is a set-membership check, never a single-subject restriction", async () => {
     const { prisma, attemptCreateMany } = makePrisma({ questions: [OWNED_Q1, OWNED_Q2_OTHER_SUBJECT] });
-    const service = new PracticeService(prisma, {} as any, {} as any);
+    const service = new PracticeService(subjectAccessFixture(prisma), {} as any, {} as any);
 
     const result = await service.submitPractice("user-1", [
       { questionId: "q1", answer: "Paris" },
@@ -282,7 +283,7 @@ describe("PracticeService.submitPractice — question-scope validation", () => {
 
   it("E: an unknown/nonexistent questionId alongside a foreign-subject question is still just silently skipped for the unknown one — the foreign one is what triggers the rejection, not the unknown id", async () => {
     const { prisma, attemptCreateMany } = makePrisma({ questions: [UNOWNED_Q] }); // "does-not-exist" never resolves to a row at all
-    const service = new PracticeService(prisma, {} as any, {} as any);
+    const service = new PracticeService(subjectAccessFixture(prisma), {} as any, {} as any);
 
     await expect(
       service.submitPractice("user-1", [
@@ -302,7 +303,7 @@ describe("PracticeService.submitPractice — question-scope validation", () => {
     const studentA = { id: "student-A", subjects: [{ subjectId: "subject-1" }] };
     const questionOwnedOnlyByBsSubject = { id: "q-b-only", topicId: "topic-b", correctAnswerJson: "x", explanationEn: null, explanationAr: null, topic: withReadyGate({ id: "topic-b", unit: { subjectId: "subject-2" } }) };
     const { prisma, attemptCreateMany } = makePrisma({ profile: studentA, questions: [questionOwnedOnlyByBsSubject] });
-    const service = new PracticeService(prisma, {} as any, {} as any);
+    const service = new PracticeService(subjectAccessFixture(prisma), {} as any, {} as any);
 
     await expect(service.submitPractice("user-A", [{ questionId: "q-b-only", answer: "x" }])).rejects.toThrow(ForbiddenException);
     expect(attemptCreateMany).not.toHaveBeenCalled();

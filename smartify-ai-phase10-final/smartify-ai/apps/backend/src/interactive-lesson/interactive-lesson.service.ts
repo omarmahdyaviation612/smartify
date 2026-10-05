@@ -5,7 +5,7 @@ import { AIContextBuilderService, LessonTeachingContext } from "../ai/context/ai
 import { AIUsageService } from "../ai/usage/ai-usage.service";
 import { TutorQuestionPacksService } from "../tutor-question-packs/tutor-question-packs.service";
 import { TrialService } from "../trial/trial.service";
-import { isStudentSubjectRowActive } from "../common/subject-entitlement.util";
+import { AccessProfile, resolveSubjectAccess } from "../common/subject-access";
 import { LessonDraftGeneratorService } from "./lesson-draft-generator/lesson-draft-generator.service";
 import { QuestionDraftGeneratorService } from "../question-bank/question-draft-generator/question-draft-generator.service";
 import { describeExpectedAnswer, describeOperands, tryDeterministicValidate } from "./answer-validators/deterministic-validator";
@@ -65,7 +65,7 @@ export class InteractiveLessonService {
   ) {}
 
   private async getProfileOrThrow(userId: string) {
-    const profile = await this.prisma.client.studentProfile.findUnique({ where: { userId } });
+    const profile = await this.prisma.client.studentProfile.findUnique({ where: { userId }, include: { user: { select: { role: true, isTestStudent: true } } } });
     if (!profile) throw new NotFoundException("Complete onboarding before starting a lesson.");
     return profile;
   }
@@ -155,12 +155,13 @@ export class InteractiveLessonService {
    * this path — see LessonPublishService.autoPublishIntoTopic's doc
    * comment for the tradeoff this accepts.
    */
-  private async ensureTopicHasSteps(topicId: string, profile: { userId: string; preferredLang?: string; age?: number }): Promise<any> {
+  private async ensureTopicHasSteps(topicId: string, profile: AccessProfile & { userId: string; preferredLang?: string; age?: number }): Promise<any> {
     const existing = await this.prisma.client.topic.findUnique({
       where: { id: topicId },
       include: { ...TOPIC_GATE_INCLUDE, unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
     });
     if (!existing) throw new NotFoundException(LESSON_NOT_AVAILABLE);
+    await this.assertSubjectAccessible(profile, existing.unit.subjectId);
     if (existing.teachingStepsJson) {
       this.assertStepsServable(existing);
       return existing;
@@ -273,11 +274,8 @@ export class InteractiveLessonService {
    * single-subject FreeTutorTrial mechanism, which stays exclusive to
    * free-form Tutor chat. Resuming an existing session never charges again.
    */
-  private async reserveEntitlement(profile: { id: string }, subjectId: string, topicId: string) {
-    const studentSubject = await this.prisma.client.studentSubject.findUnique({
-      where: { studentId_subjectId: { studentId: profile.id, subjectId } },
-    });
-    const hasSubjectEntitlement = isStudentSubjectRowActive(studentSubject);
+  private async reserveEntitlement(profile: AccessProfile, subjectId: string, topicId: string) {
+    const hasSubjectEntitlement = (await resolveSubjectAccess(this.prisma, profile, subjectId)).active;
     const reservation = hasSubjectEntitlement
       ? await this.questionPacks.consumeForTutor(profile.id, subjectId)
       : await this.trialService.reserveLessonTrial(profile.id, subjectId, topicId);
@@ -400,7 +398,7 @@ export class InteractiveLessonService {
    */
   async advance(userId: string, topicId: string) {
     const profile = await this.getProfileOrThrow(userId);
-    const topic = await this.ensureTopicHasSteps(topicId, { userId, preferredLang: (profile as any).preferredLang, age: (profile as any).age });
+    const topic = await this.ensureTopicHasSteps(topicId, { ...profile, userId });
     if ((topic as any).__preparation) return topic;
     const steps = this.getSteps(topic);
     let session = await this.getOwnSession(profile, topicId);
@@ -737,6 +735,7 @@ export class InteractiveLessonService {
     }
     const profile = await this.getProfileOrThrow(userId);
     const topic = await this.getTopicOrThrow(topicId);
+    await this.assertSubjectAccessible(profile, topic.unit.subjectId);
     const steps = this.getSteps(topic);
     const session = await this.getOwnSession(profile, topicId);
     if (!session) throw new NotFoundException("Start the lesson before responding.");
@@ -1011,6 +1010,7 @@ export class InteractiveLessonService {
       include: { ...TOPIC_GATE_INCLUDE, unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
     });
     if (!topic) throw new NotFoundException(LESSON_NOT_AVAILABLE);
+    await this.assertSubjectAccessible(profile, topic.unit.subjectId);
     if (topic.teachingStepsJson) this.assertStepsServable(topic);
     if (!topic.teachingStepsJson) {
       this.assertGenerationPossible(topic);
@@ -1035,5 +1035,11 @@ export class InteractiveLessonService {
       orderBy: { createdAt: "desc" },
     });
     return { started: true, ...this.toPublicState(topic, session, steps, lastMessage?.content ?? null, session.status === "COMPLETED", stepResults), stepResults };
+  }
+
+  private async assertSubjectAccessible(profile: AccessProfile, subjectId: string) {
+    const access = await resolveSubjectAccess(this.prisma, profile, subjectId);
+    if (access.active || await this.trialService.isSubjectTrialBrowsable(profile.id, subjectId)) return;
+    throw new ForbiddenException("Purchase this subject before opening its lessons.");
   }
 }

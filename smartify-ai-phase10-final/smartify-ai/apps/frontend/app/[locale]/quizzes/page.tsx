@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getQuizzesCopy } from "@/content/quizzes";
@@ -14,6 +14,7 @@ import Link from "next/link";
 import { getLearningFeedback } from "@/content/learning-feedback";
 
 interface Subject {
+  entitlement?: "ACTIVE" | "LOCKED";
   id: string;
   nameEn: string;
   nameAr: string;
@@ -51,6 +52,7 @@ type QuizType = "topic_assessment" | "mock_exam";
 
 export default function QuizzesPage() {
   const { locale } = useParams<{ locale: Locale }>();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const requestedSubjectId = searchParams.get("subjectId");
   const isAr = locale === "ar";
@@ -82,6 +84,8 @@ export default function QuizzesPage() {
     apiFetch<{ subjects: Subject[] }>("/dashboard/summary")
       .then((data) => {
         if (!active) return;
+        if (data.subjects.some(s => s.id === requestedSubjectId && s.entitlement === "LOCKED")) { router.replace(`/${locale}/billing?subjectId=${encodeURIComponent(requestedSubjectId!)}`); return; }
+        data.subjects = data.subjects.filter(s => s.entitlement !== "LOCKED");
         setSubjects(data.subjects);
         const requested = requestedSubjectId && data.subjects.some((s) => s.id === requestedSubjectId) ? requestedSubjectId : null;
         if (requested) setSubjectId(requested);

@@ -6,7 +6,7 @@ import { QuestionDraftGeneratorService } from "../question-bank/question-draft-g
 import { EmailService } from "../email/email.service";
 import { shuffleQuestionPool } from "./shuffle-question-pool";
 import { TrialService } from "../trial/trial.service";
-import { hasSubjectEntitlementInList } from "../common/subject-entitlement.util";
+import { AccessProfile, resolveSubjectAccess } from "../common/subject-access";
 import { questionServabilityByTopic, QUESTION_PROVENANCE_SELECT, TOPIC_GATE_INCLUDE, UNIT_GATE_SELECT } from "../ai/context/topic-content-provenance.util";
 
 type QuizType = "topic_assessment" | "mock_exam" | "lesson_check";
@@ -35,14 +35,10 @@ export class QuizzesService {
   private async getProfileOrThrow(userId: string) {
     const profile = await this.prisma.client.studentProfile.findUnique({
       where: { userId },
-      include: { subjects: true },
+      include: { subjects: true, user: { select: { role: true, isTestStudent: true } } },
     });
     if (!profile) throw new NotFoundException("Complete onboarding before taking a quiz.");
     return profile;
-  }
-
-  private hasOwnedAccess(profile: { subjects: Array<{ subjectId: string; expiresAt?: Date | null }> }, subjectId: string): boolean {
-    return hasSubjectEntitlementInList(profile.subjects, subjectId);
   }
 
   /**
@@ -52,8 +48,8 @@ export class QuizzesService {
    * trial lesson in that Subject was used on — "mock_exam" (whole-subject,
    * no topicId) is never trial-bypassable.
    */
-  private async assertSubjectAccessible(profile: { id: string; subjects: Array<{ subjectId: string; expiresAt?: Date | null }> }, subjectId: string, topicId?: string) {
-    if (this.hasOwnedAccess(profile, subjectId)) return;
+  private async assertSubjectAccessible(profile: AccessProfile, subjectId: string, topicId?: string) {
+    if ((await resolveSubjectAccess(this.prisma, profile, subjectId)).active) return;
     if (topicId && (await this.trialService.isTopicTrialAccessible(profile.id, subjectId, topicId))) return;
     throw new ForbiddenException("This subject is not part of your selected subjects.");
   }

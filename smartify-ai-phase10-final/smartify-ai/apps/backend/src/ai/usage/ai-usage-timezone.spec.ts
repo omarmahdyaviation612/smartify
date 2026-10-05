@@ -79,6 +79,7 @@ describe("daily AI UTC boundaries", () => {
       aIDailyUsageCounter: { findUnique: jest.fn().mockResolvedValue(null) },
       aIUsage: { aggregate: jest.fn().mockResolvedValue({ _sum: { costUsd: null } }) },
       studentProfile: { findUnique: jest.fn().mockResolvedValue({ id: "student", subjects: [{ subjectId: "subject" }] }) },
+      subject: { findFirst: jest.fn().mockResolvedValue({ id: "subject", isActive: true }) },
       tutorExtraQuestionCredit: { findUnique: jest.fn().mockResolvedValue(null) },
     };
     const usage = new AIUsageService({ client } as any, {} as any);

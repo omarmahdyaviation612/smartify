@@ -54,6 +54,8 @@ export interface PaymentProvider {
     amountEGP: number;
   }): Promise<"paid" | "pending" | "failed" | "unverified">;
   createCheckoutSession(params: CreateCheckoutParams): Promise<CheckoutSession>;
+  /** Hosted confirmation to modify the existing recurring subscription. */
+  createSubscriptionUpgrade?(params: CreateCheckoutParams & { externalProviderSubscriptionId: string }): Promise<CheckoutSession>;
   /**
    * Verifies and parses an incoming webhook. Takes the FULL headers object
    * (not a single named header) so each provider can extract whichever

@@ -1,3 +1,4 @@
+import { subjectAccessFixture } from "../common/subject-access.fixtures.testspec";
 import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { withReadyGate } from "../ai/context/topic-content-gate.fixtures.testspec";
 import { QuizzesService } from "./quizzes.service";
@@ -27,7 +28,7 @@ describe("QuizzesService — authorization & ownership", () => {
 
   it("rejects fetching quiz questions for a subject the student never selected", async () => {
     const prisma = makePrismaMock();
-    const service = new QuizzesService(prisma, topicAccuracy, questionGenerator, emailService);
+    const service = new QuizzesService(subjectAccessFixture(prisma), topicAccuracy, questionGenerator, emailService);
 
     await expect(
       service.getQuizQuestions("user-1", "unrelated-subject", "mock_exam"),
@@ -36,21 +37,21 @@ describe("QuizzesService — authorization & ownership", () => {
 
   it("returns NotFoundException — not the other student's data — when a quiz result belongs to a different student", async () => {
     const prisma = makePrismaMock({ quizResult: { id: "result-1", studentId: "someone-elses-student-id" } });
-    const service = new QuizzesService(prisma, topicAccuracy, questionGenerator, emailService);
+    const service = new QuizzesService(subjectAccessFixture(prisma), topicAccuracy, questionGenerator, emailService);
 
     await expect(service.getResult("user-1", "result-1")).rejects.toThrow(NotFoundException);
   });
 
   it("returns NotFoundException when the quiz result doesn't exist at all (not a different error that leaks existence)", async () => {
     const prisma = makePrismaMock({ quizResult: null });
-    const service = new QuizzesService(prisma, topicAccuracy, questionGenerator, emailService);
+    const service = new QuizzesService(subjectAccessFixture(prisma), topicAccuracy, questionGenerator, emailService);
 
     await expect(service.getResult("user-1", "does-not-exist")).rejects.toThrow(NotFoundException);
   });
 
   it("returns the result when it genuinely belongs to the requesting student", async () => {
     const prisma = makePrismaMock({ quizResult: { id: "result-1", studentId: "student-1" } });
-    const service = new QuizzesService(prisma, topicAccuracy, questionGenerator, emailService);
+    const service = new QuizzesService(subjectAccessFixture(prisma), topicAccuracy, questionGenerator, emailService);
 
     await expect(service.getResult("user-1", "result-1")).resolves.toMatchObject({ id: "result-1" });
   });
@@ -94,7 +95,7 @@ describe("QuizzesService.getQuizQuestions — Phase 10E hardening", () => {
 
   it("test 23/24: excludes isPlaceholder:true Questions from the query itself, for both topic_assessment and mock_exam", async () => {
     const prisma = makePrisma(makePool(5, { placeholder: true }));
-    const service = new QuizzesService(prisma, topicAccuracy, questionGenerator, emailService);
+    const service = new QuizzesService(subjectAccessFixture(prisma), topicAccuracy, questionGenerator, emailService);
 
     const topicResult = await service.getQuizQuestions("user-1", "subject-1", "topic_assessment", "topic-1");
     expect(topicResult.questions).toHaveLength(0);
@@ -107,7 +108,7 @@ describe("QuizzesService.getQuizQuestions — Phase 10E hardening", () => {
   it("test 26: Topic Quiz randomizes the eligible pool before selecting (deterministic rng)", async () => {
     const pool = makePool(8);
     const prisma = makePrisma(pool);
-    const service = new QuizzesService(prisma, topicAccuracy, questionGenerator, emailService);
+    const service = new QuizzesService(subjectAccessFixture(prisma), topicAccuracy, questionGenerator, emailService);
 
     // A fixed sequence, not Math.random — deterministic, never flaky.
     const fixedSequence = [0.9, 0.1, 0.8, 0.2, 0.7, 0.3, 0.6, 0.05];
@@ -123,7 +124,7 @@ describe("QuizzesService.getQuizQuestions — Phase 10E hardening", () => {
   it("test 27: Mock Exam randomizes the eligible pool before selecting (deterministic rng)", async () => {
     const pool = makePool(25);
     const prisma = makePrisma(pool);
-    const service = new QuizzesService(prisma, topicAccuracy, questionGenerator, emailService);
+    const service = new QuizzesService(subjectAccessFixture(prisma), topicAccuracy, questionGenerator, emailService);
 
     let seed = 1;
     const rng = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
@@ -136,7 +137,7 @@ describe("QuizzesService.getQuizQuestions — Phase 10E hardening", () => {
 
   it("test 28: Topic Quiz target remains 8", async () => {
     const prisma = makePrisma(makePool(30));
-    const service = new QuizzesService(prisma, topicAccuracy, questionGenerator, emailService);
+    const service = new QuizzesService(subjectAccessFixture(prisma), topicAccuracy, questionGenerator, emailService);
     const result = await service.getQuizQuestions("user-1", "subject-1", "topic_assessment", "topic-1");
     expect(result.requestedCount).toBe(8);
     expect(result.questions).toHaveLength(8);
@@ -144,7 +145,7 @@ describe("QuizzesService.getQuizQuestions — Phase 10E hardening", () => {
 
   it("test 29: Mock Exam target remains 20", async () => {
     const prisma = makePrisma(makePool(30));
-    const service = new QuizzesService(prisma, topicAccuracy, questionGenerator, emailService);
+    const service = new QuizzesService(subjectAccessFixture(prisma), topicAccuracy, questionGenerator, emailService);
     const result = await service.getQuizQuestions("user-1", "subject-1", "mock_exam");
     expect(result.requestedCount).toBe(20);
     expect(result.questions).toHaveLength(20);
@@ -152,7 +153,7 @@ describe("QuizzesService.getQuizQuestions — Phase 10E hardening", () => {
 
   it("test 30: zero eligible Questions remains safe — no crash, empty result", async () => {
     const prisma = makePrisma([]);
-    const service = new QuizzesService(prisma, topicAccuracy, questionGenerator, emailService);
+    const service = new QuizzesService(subjectAccessFixture(prisma), topicAccuracy, questionGenerator, emailService);
     const result = await service.getQuizQuestions("user-1", "subject-1", "topic_assessment", "topic-1");
     expect(result.questions).toEqual([]);
     expect(result.availableCount).toBe(0);
@@ -161,7 +162,7 @@ describe("QuizzesService.getQuizQuestions — Phase 10E hardening", () => {
 
   it("test 31: an insufficient pool is honestly represented — requestedCount/availableCount/returnedCount/isFullAssessment", async () => {
     const prisma = makePrisma(makePool(3));
-    const service = new QuizzesService(prisma, topicAccuracy, questionGenerator, emailService);
+    const service = new QuizzesService(subjectAccessFixture(prisma), topicAccuracy, questionGenerator, emailService);
     const result = await service.getQuizQuestions("user-1", "subject-1", "topic_assessment", "topic-1");
 
     expect(result).toMatchObject({ requestedCount: 8, availableCount: 3, returnedCount: 3, isFullAssessment: false });
@@ -170,7 +171,7 @@ describe("QuizzesService.getQuizQuestions — Phase 10E hardening", () => {
 
   it("a full pool is honestly represented as isFullAssessment: true", async () => {
     const prisma = makePrisma(makePool(20));
-    const service = new QuizzesService(prisma, topicAccuracy, questionGenerator, emailService);
+    const service = new QuizzesService(subjectAccessFixture(prisma), topicAccuracy, questionGenerator, emailService);
     const result = await service.getQuizQuestions("user-1", "subject-1", "mock_exam");
     expect(result.isFullAssessment).toBe(true);
     expect(result.returnedCount).toBe(20);
@@ -218,7 +219,7 @@ describe("QuizzesService.submitQuiz — lesson_check parent notification", () =>
   it("emails every linked parent for a lesson_check submission and reports how many were notified", async () => {
     const prisma = makePrisma();
     const emailService = { send: jest.fn().mockResolvedValue({ sent: true }) } as any;
-    const service = new QuizzesService(prisma, {} as any, { ensurePoolForTopic: jest.fn() } as any, emailService);
+    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, { ensurePoolForTopic: jest.fn() } as any, emailService);
 
     const result = await service.submitQuiz("user-1", { subjectId: "subject-1", type: "lesson_check", topicId: "topic-1", answers: ANSWERS });
 
@@ -231,7 +232,7 @@ describe("QuizzesService.submitQuiz — lesson_check parent notification", () =>
   it("never emails anyone for topic_assessment or mock_exam, even with a parent linked", async () => {
     const prisma = makePrisma();
     const emailService = { send: jest.fn().mockResolvedValue({ sent: true }) } as any;
-    const service = new QuizzesService(prisma, {} as any, { ensurePoolForTopic: jest.fn() } as any, emailService);
+    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, { ensurePoolForTopic: jest.fn() } as any, emailService);
 
     const result = await service.submitQuiz("user-1", { subjectId: "subject-1", type: "topic_assessment", topicId: "topic-1", answers: ANSWERS });
 
@@ -243,7 +244,7 @@ describe("QuizzesService.submitQuiz — lesson_check parent notification", () =>
   it("is a safe no-op (0 notified, no crash) when the student has no linked parent", async () => {
     const prisma = makePrisma({ relations: [] });
     const emailService = { send: jest.fn().mockResolvedValue({ sent: true }) } as any;
-    const service = new QuizzesService(prisma, {} as any, { ensurePoolForTopic: jest.fn() } as any, emailService);
+    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, { ensurePoolForTopic: jest.fn() } as any, emailService);
 
     const result = await service.submitQuiz("user-1", { subjectId: "subject-1", type: "lesson_check", topicId: "topic-1", answers: ANSWERS });
 
@@ -254,7 +255,7 @@ describe("QuizzesService.submitQuiz — lesson_check parent notification", () =>
   it("still returns a normal result even when Resend/EmailService fails", async () => {
     const prisma = makePrisma();
     const emailService = { send: jest.fn().mockRejectedValue(new Error("Resend down")) } as any;
-    const service = new QuizzesService(prisma, {} as any, { ensurePoolForTopic: jest.fn() } as any, emailService);
+    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, { ensurePoolForTopic: jest.fn() } as any, emailService);
 
     const result = await service.submitQuiz("user-1", { subjectId: "subject-1", type: "lesson_check", topicId: "topic-1", answers: ANSWERS });
 
@@ -304,7 +305,7 @@ describe("QuizzesService.submitQuiz — grading, scoring & persistence", () => {
 
   it("A: an all-correct quiz scores 100, persists 3 correct QuestionAttempt rows, and a matching QuizResult", async () => {
     const { prisma, attemptCreateMany, quizResultCreate } = makePrisma();
-    const service = new QuizzesService(prisma, {} as any, noGenerator, noEmail);
+    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, noGenerator, noEmail);
 
     const result = await service.submitQuiz("user-1", {
       subjectId: "subject-1",
@@ -322,7 +323,7 @@ describe("QuizzesService.submitQuiz — grading, scoring & persistence", () => {
 
   it("B: a mixed-correctness quiz computes the exact score and identifies the weak topic within this quiz", async () => {
     const { prisma, quizResultCreate } = makePrisma();
-    const service = new QuizzesService(prisma, {} as any, noGenerator, noEmail);
+    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, noGenerator, noEmail);
 
     // q1 correct, q2 wrong (both Fractions -> 1/2 = 50% < 60%), q3 correct (Decimals -> 100%).
     const result = await service.submitQuiz("user-1", {
@@ -341,7 +342,7 @@ describe("QuizzesService.submitQuiz — grading, scoring & persistence", () => {
 
   it("C: an all-incorrect quiz scores 0 and flags every topic as weak", async () => {
     const { prisma, quizResultCreate } = makePrisma();
-    const service = new QuizzesService(prisma, {} as any, noGenerator, noEmail);
+    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, noGenerator, noEmail);
 
     const result = await service.submitQuiz("user-1", {
       subjectId: "subject-1",
@@ -358,7 +359,7 @@ describe("QuizzesService.submitQuiz — grading, scoring & persistence", () => {
 
   it("D/E: each submitted answer is matched by questionId and graded against THAT question's own correctAnswerJson, never a neighboring question's key", async () => {
     const { prisma, attemptCreateMany } = makePrisma({ questions: [Q1, Q2] }); // both Fractions, different keys "a"/"b"
-    const service = new QuizzesService(prisma, {} as any, noGenerator, noEmail);
+    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, noGenerator, noEmail);
 
     // Submitted answers are swapped relative to each question's real key.
     const result = await service.submitQuiz("user-1", {
@@ -379,7 +380,7 @@ describe("QuizzesService.submitQuiz — grading, scoring & persistence", () => {
 
   it("F: persisted QuestionAttempt rows use source \"quiz\" (distinct from Practice's \"practice\")", async () => {
     const { prisma, attemptCreateMany } = makePrisma({ questions: [Q1] });
-    const service = new QuizzesService(prisma, {} as any, noGenerator, noEmail);
+    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, noGenerator, noEmail);
 
     await service.submitQuiz("user-1", { subjectId: "subject-1", type: "topic_assessment", topicId: "t-fractions", answers: [{ questionId: "q1", answer: "a" }] });
 
@@ -388,7 +389,7 @@ describe("QuizzesService.submitQuiz — grading, scoring & persistence", () => {
 
   it("G: QuizResult persists student/scope/score/breakdown/weakTopics/recommendedNextSteps exactly as computed", async () => {
     const { prisma, quizResultCreate } = makePrisma();
-    const service = new QuizzesService(prisma, {} as any, noGenerator, noEmail);
+    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, noGenerator, noEmail);
 
     const result = await service.submitQuiz("user-1", {
       subjectId: "subject-1",
@@ -407,7 +408,7 @@ describe("QuizzesService.submitQuiz — grading, scoring & persistence", () => {
 
   it("H (ownership): rejects submission for a subject the student never selected — before any grading/persistence", async () => {
     const { prisma, attemptCreateMany, quizResultCreate, questionFindMany } = makePrisma();
-    const service = new QuizzesService(prisma, {} as any, noGenerator, noEmail);
+    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, noGenerator, noEmail);
 
     await expect(
       service.submitQuiz("user-1", { subjectId: "unrelated-subject", type: "topic_assessment", topicId: "t-fractions", answers: [{ questionId: "q1", answer: "a" }] }),
@@ -424,7 +425,7 @@ describe("QuizzesService.submitQuiz — grading, scoring & persistence", () => {
     const otherSubjectQuestion = { id: "q-other", topicId: "topic-in-a-different-subject", correctAnswerJson: "z", promptEn: "Q", explanationEn: null, explanationAr: null, topic: withReadyGate({ id: "topic-in-a-different-subject", nameEn: "Unrelated Topic", nameAr: "غير ذلك", unit: { subjectId: "a-different-subject" } }) };
     const { prisma, attemptCreateMany, quizResultCreate } = makePrisma({ questions: [otherSubjectQuestion] });
     const emailService = { send: jest.fn().mockResolvedValue({ sent: true }) } as any;
-    const service = new QuizzesService(prisma, {} as any, noGenerator, emailService);
+    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, noGenerator, emailService);
 
     await expect(
       service.submitQuiz("user-1", { subjectId: "subject-1", type: "topic_assessment", topicId: "t-fractions", answers: [{ questionId: "q-other", answer: "z" }] }),
@@ -438,7 +439,7 @@ describe("QuizzesService.submitQuiz — grading, scoring & persistence", () => {
     const foreignQuestion = { id: "q-foreign", topicId: "topic-foreign", correctAnswerJson: "z", promptEn: "Q", explanationEn: null, explanationAr: null, topic: withReadyGate({ id: "topic-foreign", nameEn: "Foreign", nameAr: "أجنبي", unit: { subjectId: "a-different-subject" } }) };
     const { prisma, attemptCreateMany, quizResultCreate } = makePrisma({ questions: [Q1, foreignQuestion] });
     const emailService = { send: jest.fn().mockResolvedValue({ sent: true }) } as any;
-    const service = new QuizzesService(prisma, {} as any, noGenerator, emailService);
+    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, noGenerator, emailService);
 
     await expect(
       service.submitQuiz("user-1", {
@@ -455,7 +456,7 @@ describe("QuizzesService.submitQuiz — grading, scoring & persistence", () => {
 
   it("I: an empty submission is rejected explicitly with BadRequestException, after ownership is checked", async () => {
     const { prisma, questionFindMany } = makePrisma();
-    const service = new QuizzesService(prisma, {} as any, noGenerator, noEmail);
+    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, noGenerator, noEmail);
 
     await expect(service.submitQuiz("user-1", { subjectId: "subject-1", type: "topic_assessment", topicId: "t-fractions", answers: [] })).rejects.toThrow(BadRequestException);
     expect(questionFindMany).not.toHaveBeenCalled();
@@ -466,7 +467,7 @@ describe("QuizzesService.submitQuiz — grading, scoring & persistence", () => {
 
   it("J — CHARACTERIZATION (not a fix): an unknown/nonexistent questionId is silently dropped from grading, scoring, and persistence — matches Practice's identical behavior", async () => {
     const { prisma, attemptCreateMany } = makePrisma({ questions: [Q1] });
-    const service = new QuizzesService(prisma, {} as any, noGenerator, noEmail);
+    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, noGenerator, noEmail);
 
     const result = await service.submitQuiz("user-1", {
       subjectId: "subject-1",
@@ -482,7 +483,7 @@ describe("QuizzesService.submitQuiz — grading, scoring & persistence", () => {
 
   it("cross-student isolation: two students submitting in sequence each get their own correctly-scoped QuizResult, with no bleed between them", async () => {
     const { prisma: prismaA, quizResultCreate: createA } = makePrisma({ profile: { id: "student-A", fullName: "A", subjects: [{ subjectId: "subject-1" }] } });
-    const resultA = await new QuizzesService(prismaA, {} as any, noGenerator, noEmail).submitQuiz("user-A", {
+    const resultA = await new QuizzesService(subjectAccessFixture(prismaA), {} as any, noGenerator, noEmail).submitQuiz("user-A", {
       subjectId: "subject-1",
       type: "topic_assessment",
       topicId: "t-fractions",
@@ -490,7 +491,7 @@ describe("QuizzesService.submitQuiz — grading, scoring & persistence", () => {
     });
 
     const { prisma: prismaB, quizResultCreate: createB } = makePrisma({ profile: { id: "student-B", fullName: "B", subjects: [{ subjectId: "subject-1" }] } });
-    const resultB = await new QuizzesService(prismaB, {} as any, noGenerator, noEmail).submitQuiz("user-B", {
+    const resultB = await new QuizzesService(subjectAccessFixture(prismaB), {} as any, noGenerator, noEmail).submitQuiz("user-B", {
       subjectId: "subject-1",
       type: "topic_assessment",
       topicId: "t-fractions",

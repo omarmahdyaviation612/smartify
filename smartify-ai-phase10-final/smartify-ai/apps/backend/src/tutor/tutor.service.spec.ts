@@ -1,3 +1,4 @@
+import { subjectAccessFixture } from "../common/subject-access.fixtures.testspec";
 import { BadRequestException, ForbiddenException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { TutorService } from "./tutor.service";
 import { TOPIC_GROUNDING_ASSIGNMENT_VERSION } from "../ai/context/topic-grounding-assignment.util";
@@ -95,7 +96,7 @@ describe("TutorService", () => {
       find: jest.fn().mockResolvedValue(null),
       save: jest.fn().mockResolvedValue(undefined),
     } as any;
-    return { service: new TutorService(prisma, providerFactory, contextBuilder, usageService, questionPacks, answerCache), prisma, contextBuilder, usageService, answerCache, releaseDailySlot, releaseBudget, questionPacks };
+    return { service: new TutorService(subjectAccessFixture(prisma), providerFactory, contextBuilder, usageService, questionPacks, answerCache), prisma, contextBuilder, usageService, answerCache, releaseDailySlot, releaseBudget, questionPacks };
   }
 
   it("rejects an empty message before reserving a slot or calling the provider", async () => {

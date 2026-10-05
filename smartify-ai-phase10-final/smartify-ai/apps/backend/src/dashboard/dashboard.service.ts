@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { TopicAccuracyService } from "../analytics/topic-accuracy.service";
+import { isTestStudent, subjectDiscoveryWhere } from "../common/subject-access";
+import { hasSubjectEntitlementInList } from "../common/subject-entitlement.util";
 
 @Injectable()
 export class DashboardService {
@@ -21,6 +23,7 @@ export class DashboardService {
     const profile = await this.prisma.client.studentProfile.findUnique({
       where: { userId },
       include: {
+        user: { select: { role: true, isTestStudent: true } },
         curriculum: true,
         grade: true,
         subjects: { include: { subject: true } },
@@ -39,12 +42,15 @@ export class DashboardService {
     // Per-topic accuracy from real QuestionAttempt data, used to surface
     // weak topics. Empty until the student has actually answered questions
     // (diagnostic or practice) — no synthetic topics are ever invented.
-    const subjectIds = profile.subjects.map((s) => s.subjectId);
+    const publishedSubjects = await this.prisma.client.subject.findMany({ where: subjectDiscoveryWhere(profile), orderBy: { nameEn: "asc" } });
+    const subjects = publishedSubjects.map((subject) => ({ id: subject.id, nameEn: subject.nameEn, nameAr: subject.nameAr,
+      entitlement: isTestStudent(profile) || hasSubjectEntitlementInList(profile.subjects, subject.id) ? "ACTIVE" as const : "LOCKED" as const }));
+    const subjectIds = subjects.filter(s => s.entitlement === "ACTIVE").map(s => s.id);
     const topicStats = await this.topicAccuracy.getPerTopicAccuracy(profile.id, subjectIds);
     const weakTopics = topicStats.filter((t) => t.percent < 60).slice(0, 5);
 
     const attempts = await this.prisma.client.questionAttempt.findMany({
-      where: { studentId: profile.id },
+      where: { studentId: profile.id, question: { topic: { unit: { subjectId: { in: subjectIds } } } } },
       orderBy: { attemptedAt: "desc" },
       take: 5,
       include: {
@@ -110,7 +116,7 @@ export class DashboardService {
       fullName: profile.fullName,
       curriculum: { nameEn: profile.curriculum.nameEn, nameAr: profile.curriculum.nameAr },
       grade: { nameEn: profile.grade.nameEn, nameAr: profile.grade.nameAr },
-      subjects: profile.subjects.map((s) => ({ id: s.subject.id, nameEn: s.subject.nameEn, nameAr: s.subject.nameAr })),
+      subjects,
       diagnosticScore: (latestAssessment?.scoreJson as any) ?? null,
       recommendedFocus: (profile.learningPlans[0]?.planJson as any)?.recommendedFocus ?? null,
       weakTopics,

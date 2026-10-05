@@ -17,6 +17,18 @@ export class UsersService {
     });
   }
 
+  async setTestStudentAccess(actorId: string, actorRole: UserRole, targetUserId: string, enabled: boolean) {
+    if (actorRole !== UserRole.SUPER_ADMIN || actorId === targetUserId) throw new ForbiddenException("Only a Super Admin may configure student test access.");
+    return this.prisma.client.$transaction(async tx => {
+      const target = await tx.user.findUnique({ where: { id: targetUserId } });
+      if (!target || target.role !== "STUDENT" || !target.isActive || target.deletedAt) throw new ForbiddenException("Test access applies only to active student accounts.");
+      const updated = await tx.user.update({ where: { id: targetUserId }, data: { isTestStudent: enabled } });
+      await tx.auditLog.create({ data: { userId: actorId, action: "TEST_STUDENT_ACCESS_UPDATED", entityType: "User", entityId: targetUserId,
+        metadata: { enabled, previousValue: target.isTestStudent, changedBy: actorId } } });
+      return { id: updated.id, isTestStudent: updated.isTestStudent };
+    });
+  }
+
   /**
    * Phase 10 hardening: closes a privilege-escalation gap. Previously,
    * ANY caller with role ADMIN (not just SUPER_ADMIN) could call this

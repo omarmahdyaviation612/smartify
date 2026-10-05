@@ -5,7 +5,7 @@ import { QuestionDraftGeneratorService } from "../question-bank/question-draft-g
 import { Difficulty } from "@smartify/shared-types";
 import { pickDifficultyWeights } from "./difficulty-weights";
 import { TrialService } from "../trial/trial.service";
-import { hasSubjectEntitlementInList } from "../common/subject-entitlement.util";
+import { AccessProfile, resolveSubjectAccess } from "../common/subject-access";
 import { questionServabilityByTopic, QUESTION_PROVENANCE_SELECT, TOPIC_GATE_INCLUDE, UNIT_GATE_SELECT } from "../ai/context/topic-content-provenance.util";
 
 @Injectable()
@@ -25,14 +25,10 @@ export class PracticeService {
   private async getProfileOrThrow(userId: string) {
     const profile = await this.prisma.client.studentProfile.findUnique({
       where: { userId },
-      include: { subjects: true },
+      include: { subjects: true, user: { select: { role: true, isTestStudent: true } } },
     });
     if (!profile) throw new NotFoundException("Complete onboarding before practicing.");
     return profile;
-  }
-
-  private hasOwnedAccess(profile: { subjects: Array<{ subjectId: string; expiresAt?: Date | null }> }, subjectId: string): boolean {
-    return hasSubjectEntitlementInList(profile.subjects, subjectId);
   }
 
   /**
@@ -44,11 +40,11 @@ export class PracticeService {
    * student can pick which Topic to try).
    */
   private async assertSubjectAccessible(
-    profile: { id: string; subjects: Array<{ subjectId: string; expiresAt?: Date | null }> },
+    profile: AccessProfile,
     subjectId: string,
     opts: { topicId?: string; browseOnly?: boolean } = {},
   ) {
-    if (this.hasOwnedAccess(profile, subjectId)) return;
+    if ((await resolveSubjectAccess(this.prisma, profile, subjectId)).active) return;
     if (opts.browseOnly && (await this.trialService.isSubjectTrialBrowsable(profile.id, subjectId))) return;
     if (opts.topicId && (await this.trialService.isTopicTrialAccessible(profile.id, subjectId, opts.topicId))) return;
     throw new ForbiddenException("This subject is not part of your selected subjects.");
@@ -197,7 +193,7 @@ export class PracticeService {
       const q = questionById.get(a.questionId);
       if (!q) continue;
       const subjectId = q.topic.unit.subjectId;
-      if (this.hasOwnedAccess(profile, subjectId)) continue;
+      if ((await resolveSubjectAccess(this.prisma, profile, subjectId)).active) continue;
       if (await this.trialService.isTopicTrialAccessible(profile.id, subjectId, q.topicId)) continue;
       throw new ForbiddenException("One or more submitted questions are not part of your selected subjects.");
     }

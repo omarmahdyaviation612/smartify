@@ -25,6 +25,8 @@ model User {
   email         String    @unique
   role          UserRole  @default(STUDENT)
   isActive      Boolean   @default(true)
+  // Server-controlled subject testing capability; never an administrative role.
+  isTestStudent Boolean   @default(false)
   emailVerified DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -971,6 +973,8 @@ model Subscription {
   // plan-based rows (nothing to backfill: those subjects were already
   // granted through the old flow).
   selectedSubjectIds             Json?
+  // Proposed subscription expansion, applied only after verified payment.
+  pendingSubjectChange           Json?
   monthlyTotalEGP                Decimal // sum of the selected Subjects' own priceEGP (subject-based pricing) — or, on a historical row, pricingPlan.monthlyPriceEGP + (additionalSubjectsCount * pricingPlan.additionalSubjectPriceEGP) as originally snapshotted
   status                         String // "pending" | "active" | "canceled" | "past_due"
   currentPeriodStart             DateTime?
