@@ -50,9 +50,6 @@ export function Navbar({ locale, copy }: { locale: Locale; copy: MarketingCopy }
                 Admin
               </Link>
             )}
-            <Link href={`${base}/dashboard`} className="hidden text-sm font-medium text-neutral-700 sm:block">
-              {locale === "ar" ? "لوحة التحكم" : "Dashboard"}
-            </Link>
             <button
               type="button"
               onClick={() => signOut({ redirectUrl: base })}
