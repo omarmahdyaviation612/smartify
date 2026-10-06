@@ -61,21 +61,21 @@ export class DashboardService {
       attemptedAt: a.attemptedAt,
     }));
 
-    // Phase 10C: scoped strictly to the student's own selected subjects —
-    // and, defensively, to their own grade too (never trusting subjectIds
-    // alone to already be grade-correct, in case a future bug elsewhere
-    // ever lets a StudentSubject point at the wrong grade's subject).
-    // Relational IDs only, never a name match. `subjectIds` empty (no
-    // subjects selected yet) naturally yields zero topics via `{ in: [] }`
-    // — no separate "incomplete profile" branch needed; this is the
-    // fail-closed behavior by construction, not a special case.
+    // Scoped strictly to the student's own selected subjects. Availability is
+    // an OFFERING question (GradeSubject) — a shared subject's content home
+    // may be a different curriculum's grade entirely, so this must NOT also
+    // filter on `subject.gradeId`. Doing that returned an empty list with no
+    // error for exactly the students the shared-subject work exists to serve.
+    // `subjectIds` empty (no subjects selected yet) naturally yields zero
+    // topics via `{ in: [] }` — fail-closed by construction, not by a special
+    // case.
     //
     // Prisma's JSON-column null filters need the Prisma.JsonNull sentinel,
     // not a plain `null`, to distinguish SQL NULL from a JSON "null" value —
     // simplest to just filter in JS instead of fighting that at the query
     // level; cheap at this scale either way.
     const allTopics = await this.prisma.client.topic.findMany({
-      where: { unit: { subjectId: { in: subjectIds }, subject: { gradeId: profile.gradeId } } },
+      where: { unit: { subjectId: { in: subjectIds } } },
       include: { unit: true },
       orderBy: [{ unit: { order: "asc" } }, { order: "asc" }],
     });

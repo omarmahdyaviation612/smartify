@@ -39,13 +39,14 @@ describe("DashboardService.getSummary — Phase 10C content scoping", () => {
   function makeService(opts: {
     profile?: any;
     selectedSubjectIds?: string[]; // StudentSubject rows
+    gradeId?: string;
   }) {
     const profile = "profile" in opts ? opts.profile : {
       id: "student-1",
       userId: "user-1",
       fullName: "Test Student",
       curriculumId: "curriculum-eg",
-      gradeId: "grade-1-eg",
+      gradeId: opts.gradeId ?? "grade-1-eg",
       curriculum: { nameEn: "Egyptian National", nameAr: "المصري" },
       grade: { nameEn: "Grade 1", nameAr: "الأول" },
       subjects: (opts.selectedSubjectIds ?? []).map((subjectId) => ({
@@ -63,12 +64,16 @@ describe("DashboardService.getSummary — Phase 10C content scoping", () => {
         topic: {
           findMany: jest.fn().mockImplementation(async ({ where }: any) => {
             const subjectIdIn: string[] = where?.unit?.subjectId?.in ?? [];
-            const requiredGradeId: string | undefined = where?.unit?.subject?.gradeId;
+            // Presence-checked, not truthiness: a filter of `{ gradeId:
+            // undefined }` must still count as "scoped by the student's grade"
+            // so this mock can never quietly accept a removed clause.
+            const gradeFilter = where?.unit?.subject;
+            const requiredGradeId: string | undefined = gradeFilter?.gradeId;
             return ALL_TOPICS.filter((t) => {
               const unit = (UNITS as any)[t.unitId];
               if (!unit) return false;
               if (!subjectIdIn.includes(unit.subjectId)) return false;
-              if (requiredGradeId) {
+              if (gradeFilter !== undefined) {
                 const subject = (SUBJECTS as any)[unit.subjectId];
                 if (!subject || subject.gradeId !== requiredGradeId) return false;
               }
@@ -99,9 +104,29 @@ describe("DashboardService.getSummary — Phase 10C content scoping", () => {
     expect(summary.pilotLessons.map((l: any) => l.topicId)).toEqual(["topic-arabic-reading-g1-eg"]);
   });
 
-  it("CASE 3 — a student from another grade never receives Grade 1 Mathematics topics, even if subjectIds somehow included that subject", async () => {
-    // Grade 2 profile, but (defensively) subjectIds includes the GRADE-1 math subject id —
-    // simulating a hypothetical stale/incorrect StudentSubject row. The grade-level guard must still block it.
+  // BEHAVIOUR CHANGE (shared subjects Phase 1, Task 11) — read this before
+  // trusting this file as a grade-scoping guarantee.
+  //
+  // The dashboard used to add `subject: { gradeId: profile.gradeId }` as a
+  // DEFENSIVE backstop: it assumed a StudentSubject row could be stale/point
+  // at another grade's subject, and hid the content in that case. That clause
+  // is gone, because a shared subject's content home IS another curriculum's
+  // grade — the very case this change exists to serve — so the clause hid
+  // legitimate content for exactly those students (see the regression test
+  // below, and the GradeSubject offering rule in common/grade-subject.util.ts).
+  //
+  // The two purposes conflict and cannot both hold in one query, so the
+  // backstop moved rather than disappeared: a stale entitlement is now caught
+  // by the GradeSubject invariant checker
+  // (common/grade-subject-invariants.ts, kind
+  // ENTITLEMENT_NOT_OFFERED_FOR_STUDENT_GRADE — covered in
+  // grade-subject-invariants.spec.ts and run read-only against the real
+  // database by grade-subject-invariants.postgres.spec.ts).
+  //
+  // Net effect recorded here deliberately: a stale StudentSubject row for
+  // another grade's subject is now RENDERED by the dashboard instead of being
+  // silently hidden.
+  it("CASE 3 — a stale StudentSubject row for another grade's subject is no longer hidden by the dashboard (backstop moved to the invariant checker)", async () => {
     const { service } = makeService({
       profile: {
         id: "student-2", userId: "user-2", fullName: "Grade 2 Student",
@@ -113,7 +138,11 @@ describe("DashboardService.getSummary — Phase 10C content scoping", () => {
       },
     });
     const summary = await service.getSummary("user-2");
-    expect(summary.pilotLessons.map((l: any) => l.topicId)).not.toContain("topic-addition-g1-eg");
+
+    // The content filter is now owned subjects only — the removed grade clause
+    // was the only thing that hid this, so this documents the change rather
+    // than asserting the old guarantee.
+    expect(summary.pilotLessons.map((l: any) => l.topicId)).toContain("topic-addition-g1-eg");
   });
 
   it("CASE 4 — a student from another curriculum never receives Egyptian National topics", async () => {
@@ -155,6 +184,28 @@ describe("DashboardService.getSummary — Phase 10C content scoping", () => {
     const { service, prisma } = makeService({ selectedSubjectIds: ["subject-math-g1-eg"] });
     await service.getSummary("user-1");
     const call = prisma.client.topic.findMany.mock.calls[0][0];
-    expect(call.where).toEqual({ unit: { subjectId: { in: ["subject-math-g1-eg"] }, subject: { gradeId: "grade-1-eg" } } });
+    // Grade 1 EG_NATIONAL here, and nothing else: the CONTENT filter is the
+    // student's own subjectIds. Availability is an OFFERING question
+    // (GradeSubject), so `subject.gradeId` must NOT appear — a shared
+    // subject's content home is a different curriculum's grade entirely.
+    expect(call.where).toEqual({ unit: { subjectId: { in: ["subject-math-g1-eg"] } } });
+  });
+
+  // British Grade 1 owns no Arabic of its own: the Arabic Subject's content
+  // home is grade-1-eg. Under the old `subject: { gradeId: profile.gradeId }`
+  // clause this topic was filtered out and the student saw an empty Arabic
+  // section — with no error anywhere.
+  it("lists a shared subject's topics for a student whose grade merely offers it", async () => {
+    (SUBJECTS as any)["subject-arabic-eg1"] = { gradeId: "grade-1-eg" };
+    (UNITS as any)["unit-arabic-eg1"] = { subjectId: "subject-arabic-eg1" };
+    ALL_TOPICS.push({
+      id: "topic-arabic-eg1", unitId: "unit-arabic-eg1", nameEn: "Arabic Reading", order: 1,
+      teachingStepsJson: [{ type: "INTRO" }],
+    } as any);
+
+    const { service } = makeService({ selectedSubjectIds: ["subject-arabic-eg1"], gradeId: "grade-1-uk" });
+    const summary = await service.getSummary("user-1");
+
+    expect(summary.pilotLessons.map((l: any) => l.topicId)).toContain("topic-arabic-eg1");
   });
 });
