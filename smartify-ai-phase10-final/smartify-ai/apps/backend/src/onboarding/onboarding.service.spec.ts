@@ -1,4 +1,5 @@
 import { BadRequestException } from "@nestjs/common";
+import { studentOnboardingSchema } from "@smartify/validation";
 import { OnboardingService } from "./onboarding.service";
 
 /**
@@ -16,12 +17,13 @@ describe("OnboardingService", () => {
   const gradeInCurriculumB = { id: "grade-2", curriculumId: "curriculum-B" };
   const subjectInGrade1 = { id: "subject-1", gradeId: "grade-1" };
 
-  function makePrismaMock(overrides: Partial<{ grade: any; subjects: any[] }> = {}) {
+  function makePrismaMock(overrides: Partial<{ grade: any; subjects: any[]; school: any }> = {}) {
     return {
       client: {
         curriculum: { findUnique: jest.fn().mockResolvedValue(curriculum) },
         grade: { findUnique: jest.fn().mockResolvedValue(overrides.grade ?? gradeInCurriculumA) },
         subject: { findMany: jest.fn().mockResolvedValue(overrides.subjects ?? [subjectInGrade1]) },
+        school: { findUnique: jest.fn().mockResolvedValue(overrides.school ?? null) },
         studentProfile: {
           upsert: jest.fn().mockResolvedValue({ id: "student-1" }),
           findUnique: jest.fn().mockResolvedValue({ id: "student-1" }),
@@ -73,6 +75,77 @@ describe("OnboardingService", () => {
 
       await expect(service.saveProfile("user-1", baseInput)).resolves.toBeDefined();
       expect(prisma.client.studentSubject.createMany).toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * Student school info V1 (2026-09-25): governorate/area are passed
+   * through as-is (no cross-entity check needed — they're plain scalars),
+   * but schoolId is re-verified server-side against the real School table
+   * rather than trusted from the client, matching the same
+   * never-trust-the-frontend pattern as curriculum/grade/subject above.
+   */
+  describe("saveProfile — school info", () => {
+    const activeSchool = { id: "school-1", governorate: "CAIRO", isActive: true };
+
+    it("persists governorate and area as submitted", async () => {
+      const prisma = makePrismaMock();
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
+
+      await service.saveProfile("user-1", { ...baseInput, governorate: "CAIRO" as any, area: "Nasr City" });
+
+      const upsertArgs = prisma.client.studentProfile.upsert.mock.calls[0][0];
+      expect(upsertArgs.create.governorate).toBe("CAIRO");
+      expect(upsertArgs.create.area).toBe("Nasr City");
+    });
+
+    it("persists a selected schoolId once the School is verified to exist and be active", async () => {
+      const prisma = makePrismaMock({ school: activeSchool });
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
+
+      await service.saveProfile("user-1", { ...baseInput, governorate: "CAIRO" as any, schoolId: "school-1" });
+
+      const upsertArgs = prisma.client.studentProfile.upsert.mock.calls[0][0];
+      expect(upsertArgs.create.schoolId).toBe("school-1");
+      expect(upsertArgs.create.schoolNameManual).toBeNull();
+    });
+
+    it("persists a manually-entered school name when no schoolId is given", async () => {
+      const prisma = makePrismaMock();
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
+
+      await service.saveProfile("user-1", { ...baseInput, schoolNameManual: "My Unlisted School" });
+
+      const upsertArgs = prisma.client.studentProfile.upsert.mock.calls[0][0];
+      expect(upsertArgs.create.schoolId).toBeNull();
+      expect(upsertArgs.create.schoolNameManual).toBe("My Unlisted School");
+    });
+
+    it("rejects a schoolId that does not exist in the School table", async () => {
+      const prisma = makePrismaMock({ school: null });
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
+
+      await expect(
+        service.saveProfile("user-1", { ...baseInput, schoolId: "does-not-exist" }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("rejects a schoolId that references an inactive School", async () => {
+      const prisma = makePrismaMock({ school: { ...activeSchool, isActive: false } });
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
+
+      await expect(
+        service.saveProfile("user-1", { ...baseInput, schoolId: "school-1" }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("rejects when the selected School's governorate doesn't match the submitted governorate", async () => {
+      const prisma = makePrismaMock({ school: { ...activeSchool, governorate: "GIZA" } });
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
+
+      await expect(
+        service.saveProfile("user-1", { ...baseInput, governorate: "CAIRO" as any, schoolId: "school-1" }),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -158,6 +231,42 @@ describe("OnboardingService", () => {
       expect(mockQuestionGenerator.ensurePoolForTopic).toHaveBeenCalledTimes(2);
       expect(mockQuestionGenerator.ensurePoolForTopic).toHaveBeenCalledWith("topic-math-1", "user-1");
       expect(mockQuestionGenerator.ensurePoolForTopic).toHaveBeenCalledWith("topic-eng-1", "user-1");
+    });
+  });
+
+  describe("studentOnboardingSchema — school info shape", () => {
+    // Uses real cuid-format ids — baseInput's "grade-1"/"subject-1" are
+    // fine for the mocked service-level tests above (which never run them
+    // through the schema), but this schema is validated directly here.
+    const validShapeInput = { ...baseInput, gradeId: "clh1111111111111111111111", subjectIds: ["clh2222222222222222222222"] };
+
+    it("rejects a payload that sets BOTH schoolId and schoolNameManual", () => {
+      const result = studentOnboardingSchema.safeParse({
+        ...validShapeInput,
+        schoolId: "clh1234567890123456789012",
+        schoolNameManual: "Some School",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("accepts a payload with neither schoolId nor schoolNameManual (manual fallback not used)", () => {
+      const result = studentOnboardingSchema.safeParse(validShapeInput);
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts governorate/area/schoolNameManual together (no school selected from the list)", () => {
+      const result = studentOnboardingSchema.safeParse({
+        ...validShapeInput,
+        governorate: "CAIRO",
+        area: "Nasr City",
+        schoolNameManual: "My Unlisted School",
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects an unknown governorate code", () => {
+      const result = studentOnboardingSchema.safeParse({ ...validShapeInput, governorate: "ATLANTIS" });
+      expect(result.success).toBe(false);
     });
   });
 

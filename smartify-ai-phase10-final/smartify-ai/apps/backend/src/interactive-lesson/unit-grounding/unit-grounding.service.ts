@@ -5,6 +5,7 @@ import * as os from "os";
 import * as path from "path";
 import * as crypto from "crypto";
 import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@smartify/database";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AIProviderFactory } from "../../ai/ai-provider.factory";
 import { AIContextBuilderService } from "../../ai/context/ai-context-builder.service";
@@ -267,7 +268,7 @@ export class UnitGroundingService {
     // exclusion of a microsecond-scale race.
     const staleThreshold = new Date(Date.now() - LOCK_STALE_AFTER_MS);
     const claimed = await this.prisma.client.unit.updateMany({
-      where: { id: unitId, OR: [{ groundingLockedAt: null }, { groundingLockedAt: { lt: staleThreshold } }] },
+      where: { id: unitId, groundingNotesJson: { equals: Prisma.JsonNull }, OR: [{ groundingLockedAt: null }, { groundingLockedAt: { lt: staleThreshold } }] },
       data: { groundingLockedAt: new Date(), groundingLockedBy: requestingActorId },
     });
 

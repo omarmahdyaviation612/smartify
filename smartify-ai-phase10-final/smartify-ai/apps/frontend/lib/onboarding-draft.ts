@@ -16,6 +16,16 @@ export interface OnboardingDraft {
   subjectIds?: string[];
   weeklyStudyHours?: number;
   goals?: string;
+  // Student school info V1 (2026-09-25) — collected on the profile step
+  // like the fields above, carried through the draft the same way, and
+  // sent in the same single POST /onboarding/profile the rest of the
+  // draft already goes out in (see grade-subjects/page.tsx). schoolId and
+  // schoolNameManual are mutually exclusive; the UI enforces this by
+  // clearing one whenever the other is set — see profile/page.tsx.
+  governorate?: string;
+  area?: string;
+  schoolId?: string;
+  schoolNameManual?: string;
 }
 
 const KEY = "sf_onboarding_draft";
