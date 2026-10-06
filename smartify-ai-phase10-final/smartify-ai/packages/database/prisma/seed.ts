@@ -117,14 +117,17 @@ async function main() {
   // British test curriculum: grades 1-6 with core subjects and optional
   // second-language choices for grades 4-6.
   const britishCurriculum = await prisma.curriculum.findUniqueOrThrow({ where: { code: "BRITISH_INTL" } });
+  // Arabic and Social Studies are deliberately NOT seeded for this curriculum
+  // (2026-10-06): they are shared subjects whose content home is the Egyptian
+  // National curriculum's own grade, offered here through GradeSubject — see
+  // docs/superpowers/specs/2026-10-06-shared-subjects-design.md. Seeding them
+  // again would recreate the empty placeholders Phase 2 withdrew.
   const britishCoreSubjects = [
-    { nameEn: "Arabic", nameAr: "اللغة العربية", icon: "language" },
     { nameEn: "English", nameAr: "اللغة الإنجليزية", icon: "language" },
     { nameEn: "Mathematics", nameAr: "الرياضيات", icon: "calculator" },
     { nameEn: "Science", nameAr: "العلوم", icon: "flask" },
   ];
   const britishAdditionalSubjects = [
-    { nameEn: "Social Studies", nameAr: "الدراسات الاجتماعية", icon: "globe" },
     { nameEn: "French", nameAr: "اللغة الفرنسية", icon: "language" },
     { nameEn: "German", nameAr: "اللغة الألمانية", icon: "language" },
   ];

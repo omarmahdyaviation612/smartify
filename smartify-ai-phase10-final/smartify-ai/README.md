@@ -42,7 +42,13 @@ cp apps/frontend/.env.example apps/frontend/.env.local
 pnpm db:generate
 DATABASE_URL=postgresql://smartify:smartify_local@localhost:5432/smartify pnpm staging:verify
 
-# 5. Run both apps
+# 5. Link the shared subjects. Arabic Language and Social Studies live once,
+#    under the Egyptian National grades, and are OFFERED to other curricula
+#    through GradeSubject — they are not seeded per curriculum (2026-10-06).
+pnpm --filter @smartify/backend build
+cd apps/backend && node dist/scripts/shared-subjects-link.js --apply && cd ../..
+
+# 6. Run both apps
 pnpm dev
 ```
 
