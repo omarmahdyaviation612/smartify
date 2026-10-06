@@ -23,9 +23,13 @@ function parseSelectedSubjectIds(value: unknown): string[] {
   return value.filter((v): v is string => typeof v === "string");
 }
 
+type PendingSubscriptionChange = { subjectIds: string[]; monthlyTotalEGP: number; homeworkAddonActive?: boolean; homeworkAddonAllowance?: number | null; checkoutUrl?: string };
+
 function pendingChange(subscription: { pendingSubjectChange?: unknown }) {
   const value = subscription.pendingSubjectChange as any;
-  return value && Array.isArray(value.subjectIds) && Number.isFinite(value.monthlyTotalEGP) ? value as { subjectIds: string[]; monthlyTotalEGP: number; checkoutUrl?: string } : null;
+  return value && Array.isArray(value.subjectIds) && Number.isFinite(value.monthlyTotalEGP)
+    ? value as PendingSubscriptionChange
+    : null;
 }
 
 @Injectable()
@@ -62,6 +66,25 @@ export class BillingService {
     const profile = await this.prisma.client.studentProfile.findUnique({ where: { userId }, include: { subjects: true, user: { select: { role: true, isTestStudent: true } }, grade: true, curriculum: true } });
     if (!profile) throw new NotFoundException("Complete onboarding before subscribing.");
     return profile;
+  }
+
+  private async getHomeworkAddonTiers() {
+    const [ten, twenty] = await Promise.all([
+      this.prisma.client.systemConfig.findUnique({ where: { key: "homework_addon_price_10_egp" } }),
+      this.prisma.client.systemConfig.findUnique({ where: { key: "homework_addon_price_20_egp" } }),
+    ]);
+    return [
+      { allowance: 10, amountEGP: ten?.value },
+      { allowance: 20, amountEGP: twenty?.value },
+    ].filter((tier): tier is { allowance: number; amountEGP: number } =>
+      typeof tier.amountEGP === "number" && Number.isFinite(tier.amountEGP) && tier.amountEGP > 0);
+  }
+
+  private async getHomeworkAddonPriceEGP(allowance: number): Promise<number> {
+    if (allowance !== 10 && allowance !== 20) throw new BadRequestException("Choose a valid Homework Helper tier.");
+    const tier = (await this.getHomeworkAddonTiers()).find((item) => item.allowance === allowance);
+    if (!tier) throw new BadRequestException("Homework Helper is not yet available for purchase.");
+    return tier.amountEGP;
   }
 
   /**
@@ -112,6 +135,11 @@ export class BillingService {
     return { ...subscription, subjects };
   }
 
+  async getHomeworkAddonPricing() {
+    const tiers = await this.getHomeworkAddonTiers();
+    return { configured: tiers.length === 2, tiers };
+  }
+
   /** No client identifiers and no writes: revisiting or retrying never grants access. */
   async getPaymentStatus(userId: string): Promise<{ status: "verified" | "pending" | "failed" | "unverified" }> {
     const profile = await this.prisma.client.studentProfile.findUnique({ where: { userId } });
@@ -147,7 +175,7 @@ export class BillingService {
    * at what price; only ever computed from trusted server-side Subject
    * data, never from a client-supplied total.
    */
-  private async resolvePendingSubscription(userId: string, input: { subjectIds: string[] }) {
+  private async resolvePendingSubscription(userId: string, input: { subjectIds: string[]; homeworkAddon?: boolean; homeworkAddonAllowance?: number }) {
     const profile = await this.getProfileOrThrow(userId);
 
     const selectedSubjectIds = [...new Set(input.subjectIds ?? [])];
@@ -167,27 +195,88 @@ export class BillingService {
       throw new BadRequestException(`The following subject(s) are not yet available for purchase: ${unpriced.map((s) => s.nameEn).join(", ")}.`);
     }
 
-    const monthlyTotalEGP = subjects.reduce((sum, subject) => sum + Number(subject.priceEGP), 0);
-
     const existing = await this.prisma.client.subscription.findUnique({ where: { studentId: profile.id } });
+    const currentlyHasHomeworkAddon = existing?.status === "active" && existing.homeworkAddonActive === true;
+    const requestedHomeworkAddon = input.homeworkAddon ?? currentlyHasHomeworkAddon;
+    const currentAllowance = existing?.homeworkAddonMonthlyAllowance ?? null;
+    const requestedHomeworkAddonAllowance = requestedHomeworkAddon
+      ? input.homeworkAddonAllowance ?? (currentlyHasHomeworkAddon ? currentAllowance : 10)
+      : null;
+    if (requestedHomeworkAddon && requestedHomeworkAddonAllowance !== 10 && requestedHomeworkAddonAllowance !== 20) {
+      throw new BadRequestException("Choose a valid Homework Helper tier.");
+    }
+    const homeworkAddonPendingAmountEGP = requestedHomeworkAddon
+      ? currentlyHasHomeworkAddon && requestedHomeworkAddonAllowance === currentAllowance && existing?.homeworkAddonMonthlyAmountEGP != null
+        ? Number(existing.homeworkAddonMonthlyAmountEGP)
+        : await this.getHomeworkAddonPriceEGP(requestedHomeworkAddonAllowance!)
+      : null;
+    const monthlyTotalEGP = subjects.reduce((sum, subject) => sum + Number(subject.priceEGP), 0)
+      + (homeworkAddonPendingAmountEGP ?? 0);
+
     if (existing?.status === "active") {
       const previousIds = existing.selectedSubjectIds == null ? profile.subjects.filter(s => hasSubjectEntitlementInList(profile.subjects, s.subjectId)).map(s => s.subjectId) : parseSelectedSubjectIds(existing.selectedSubjectIds);
       if (previousIds.some(id => !selectedSubjectIds.includes(id))) throw new BadRequestException("Keep your current subjects selected when adding a subject.");
-      if (selectedSubjectIds.every(id => previousIds.includes(id))) throw new BadRequestException("Select an additional subject.");
+      const hasSubjectAddition = selectedSubjectIds.some(id => !previousIds.includes(id));
+      const addonChanged = requestedHomeworkAddon !== currentlyHasHomeworkAddon || requestedHomeworkAddonAllowance !== currentAllowance;
+      if (!hasSubjectAddition && !addonChanged) throw new BadRequestException("Select an additional subject or change the Homework Helper add-on.");
       const pending = pendingChange(existing);
       if (pending) {
-        if (pending.subjectIds.length !== selectedSubjectIds.length || pending.subjectIds.some(id => !selectedSubjectIds.includes(id))) throw new BadRequestException("A subject change is already awaiting payment. Complete it before starting another.");
-        return { subjects, monthlyTotalEGP: pending.monthlyTotalEGP, subscription: existing, change: pending, resume: true };
+        if (pending.subjectIds.length !== selectedSubjectIds.length
+          || pending.subjectIds.some(id => !selectedSubjectIds.includes(id))
+          || (pending.homeworkAddonActive ?? currentlyHasHomeworkAddon) !== requestedHomeworkAddon
+          || (pending.homeworkAddonAllowance ?? currentAllowance) !== requestedHomeworkAddonAllowance) {
+          throw new BadRequestException("A subscription change is already awaiting payment. Complete it before starting another.");
+        }
+        return {
+          subjects,
+          monthlyTotalEGP: pending.monthlyTotalEGP,
+          subscription: existing,
+          change: pending,
+          homeworkAddonActive: pending.homeworkAddonActive ?? currentlyHasHomeworkAddon,
+          resume: true,
+        };
       }
       const claimed = await this.prisma.client.subscription.updateMany({ where: { id: existing.id, status: "active", pendingSubjectChange: { equals: Prisma.DbNull } },
-        data: { pendingSubjectChange: { subjectIds: selectedSubjectIds, monthlyTotalEGP } } });
-      if (claimed.count !== 1) throw new BadRequestException("A subject change is already awaiting payment.");
-      return { subjects, monthlyTotalEGP, subscription: existing, change: { subjectIds: selectedSubjectIds, monthlyTotalEGP }, resume: false };
+        data: {
+          pendingSubjectChange: { subjectIds: selectedSubjectIds, monthlyTotalEGP, homeworkAddonActive: requestedHomeworkAddon, homeworkAddonAllowance: requestedHomeworkAddonAllowance },
+          homeworkAddonPendingActive: requestedHomeworkAddon,
+          homeworkAddonPendingAmountEGP,
+          homeworkAddonPendingAllowance: requestedHomeworkAddonAllowance,
+        } });
+      if (claimed.count !== 1) throw new BadRequestException("A subscription change is already awaiting payment.");
+      const change: PendingSubscriptionChange = {
+        subjectIds: selectedSubjectIds,
+        monthlyTotalEGP,
+        homeworkAddonActive: requestedHomeworkAddon,
+        homeworkAddonAllowance: requestedHomeworkAddonAllowance,
+      };
+      return {
+        subjects,
+        monthlyTotalEGP,
+        subscription: existing,
+        change,
+        homeworkAddonActive: requestedHomeworkAddon,
+        homeworkAddonAllowance: requestedHomeworkAddonAllowance,
+        resume: false,
+      };
     }
 
     const subscription = await this.prisma.client.subscription.upsert({
       where: { studentId: profile.id },
-      update: { pricingPlanId: null, additionalSubjectsCount: 0, selectedSubjectIds, monthlyTotalEGP, status: "pending" },
+      update: {
+        pricingPlanId: null,
+        additionalSubjectsCount: 0,
+        selectedSubjectIds,
+        monthlyTotalEGP,
+        status: "pending",
+        homeworkAddonActive: false,
+        homeworkAddonMonthlyAmountEGP: null,
+        homeworkAddonMonthlyAllowance: null,
+        homeworkAddonPendingActive: requestedHomeworkAddon,
+        homeworkAddonPendingAmountEGP,
+        homeworkAddonPendingAllowance: requestedHomeworkAddonAllowance,
+        pendingSubjectChange: Prisma.DbNull,
+      },
       create: {
         studentId: profile.id,
         pricingPlanId: null,
@@ -195,10 +284,15 @@ export class BillingService {
         selectedSubjectIds,
         monthlyTotalEGP,
         status: "pending",
+        homeworkAddonActive: false,
+        homeworkAddonMonthlyAllowance: null,
+        homeworkAddonPendingActive: requestedHomeworkAddon,
+        homeworkAddonPendingAmountEGP,
+        homeworkAddonPendingAllowance: requestedHomeworkAddonAllowance,
       },
     });
 
-    return { subjects, monthlyTotalEGP, subscription, change: null, resume: false };
+    return { subjects, monthlyTotalEGP, subscription, change: null, homeworkAddonActive: requestedHomeworkAddon, resume: false };
   }
 
   /**
@@ -208,9 +302,9 @@ export class BillingService {
    * the row is the source of truth, the provider session is just how
    * money actually moves.
    */
-  async startCheckout(userId: string, input: { subjectIds: string[] }) {
+  async startCheckout(userId: string, input: { subjectIds: string[]; homeworkAddon?: boolean; homeworkAddonAllowance?: number }) {
     const { provider, providerKey } = await this.providerFactory.getActiveProvider();
-    const { subjects, monthlyTotalEGP, subscription, change, resume } = await this.resolvePendingSubscription(userId, input);
+    const { subjects, monthlyTotalEGP, subscription, change, homeworkAddonActive, resume } = await this.resolvePendingSubscription(userId, input);
     if (resume) {
       if (!change?.checkoutUrl) throw new BadRequestException("Continue your pending payment with its original payment method.");
       return { checkoutUrl: change.checkoutUrl };
@@ -221,7 +315,7 @@ export class BillingService {
       studentUserId: userId,
       subscriptionId: subscription.id,
       amountEGP: monthlyTotalEGP,
-      description: `Smartify AI — ${subjects.map((s) => s.nameEn).join(", ")}`,
+      description: `Smartify AI — ${subjects.map((s) => s.nameEn).join(", ")}${homeworkAddonActive ? " + Homework Helper" : ""}`,
       successUrl: `${env.FRONTEND_URL}/billing/success`,
       cancelUrl: `${env.FRONTEND_URL}/billing`,
     };
@@ -233,7 +327,10 @@ export class BillingService {
       session = await provider.createSubscriptionUpgrade({ ...params, externalProviderSubscriptionId: subscription.externalProviderSubscriptionId });
     } else session = await provider.createCheckoutSession(params);
     } catch (error) {
-      if (change) await this.prisma.client.subscription.updateMany({ where: { id: subscription.id, pendingSubjectChange: { equals: change } }, data: { pendingSubjectChange: Prisma.DbNull } });
+      if (change) await this.prisma.client.subscription.updateMany({
+        where: { id: subscription.id, pendingSubjectChange: { equals: change } },
+        data: { pendingSubjectChange: Prisma.DbNull, homeworkAddonPendingActive: null, homeworkAddonPendingAmountEGP: null, homeworkAddonPendingAllowance: null },
+      });
       throw error;
     }
 
@@ -254,14 +351,17 @@ export class BillingService {
    * against this reference. Nothing here grants any entitlement; only
    * AdminInstapayService.confirm() does, via the existing applyWebhookEvent.
    */
-  async startInstapayCheckout(userId: string, input: { subjectIds: string[] }) {
+  async startInstapayCheckout(userId: string, input: { subjectIds: string[]; homeworkAddon?: boolean; homeworkAddonAllowance?: number }) {
     const env = loadBackendEnv();
     if (!env.INSTAPAY_RECIPIENT_NAME || !env.INSTAPAY_RECIPIENT_HANDLE) {
       throw new ServiceUnavailableException("InstaPay is not configured on this environment yet.");
     }
     const { monthlyTotalEGP, subscription, change, resume } = await this.resolvePendingSubscription(userId, input);
     if (change && subscription.paymentProvider !== "instapay") {
-      await this.prisma.client.subscription.updateMany({ where: { id: subscription.id, pendingSubjectChange: { equals: change } }, data: { pendingSubjectChange: Prisma.DbNull } });
+      await this.prisma.client.subscription.updateMany({
+        where: { id: subscription.id, pendingSubjectChange: { equals: change } },
+        data: { pendingSubjectChange: Prisma.DbNull, homeworkAddonPendingActive: null, homeworkAddonPendingAmountEGP: null, homeworkAddonPendingAllowance: null },
+      });
       throw new BadRequestException("Use your existing payment provider to add subjects.");
     }
 
@@ -313,7 +413,15 @@ export class BillingService {
     // client-side right after a successful cancel.
     return this.prisma.client.subscription.update({
       where: { id: subscription.id },
-      data: { status: "canceled" },
+      data: {
+        status: "canceled",
+        homeworkAddonActive: false,
+        homeworkAddonMonthlyAmountEGP: null,
+        homeworkAddonMonthlyAllowance: null,
+        homeworkAddonPendingActive: null,
+        homeworkAddonPendingAmountEGP: null,
+        homeworkAddonPendingAllowance: null,
+      },
       include: { pricingPlan: true },
     });
   }
@@ -377,6 +485,8 @@ export class BillingService {
         if (!subscription) throw new NotFoundException("Checkout is not available for reconciliation yet.");
         if (isActivation) {
           const change = pendingChange(subscription);
+          const nextHomeworkAddonActive = change?.homeworkAddonActive ?? subscription.homeworkAddonPendingActive ?? null;
+          const nextHomeworkAddonAllowance = change?.homeworkAddonAllowance ?? subscription.homeworkAddonPendingAllowance ?? null;
           const now = new Date();
           const periodEnd = new Date(now);
           periodEnd.setMonth(periodEnd.getMonth() + 1);
@@ -387,6 +497,16 @@ export class BillingService {
               currentPeriodStart: now,
               currentPeriodEnd: periodEnd,
               ...(change ? { selectedSubjectIds: change.subjectIds, monthlyTotalEGP: change.monthlyTotalEGP, pendingSubjectChange: Prisma.DbNull } : {}),
+              ...(nextHomeworkAddonActive !== null ? {
+                homeworkAddonActive: nextHomeworkAddonActive,
+                homeworkAddonMonthlyAmountEGP: nextHomeworkAddonActive
+                  ? subscription.homeworkAddonPendingAmountEGP
+                  : null,
+                homeworkAddonMonthlyAllowance: nextHomeworkAddonActive ? nextHomeworkAddonAllowance : null,
+                homeworkAddonPendingActive: null,
+                homeworkAddonPendingAmountEGP: null,
+                homeworkAddonPendingAllowance: null,
+              } : {}),
               // Captured here — the first verified backend point a real
               // provider subscription id becomes available. Never trusted
               // from client input; this comes only from the signature-
@@ -410,7 +530,15 @@ export class BillingService {
           // checkout session id) — a stale/substituted id cannot match.
           await tx.subscription.updateMany({
             where: { id: subscription.id, paymentProvider: providerKey, externalProviderSubscriptionId: lookupValue },
-            data: { status: event.type === "subscription.canceled" ? "canceled" : "past_due" },
+            data: {
+              status: event.type === "subscription.canceled" ? "canceled" : "past_due",
+              homeworkAddonActive: false,
+              homeworkAddonMonthlyAmountEGP: null,
+              homeworkAddonMonthlyAllowance: null,
+              homeworkAddonPendingActive: null,
+              homeworkAddonPendingAmountEGP: null,
+              homeworkAddonPendingAllowance: null,
+            },
           });
         }
       });
@@ -450,6 +578,8 @@ export class BillingService {
         const subscription = await tx.subscription.findUnique({ where: { id: subscriptionId } });
         if (!subscription) throw new NotFoundException("Subscription not found for this payment.");
         const change = pendingChange(subscription);
+        const nextHomeworkAddonActive = change?.homeworkAddonActive ?? subscription.homeworkAddonPendingActive ?? null;
+        const nextHomeworkAddonAllowance = change?.homeworkAddonAllowance ?? subscription.homeworkAddonPendingAllowance ?? null;
         if (change && referenceId !== subscription.externalSubscriptionId) throw new BadRequestException("This receipt does not match the pending subject change.");
         const now = new Date();
         const periodEnd = new Date(now);
@@ -457,7 +587,17 @@ export class BillingService {
         const activated = await tx.subscription.updateMany({
           where: { id: subscription.id, status: change ? "active" : "pending" },
           data: { status: "active", currentPeriodStart: now, currentPeriodEnd: periodEnd,
-            ...(change ? { selectedSubjectIds: change.subjectIds, monthlyTotalEGP: change.monthlyTotalEGP, pendingSubjectChange: Prisma.DbNull } : {}) },
+            ...(change ? { selectedSubjectIds: change.subjectIds, monthlyTotalEGP: change.monthlyTotalEGP, pendingSubjectChange: Prisma.DbNull } : {}),
+            ...(nextHomeworkAddonActive !== null ? {
+              homeworkAddonActive: nextHomeworkAddonActive,
+              homeworkAddonMonthlyAmountEGP: nextHomeworkAddonActive
+                ? subscription.homeworkAddonPendingAmountEGP
+                : null,
+              homeworkAddonMonthlyAllowance: nextHomeworkAddonActive ? nextHomeworkAddonAllowance : null,
+              homeworkAddonPendingActive: null,
+              homeworkAddonPendingAmountEGP: null,
+              homeworkAddonPendingAllowance: null,
+            } : {}) },
         });
         if (activated.count !== 1) return;
         // Subject-based pricing (2026-09-20) — see applyWebhookEvent's

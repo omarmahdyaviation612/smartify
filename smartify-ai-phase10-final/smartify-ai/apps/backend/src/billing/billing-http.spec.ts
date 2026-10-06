@@ -9,6 +9,8 @@ describe("billing HTTP contract", () => {
   let app: INestApplication;
   let url: string;
   const getPaymentStatus = jest.fn().mockResolvedValue({ status: "unverified" });
+  const getHomeworkAddonPricing = jest.fn().mockResolvedValue({ configured: true, amountEGP: 80 });
+  const startCheckout = jest.fn().mockResolvedValue({ checkoutUrl: "https://example.test/checkout" });
   beforeAll(async () => {
     const module = await Test.createTestingModule({
       controllers: [BillingController],
@@ -17,6 +19,8 @@ describe("billing HTTP contract", () => {
           getCurrentSubscription: async () => null,
           getAvailablePlans: async () => [{ id: "grade-1-5", monthlyPriceEGP: "500" }],
           getPaymentStatus,
+          getHomeworkAddonPricing,
+          startCheckout,
         } },
         { provide: AUTH_PROVIDER, useValue: { verifySessionToken: async () => ({ externalUserId: "own-clerk-user" }) } },
         { provide: PrismaService, useValue: { client: { user: { findUnique: async () => ({ id: "own-user", isActive: true, deletedAt: null }) } } } },
@@ -35,6 +39,13 @@ describe("billing HTTP contract", () => {
   });
   it("requires authentication for payment verification", async () => {
     expect((await fetch(`${url}/billing/payment-status`)).status).toBe(401);
+  });
+  it("returns the trusted Homework add-on quote and forwards the optional checkout selection", async () => {
+    const quote = await fetch(`${url}/billing/homework-addon`, { headers: { authorization: "Bearer fixture" } });
+    expect(await quote.json()).toEqual({ configured: true, amountEGP: 80 });
+    const response = await fetch(`${url}/billing/checkout`, { method: "POST", headers: { authorization: "Bearer fixture", "content-type": "application/json" }, body: JSON.stringify({ subjectIds: ["math"], homeworkAddon: true }) });
+    expect(await response.json()).toEqual({ checkoutUrl: "https://example.test/checkout" });
+    expect(startCheckout).toHaveBeenCalledWith("own-user", { subjectIds: ["math"], homeworkAddon: true });
   });
   it("ignores forged success and user identifiers and verifies only the authenticated user", async () => {
     const response = await fetch(`${url}/billing/payment-status?status=paid&userId=other&session_id=other`, {

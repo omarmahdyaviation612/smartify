@@ -20,6 +20,9 @@ export class BillingController {
     return response.json(await this.billingService.getCurrentSubscription(user.id));
   }
 
+  @Get("homework-addon")
+  getHomeworkAddonPricing() { return this.billingService.getHomeworkAddonPricing(); }
+
   @Get("payment-status")
   @Header("Cache-Control", "no-store")
   getPaymentStatus(@CurrentUser() user: any) {
@@ -27,7 +30,7 @@ export class BillingController {
   }
 
   @Post("checkout")
-  startCheckout(@CurrentUser() user: any, @Body() body: { subjectIds: string[] }) {
+  startCheckout(@CurrentUser() user: any, @Body() body: { subjectIds: string[]; homeworkAddon?: boolean; homeworkAddonAllowance?: number }) {
     return this.billingService.startCheckout(user.id, body);
   }
 

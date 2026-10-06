@@ -39,7 +39,7 @@ export class InstapayService {
     return Boolean(env.INSTAPAY_RECIPIENT_NAME && env.INSTAPAY_RECIPIENT_HANDLE);
   }
 
-  async initiateSubscription(userId: string, input: { subjectIds: string[] }) {
+  async initiateSubscription(userId: string, input: { subjectIds: string[]; homeworkAddon?: boolean; homeworkAddonAllowance?: number }) {
     return this.billingService.startInstapayCheckout(userId, input);
   }
 

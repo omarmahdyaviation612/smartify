@@ -30,6 +30,7 @@ import { UnitGroundingModule } from "./interactive-lesson/unit-grounding/unit-gr
 import { TrialModule } from "./trial/trial.module";
 import { ReferralModule } from "./referral/referral.module";
 import { SchoolsModule } from "./schools/schools.module";
+import { HomeworkModule } from "./homework/homework.module";
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { SchoolsModule } from "./schools/schools.module";
     TrialModule,
     ReferralModule,
     SchoolsModule,
+    HomeworkModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

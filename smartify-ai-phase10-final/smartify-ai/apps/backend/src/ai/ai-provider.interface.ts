@@ -50,6 +50,8 @@ export interface AIGenerateResult {
 }
 
 export interface AIProvider {
+  /** Explicit capability gate; image based Homework requests fail closed unless true. */
+  readonly supportsVision?: boolean;
   generate(request: AIGenerateRequest): Promise<AIGenerateResult>;
 }
 

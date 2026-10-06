@@ -84,6 +84,9 @@ model StudentProfile {
   questionAttempts      QuestionAttempt[]
   achievements          StudentAchievement[]
   aiConversations       AIConversation[]
+  homeworkSessions     HomeworkSession[]
+  homeworkAllowanceCounters HomeworkAllowanceCounter[]
+  homeworkAllowanceReservations HomeworkAllowanceReservation[]
   lessonSessions        LessonSession[]
   aiCredits             AICredits?
   subscription          Subscription?
@@ -194,6 +197,7 @@ model Curriculum {
   studentProfiles  StudentProfile[]
   pricingPlans     PricingPlan[]
   tutorAnswerCache TutorAnswerCache[]
+  homeworkSessions HomeworkSession[]
 }
 
 model Grade {
@@ -208,6 +212,7 @@ model Grade {
   subjects         Subject[]
   studentProfiles  StudentProfile[]
   tutorAnswerCache TutorAnswerCache[]
+  homeworkSessions HomeworkSession[]
 
   @@index([curriculumId])
 }
@@ -255,6 +260,8 @@ model Subject {
   materials               LearningMaterial[]
   lessonTrialConsumptions LessonTrialConsumption[]
   referralRewards         Referral[]
+  homeworkSessions        HomeworkSession[]
+  homeworkAccessSessions  HomeworkSession[] @relation("HomeworkAccessSubject")
 
   @@index([gradeId])
   @@index([sharedContentSubjectId])
@@ -473,6 +480,7 @@ model Topic {
   tutorAnswerCache        TutorAnswerCache[]
   materials               LearningMaterial[]
   lessonSessions          LessonSession[]
+  homeworkSessions       HomeworkSession[]
   visualAssets            LessonVisualAsset[]
   publishedFromDraft      LessonDraft?
   quizResults             QuizResult[]
@@ -981,6 +989,14 @@ model Subscription {
   // plan-based rows (nothing to backfill: those subjects were already
   // granted through the old flow).
   selectedSubjectIds             Json?
+  // Optional Homework Helper monthly add-on. It is activated only from a
+  // verified payment event and remains independent of subject selection.
+  homeworkAddonActive            Boolean        @default(false)
+  homeworkAddonMonthlyAmountEGP   Decimal?
+  homeworkAddonMonthlyAllowance   Int?
+  homeworkAddonPendingActive      Boolean?
+  homeworkAddonPendingAmountEGP   Decimal?
+  homeworkAddonPendingAllowance   Int?
   // Proposed subscription expansion, applied only after verified payment.
   pendingSubjectChange           Json?
   monthlyTotalEGP                Decimal // sum of the selected Subjects' own priceEGP (subject-based pricing) — or, on a historical row, pricingPlan.monthlyPriceEGP + (additionalSubjectsCount * pricingPlan.additionalSubjectPriceEGP) as originally snapshotted
@@ -1289,6 +1305,82 @@ model AIMessage {
   createdAt      DateTime       @default(now())
 
   @@index([conversationId])
+}
+
+// Photo-based homework sessions store extracted text and tutoring state only.
+// Raw image bytes are transient request data and are deliberately absent.
+model HomeworkSession {
+  id                    String         @id @default(cuid())
+  studentId             String
+  student               StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subjectId             String
+  subject               Subject        @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  // Student-facing curriculum subject used to recheck entitlement on resume.
+  accessSubjectId       String
+  accessSubject         Subject        @relation("HomeworkAccessSubject", fields: [accessSubjectId], references: [id], onDelete: Restrict)
+  topicId               String?
+  topic                 Topic?         @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  curriculumId          String
+  curriculum            Curriculum     @relation(fields: [curriculumId], references: [id], onDelete: Restrict)
+  gradeId               String
+  grade                 Grade          @relation(fields: [gradeId], references: [id], onDelete: Restrict)
+  extractedQuestion     String         @db.Text
+  status                String         @default("AWAITING_TOPIC_CONFIRMATION")
+  incorrectAttemptCount Int            @default(0)
+  solutionRevealed      Boolean        @default(false)
+  solvedAt              DateTime?
+  turnLockExpiresAt     DateTime?
+  turnLockToken         String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  messages    HomeworkMessage[]
+  reservation HomeworkAllowanceReservation?
+
+  @@index([studentId, updatedAt])
+  @@index([subjectId, status])
+  @@index([topicId])
+}
+
+model HomeworkMessage {
+  id        String          @id @default(cuid())
+  sessionId String
+  session   HomeworkSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      String // "user" | "assistant"
+  kind      String? // "HELP" | "ANSWER" | "REVEAL_SOLUTION"
+  content   String          @db.Text
+  createdAt DateTime        @default(now())
+
+  @@index([sessionId, createdAt])
+}
+
+model HomeworkAllowanceCounter {
+  id          String         @id @default(cuid())
+  studentId   String
+  student     StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  periodStart DateTime
+  periodEnd   DateTime
+  reserved    Int            @default(0)
+  consumed    Int            @default(0)
+  updatedAt   DateTime       @updatedAt
+
+  @@unique([studentId, periodStart])
+}
+
+model HomeworkAllowanceReservation {
+  id          String          @id @default(cuid())
+  sessionId   String          @unique
+  session     HomeworkSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  studentId   String
+  student     StudentProfile  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  periodStart DateTime
+  status      String          @default("RESERVED") // "RESERVED" | "CONSUMED" | "REFUNDED"
+  expiresAt   DateTime
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([studentId, periodStart, status])
+  @@index([status, expiresAt])
 }
 
 // ============ GAMIFICATION ============

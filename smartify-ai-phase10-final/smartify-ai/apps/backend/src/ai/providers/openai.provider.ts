@@ -6,12 +6,14 @@ import type { AIGenerateRequest, AIGenerateResult, AIProvider } from "../ai-prov
 
 @Injectable()
 export class OpenAIProvider implements AIProvider {
+  readonly supportsVision: boolean;
   private client: OpenAI | null = null;
   private readonly model: string;
   private readonly logger = new Logger(OpenAIProvider.name);
 
   constructor(model: string) {
     this.model = model;
+    this.supportsVision = /^(?:gpt-4o-mini(?:-\d{4}-\d{2}-\d{2})?|gpt-4o(?:-\d{4}-\d{2}-\d{2})?|gpt-4\.1(?:-\d{4}-\d{2}-\d{2})?)$/i.test(model);
     const env = loadBackendEnv();
     if (env.OPENAI_API_KEY) {
       this.client = createInstrumentedOpenAI(env.OPENAI_API_KEY, entry => this.logger.log(JSON.stringify(entry)));
