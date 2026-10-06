@@ -149,8 +149,9 @@ export class ReferralService {
 
     const now = new Date();
     const base = existingGrant?.expiresAt && existingGrant.expiresAt > now ? existingGrant.expiresAt : now;
-    const newExpiresAt = new Date(base);
-    newExpiresAt.setDate(newExpiresAt.getDate() + REWARD_DAYS);
+    // Reward duration is a fixed number of elapsed 24-hour days, independent
+    // of the server's local timezone or daylight-saving transitions.
+    const newExpiresAt = new Date(base.getTime() + REWARD_DAYS * 24 * 60 * 60 * 1000);
 
     await this.prisma.client.$transaction(async (tx) => {
       const result = await tx.referral.updateMany({
