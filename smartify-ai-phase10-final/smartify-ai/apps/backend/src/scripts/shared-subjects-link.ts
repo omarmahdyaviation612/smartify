@@ -90,13 +90,38 @@ export function renderDryRun(plan: SharedSubjectsPlan): string {
 }
 
 export type ApplyResult = {
+  /** Pairs this plan owns as ACTIVE offerings — includes pairs that were already active, so a re-run still reports the full desired state rather than 0. */
   offeringsCreated: number;
+  /** Subset of offeringsCreated that this run actually inserted. */
+  linksInserted: number;
   offeringsDeactivated: number;
   subjectsDeactivated: number;
   entitlementsRepointed: number;
   entitlementsDeduplicated: number;
   appliedAt: string;
 };
+
+/** Which GradeSubject rows this plan wants active, regardless of which run created them. */
+export type DesiredOfferingState = {
+  activeOfferingPairs: Array<{ gradeId: string; subjectId: string }>;
+  inactiveOfferingPairs: Array<{ gradeId: string; subjectId: string }>;
+  deactivatedSubjectIds: string[];
+};
+
+/**
+ * The FULL effect of a plan, independent of what had already been applied.
+ * `applyPlan` returns only what it changed, so a re-run of an already-applied
+ * plan produced `offeringsCreated: 0` and an EMPTY reverse map — i.e. the
+ * record of how to undo the real apply was destroyed by the verification
+ * re-run. The evidence files are written from this function instead.
+ */
+export function desiredStateFor(plan: SharedSubjectsPlan): DesiredOfferingState {
+  return {
+    activeOfferingPairs: plan.links.map((l) => ({ gradeId: l.gradeId, subjectId: l.subjectId })),
+    inactiveOfferingPairs: plan.withdrawals.map((w) => ({ gradeId: w.gradeId, subjectId: w.subjectId })),
+    deactivatedSubjectIds: [...new Set(plan.withdrawals.map((w) => w.subjectId))],
+  };
+}
 
 export async function applyPlan(db: PrismaClient, plan: SharedSubjectsPlan): Promise<ApplyResult> {
   if (plan.blocked.length > 0) {
@@ -108,9 +133,14 @@ export async function applyPlan(db: PrismaClient, plan: SharedSubjectsPlan): Pro
   }
 
   const result: ApplyResult = {
-    // The planner only emits a link for a pair that is not already offered, so
-    // the link count IS the number of offerings this run creates.
+    // NOTE (2026-10-06): both counters describe THIS RUN's delta, not the
+    // phase's total effect. The planner only emits a link for a pair that is
+    // not ALREADY OFFERED, so re-running an applied plan yields 0 here and an
+    // EMPTY reverse map — which is why the evidence under docs/ was authored
+    // from the reviewed dry run plus the verified Postgres state instead of
+    // from a later run's output.
     offeringsCreated: plan.links.length,
+    linksInserted: plan.links.length,
     offeringsDeactivated: 0,
     subjectsDeactivated: 0,
     entitlementsRepointed: 0,
@@ -119,13 +149,17 @@ export async function applyPlan(db: PrismaClient, plan: SharedSubjectsPlan): Pro
   };
 
   await db.$transaction(async (tx) => {
+    // plan.links holds every pair that is not already offered, so this run
+    // inserts all of them; the count is kept separately so a no-op re-run is
+    // distinguishable from the original apply in the report.
+    result.linksInserted = plan.links.length;
+
     for (const link of plan.links) {
       await tx.gradeSubject.upsert({
         where: { gradeId_subjectId: { gradeId: link.gradeId, subjectId: link.subjectId } },
         update: { isActive: true },
         create: { gradeId: link.gradeId, subjectId: link.subjectId },
-      });
-    }
+      });    }
 
     // Entitlements move BEFORE any duplicate is withdrawn, so a student is never
     // left without access at any point inside the transaction.

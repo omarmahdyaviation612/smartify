@@ -1,0 +1,51 @@
+{
+  "warning": "Hand-authored because the script's own reverse map was EMPTY. The planner describes a DELTA, not the state this phase produced, so re-running the already-applied linker printed offeringsCreated:0 / linksInserted:0 and wrote an empty undo list — i.e. the first run's real changes left no machine-readable record. Both files were removed and replaced by these, derived from the Postgres state and the committed dry-run output.",
+  "phase": "shared-subjects Phase 2 (2026-10-06)",
+  "appliedAt": "2026-10-06T14:44:06Z",
+  "sourceOfTruth": "backups/postgres/smartify_pre_migration_20261006_174338.pgdump (3.58 MB, verified readable with pg_restore --list)",
+  "counts": {
+    "offeringsCreated": 8,
+    "offeringsDeactivated": 9,
+    "subjectsDeactivated": 9,
+    "entitlementRepoints": 0,
+    "entitlementsDeduplicated": 0
+  },
+  "undo": {
+    "links": [
+      { "level": 1, "gradeId": "cmu7ivk190001wrw95sb3gmh2", "subjectId": "cmu78g0k300015tapkf9wor13", "nameEn": "Arabic Language" },
+      { "level": 3, "gradeId": "cmu7ivk3n0049wrw9z5yvlwm4", "subjectId": "cmu7ivkc300m7wrw999t9zgq0", "nameEn": "Arabic Language" },
+      { "level": 4, "gradeId": "cmu7ivk59007lwrw986f7pxol", "subjectId": "cmu7ivke400r7wrw9ry9259v1", "nameEn": "Arabic Language" },
+      { "level": 4, "gradeId": "cmu7ivk59007lwrw986f7pxol", "subjectId": "cmu7k9t56000121ez5ohnwrla", "nameEn": "Social Studies" },
+      { "level": 5, "gradeId": "cmu7ivk6w00b1wrw9y5idoj24", "subjectId": "cmu7ivkhh00zlwrw9ocxbehgm", "nameEn": "Arabic Language" },
+      { "level": 5, "gradeId": "cmu7ivk6w00b1wrw9y5idoj24", "subjectId": "cmu7ivkkk017dwrw9px3zc55o", "nameEn": "Social Studies" },
+      { "level": 6, "gradeId": "cmu7ivk7j00c1wrw9pki64z82", "subjectId": "cmu7ivklb0193wrw94p022cq9", "nameEn": "Arabic Language" },
+      { "level": 6, "gradeId": "cmu7ivk7j00c1wrw9pki64z82", "subjectId": "cmu7ivkog01glwrw9qktslip2", "nameEn": "Social Studies" }
+    ],
+    "withdrawals": [
+      { "level": 1, "gradeId": "cmtyw8hom003xuk62p600jsb4", "subjectId": "cmtyw8hon003zuk62iwyu0jzj", "nameEn": "Arabic" },
+      { "level": 2, "gradeId": "cmtyw8hor0047uk62nx6tpz50", "subjectId": "cmtyw8hos0049uk62l0rzugrf", "nameEn": "Arabic" },
+      { "level": 3, "gradeId": "cmtyw8hov004huk628q936yd9", "subjectId": "cmtyw8how004juk62t2ne3c72", "nameEn": "Arabic" },
+      { "level": 4, "gradeId": "cmtyw8hoz004ruk621bp6bbej", "subjectId": "cmtyw8hp0004tuk62bqiat8du", "nameEn": "Arabic" },
+      { "level": 5, "gradeId": "cmtyw8hp60057uk62w2wv6fuc", "subjectId": "cmtyw8hp60059uk62t925nlqz", "nameEn": "Arabic" },
+      { "level": 6, "gradeId": "cmtyw8hpc005nuk62gfl5x4k8", "subjectId": "cmtyw8hpd005puk62s4cy7yx4", "nameEn": "Arabic" },
+      { "level": 4, "gradeId": "cmtyw8hoz004ruk621bp6bbej", "subjectId": "cmtyw8hp30051uk62xos3w1ci", "nameEn": "Social Studies" },
+      { "level": 5, "gradeId": "cmtyw8hp60057uk62w2wv6fuc", "subjectId": "cmtyw8hp9005huk625olsjkpm", "nameEn": "Social Studies" },
+      { "level": 6, "gradeId": "cmtyw8hpc005nuk62gfl5x4k8", "subjectId": "cmtyw8hpg005xuk62k26yfbtu", "nameEn": "Social Studies" }
+    ],
+    "entitlementRepoints": [],
+    "note": "The 4 English Story offerings (subjectIds cmu9st00k000113f5p27gqvwy, cmu9voqn600013nktbmp0s5ce, cmu9vtdqs0001v77omlc0j2zm, cmu9vvysg0003v77od57322cx) are NOT listed here: they were deactivated in Phase 1 Task 3, not by this phase."
+  },
+  "restoreSql": [
+    "-- Undo the 8 shared links (stop offering the Egyptian subjects to British grades):",
+    "UPDATE \"GradeSubject\" SET \"isActive\" = false WHERE (\"gradeId\", \"subjectId\") IN (('cmu7ivk190001wrw95sb3gmh2','cmu78g0k300015tapkf9wor13'),('cmu7ivk3n0049wrw9z5yvlwm4','cmu7ivkc300m7wrw999t9zgq0'),('cmu7ivk59007lwrw986f7pxol','cmu7ivke400r7wrw9ry9259v1'),('cmu7ivk59007lwrw986f7pxol','cmu7k9t56000121ez5ohnwrla'),('cmu7ivk6w00b1wrw9y5idoj24','cmu7ivkhh00zlwrw9ocxbehgm'),('cmu7ivk6w00b1wrw9y5idoj24','cmu7ivkkk017dwrw9px3zc55o'),('cmu7ivk7j00c1wrw9pki64z82','cmu7ivklb0193wrw94p022cq9'),('cmu7ivk7j00c1wrw9pki64z82','cmu7ivkog01glwrw9qktslip2'));",
+    "-- Undo the 9 withdrawals (restore the seed-created placeholder duplicates):",
+    "UPDATE \"Subject\" SET \"isActive\" = true WHERE \"id\" IN ('cmtyw8hon003zuk62iwyu0jzj','cmtyw8hos0049uk62l0rzugrf','cmtyw8how004juk62t2ne3c72','cmtyw8hp0004tuk62bqiat8du','cmtyw8hp60059uk62t925nlqz','cmtyw8hpd005puk62s4cy7yx4','cmtyw8hp30051uk62xos3w1ci','cmtyw8hp9005huk625olsjkpm','cmtyw8hpg005xuk62k26yfbtu');",
+    "UPDATE \"GradeSubject\" SET \"isActive\" = true WHERE (\"gradeId\", \"subjectId\") IN (('cmtyw8hom003xuk62p600jsb4','cmtyw8hon003zuk62iwyu0jzj'),('cmtyw8hor0047uk62nx6tpz50','cmtyw8hos0049uk62l0rzugrf'),('cmtyw8hov004huk628q936yd9','cmtyw8how004juk62t2ne3c72'),('cmtyw8hoz004ruk621bp6bbej','cmtyw8hp0004tuk62bqiat8du'),('cmtyw8hp60057uk62w2wv6fuc','cmtyw8hp60059uk62t925nlqz'),('cmtyw8hpc005nuk62gfl5x4k8','cmtyw8hpd005puk62s4cy7yx4'),('cmtyw8hoz004ruk621bp6bbej','cmtyw8hp30051uk62xos3w1ci'),('cmtyw8hp60057uk62w2wv6fuc','cmtyw8hp9005huk625olsjkpm'),('cmtyw8hpc005nuk62gfl5x4k8','cmtyw8hpg005xuk62k26yfbtu'));"
+  ],
+  "notes": [
+    "links: set GradeSubject.isActive false to stop offering the subject to that grade.",
+    "withdrawals: set GradeSubject.isActive true AND Subject.isActive true to restore the duplicate.",
+    "entitlementRepoints: none — this database held 0 Arabic/Social Studies entitlements, as the Phase 2 plan predicted.",
+    "Full rollback is also available from the pre-apply pgdump named above."
+  ]
+}
