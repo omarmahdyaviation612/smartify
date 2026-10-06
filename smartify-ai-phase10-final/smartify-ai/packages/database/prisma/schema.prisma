@@ -204,6 +204,9 @@ model Grade {
   isActive     Boolean    @default(true)
 
   subjects        Subject[]
+  // Grades that OFFER this grade's subjects are found through
+  // GradeSubject.subjectId — see Subject.gradeOfferings.
+  offeredSubjects GradeSubject[]
   studentProfiles StudentProfile[]
   tutorAnswerCache TutorAnswerCache[]
 
@@ -237,6 +240,12 @@ model Subject {
   priceEGP Decimal?
 
   units           Unit[]
+  // GradeSubject is what a student/admin sees for their own grade.
+  // `gradeId` above is this Subject's CONTENT HOME (where its units,
+  // textbook mapping, and price are authored) — for a shared subject that
+  // is the Egyptian reference grade, while other curricula's grades offer
+  // it through these rows.
+  gradeOfferings  GradeSubject[]
   studentSubjects StudentSubject[]
   assessments     Assessment[]
   questionPackPurchases TutorQuestionPackPurchase[]
@@ -248,6 +257,25 @@ model Subject {
   referralRewards Referral[]
 
   @@index([gradeId])
+}
+
+/// A grade offers a subject. Subject.gradeId is the CONTENT HOME (where
+/// units, textbook mapping, and price are authored — always the Egyptian
+/// reference grade for shared subjects); GradeSubject is what a student or
+/// admin sees for their own grade. Every subject has at least its own home
+/// grade as an offering, so the read path has exactly one shape.
+model GradeSubject {
+  id        String   @id @default(cuid())
+  gradeId   String
+  grade     Grade    @relation(fields: [gradeId], references: [id])
+  subjectId String
+  subject   Subject  @relation(fields: [subjectId], references: [id])
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([gradeId, subjectId])
+  @@index([gradeId, isActive])
+  @@index([subjectId])
 }
 
 model StudentSubject {
