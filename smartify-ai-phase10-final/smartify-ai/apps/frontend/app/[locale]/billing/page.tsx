@@ -24,8 +24,12 @@ interface Subscription {
   status: string;
   monthlyTotalEGP: string;
   subjects: Array<{ id: string; nameEn: string; nameAr: string }>;
-  pendingSubjectChange?: { subjectIds: string[]; checkoutUrl?: string } | null;
+  pendingSubjectChange?: { subjectIds: string[]; homeworkAddonActive?: boolean; homeworkAddonAllowance?: number | null; checkoutUrl?: string } | null;
+  homeworkAddonActive?: boolean;
+  homeworkAddonMonthlyAmountEGP?: number | string | null;
+  homeworkAddonMonthlyAllowance?: number | null;
 }
+interface HomeworkTier { allowance: 10 | 20; amountEGP: number }
 
 export default function BillingPage() {
   const { locale } = useParams<{ locale: Locale }>();
@@ -44,14 +48,30 @@ export default function BillingPage() {
   const [notOnboarded, setNotOnboarded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [loadingSubjects, setLoadingSubjects] = useState(true);
+  const [homeworkAddon, setHomeworkAddon] = useState(false);
+  const [homeworkAllowance, setHomeworkAllowance] = useState<10 | 20>(10);
+  const [homeworkTiers, setHomeworkTiers] = useState<HomeworkTier[]>([]);
+  const [homeworkConfigured, setHomeworkConfigured] = useState(false);
 
   async function loadBillingData() {
     setLoadingSubjects(true);
     setError(null);
-    Promise.all([apiFetch<BillingSubject[]>("/billing/subjects"), apiFetch<Subscription | null>("/billing/subscription")])
-      .then(([subjectData, subData]) => {
+    Promise.all([apiFetch<BillingSubject[]>("/billing/subjects"), apiFetch<Subscription | null>("/billing/subscription"), apiFetch<{configured:boolean;tiers:HomeworkTier[]}>("/billing/homework-addon")])
+      .then(([subjectData, subData, addonData]) => {
         setSubjects(subjectData);
         setSubscription(subData);
+        setHomeworkAddon(subData?.homeworkAddonActive === true);
+        const activeAllowance = subData?.homeworkAddonMonthlyAllowance;
+        setHomeworkAllowance(activeAllowance === 20 ? 20 : 10);
+        const snapshotPrice = Number(subData?.homeworkAddonMonthlyAmountEGP ?? 0);
+        const tiers = [...addonData.tiers];
+        if (subData?.homeworkAddonActive && snapshotPrice > 0 && (activeAllowance === 10 || activeAllowance === 20)) {
+          const activeTier = tiers.find(t => t.allowance === activeAllowance);
+          if (activeTier) activeTier.amountEGP = snapshotPrice;
+          else tiers.push({ allowance: activeAllowance, amountEGP: snapshotPrice });
+        }
+        setHomeworkTiers(tiers);
+        setHomeworkConfigured(addonData.configured || (subData?.homeworkAddonActive === true && activeAllowance != null));
         setSelectedSubjectIds(subjectData.filter(s => s.id === requestedSubjectId || (subData?.status === "active" && subData.subjects.some(owned => owned.id === s.id))).filter(s => s.priceEGP != null).map(s => s.id));
       })
       .catch((err) => {
@@ -77,7 +97,7 @@ export default function BillingPage() {
     try {
       const res = await apiFetch<{ checkoutUrl: string }>("/billing/checkout", {
         method: "POST",
-        body: JSON.stringify({ subjectIds: selectedSubjectIds }),
+        body: JSON.stringify({ subjectIds: selectedSubjectIds, homeworkAddon, ...(homeworkAddon ? { homeworkAddonAllowance: homeworkAllowance } : {}) }),
       });
       window.location.href = res.checkoutUrl;
     } catch (err: any) {
@@ -88,7 +108,8 @@ export default function BillingPage() {
   }
 
   const priceById = new Map((subjects ?? []).map((subject) => [subject.id, subject.priceEGP]));
-  const monthlyTotal = selectedSubjectIds.reduce((total, id) => total + Number(priceById.get(id) ?? 0), 0);
+  const selectedHomeworkTier = homeworkTiers.find(t => t.allowance === homeworkAllowance);
+  const monthlyTotal = selectedSubjectIds.reduce((total, id) => total + Number(priceById.get(id) ?? 0), 0) + (homeworkAddon ? Number(selectedHomeworkTier?.amountEGP ?? 0) : 0);
 
   async function handleCancel() {
     if (!confirm(copy.cancelConfirm)) return;
@@ -141,7 +162,7 @@ export default function BillingPage() {
                   {copy.statusLabel}: <span className="font-medium text-navy-900">{subscription.status}</span>
                 </p>
                 {subscription.pendingSubjectChange && (
-                  <a className="inline-block font-medium text-ai-600 underline" href={subscription.pendingSubjectChange.checkoutUrl ?? `/${locale}/billing/instapay?kind=subscription&subjectIds=${encodeURIComponent(subscription.pendingSubjectChange.subjectIds.join(","))}`}>
+                  <a className="inline-block font-medium text-ai-600 underline" href={subscription.pendingSubjectChange.checkoutUrl ?? `/${locale}/billing/instapay?kind=subscription&subjectIds=${encodeURIComponent(subscription.pendingSubjectChange.subjectIds.join(","))}&homeworkAddon=${subscription.pendingSubjectChange.homeworkAddonActive === true}&homeworkAddonAllowance=${subscription.pendingSubjectChange.homeworkAddonAllowance ?? ""}`}>
                     {isAr ? "متابعة الدفع لإضافة المادة" : "Continue payment to add your subject"}
                   </a>
                 )}
@@ -213,6 +234,18 @@ export default function BillingPage() {
                 })}
               </div>
 
+              <section className={`mt-5 rounded-sf border p-4 ${homeworkConfigured ? "border-ai-200" : "border-neutral-200 bg-neutral-50"}`}>
+                <label className="flex items-center justify-between gap-4">
+                  <span><span className="block font-medium">{isAr ? "إضافة مساعد حل الواجب" : "Add Homework Helper"}</span><span className="text-sm text-neutral-500">{isAr ? "إرشاد بالاعتماد على موضوعات منهجك" : "Step-by-step help from your curriculum"}</span></span>
+                  <input type="checkbox" checked={homeworkAddon} disabled={!homeworkConfigured} onChange={e=>setHomeworkAddon(e.target.checked)} aria-label={isAr ? "إضافة مساعد حل الواجب" : "Add Homework Helper"}/>
+                </label>
+                {homeworkTiers.map(tier => <label key={tier.allowance} className={`mt-3 flex cursor-pointer items-center justify-between rounded-sf border p-3 ${homeworkAllowance === tier.allowance ? "border-ai-500 bg-ai-50" : "border-neutral-200"}`}>
+                  <span>{isAr ? `حتى ${tier.allowance} سؤالًا شهريًا` : `Up to ${tier.allowance} questions per month`}</span>
+                  <span className="flex items-center gap-2">{tier.amountEGP} {copy.monthSuffix}<input type="radio" name="homework-tier" checked={homeworkAllowance === tier.allowance} disabled={!homeworkAddon || !homeworkConfigured} onChange={()=>setHomeworkAllowance(tier.allowance)}/></span>
+                </label>)}
+                {!homeworkConfigured && <p className="mt-2 text-sm text-neutral-500">{copy.notConfigured}</p>}
+              </section>
+
               <div className="mt-6 rounded-sf-lg bg-neutral-50 p-5">
                 <div className="flex justify-between font-semibold text-navy-900">
                   <span>{copy.totalLabel}</span>
@@ -228,7 +261,7 @@ export default function BillingPage() {
                 className="mt-3 w-full"
                 disabled={selectedSubjectIds.length === 0}
                 onClick={() => {
-                  const params = new URLSearchParams({ kind: "subscription", subjectIds: selectedSubjectIds.join(",") });
+                  const params = new URLSearchParams({ kind: "subscription", subjectIds: selectedSubjectIds.join(","), homeworkAddon: String(homeworkAddon), homeworkAddonAllowance: String(homeworkAllowance) });
                   router.push(`/${locale}/billing/instapay?${params.toString()}`);
                 }}
               >

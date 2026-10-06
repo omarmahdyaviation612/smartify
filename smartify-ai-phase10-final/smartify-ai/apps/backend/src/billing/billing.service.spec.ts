@@ -36,18 +36,28 @@ describe("BillingService", () => {
   });
 
   function makePrismaMock(
-    overrides: Partial<{ subjects: any[]; subscriptionUpsert: jest.Mock; subscriptionFindFirst: any; webhookEventLogCreate: jest.Mock }> = {},
+    overrides: Partial<{ subjects: any[]; subscriptionUpsert: jest.Mock; subscriptionFindFirst: any; subscriptionFindUnique: any; webhookEventLogCreate: jest.Mock; homeworkAddonPrice: number | null; homeworkAddonPrice10: number; homeworkAddonPrice20: number; subscriptionUpdateMany: jest.Mock }> = {},
   ) {
     const prisma = {
       client: {
         studentProfile: { findUnique: jest.fn().mockResolvedValue(studentProfile) },
         subject: { findMany: jest.fn().mockResolvedValue(overrides.subjects ?? []) },
         studentSubject: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        systemConfig: {
+          findUnique: jest.fn().mockImplementation(({ where: { key } }: any) => {
+            const value = key === "homework_addon_price_10_egp"
+              ? overrides.homeworkAddonPrice10 ?? overrides.homeworkAddonPrice
+              : key === "homework_addon_price_20_egp"
+                ? overrides.homeworkAddonPrice20 ?? overrides.homeworkAddonPrice
+                : null;
+            return Promise.resolve(value != null ? { value } : null);
+          }),
+        },
         subscription: {
           upsert: overrides.subscriptionUpsert ?? jest.fn().mockResolvedValue({ id: "sub-1" }),
           update: jest.fn().mockResolvedValue({}),
-          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-          findUnique: jest.fn(),
+          updateMany: overrides.subscriptionUpdateMany ?? jest.fn().mockResolvedValue({ count: 1 }),
+          findUnique: jest.fn().mockResolvedValue(overrides.subscriptionFindUnique ?? null),
           findFirst: jest.fn().mockResolvedValue(overrides.subscriptionFindFirst ?? { id: "sub-1", studentId: "student-1", externalSubscriptionId: "sess_1", selectedSubjectIds: null }),
         },
         webhookEventLog: {
@@ -62,7 +72,10 @@ describe("BillingService", () => {
   function makeProviderFactoryMock() {
     return {
       getActiveProvider: jest.fn().mockResolvedValue({
-        provider: { createCheckoutSession: jest.fn().mockResolvedValue({ checkoutUrl: "https://example.test/checkout", externalSessionId: "sess_1" }) },
+        provider: {
+          createCheckoutSession: jest.fn().mockResolvedValue({ checkoutUrl: "https://example.test/checkout", externalSessionId: "sess_1" }),
+          createSubscriptionUpgrade: jest.fn().mockResolvedValue({ checkoutUrl: "https://example.test/upgrade", externalSessionId: "sess_upgrade" }),
+        },
         providerKey: "stripe",
       }),
       getProviderByKey: jest.fn(),
@@ -117,6 +130,78 @@ describe("BillingService", () => {
     expect(subscriptionUpsert.mock.calls[0][0].create.monthlyTotalEGP).toBe(150);
   });
 
+  describe("Homework Helper add-on checkout", () => {
+    it("adds only the server-configured monthly add-on to the total and keeps access pending until payment activation", async () => {
+      const subscriptionUpsert = jest.fn().mockResolvedValue({ id: "sub-1" });
+      const prisma = makePrismaMock({
+        subjects: [{ id: "math", nameEn: "Math", priceEGP: 150 }],
+        subscriptionUpsert,
+        homeworkAddonPrice: 80,
+      });
+      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
+
+      await service.startCheckout("user-1", { subjectIds: ["math"], homeworkAddon: true } as any);
+
+      expect(subscriptionUpsert.mock.calls[0][0].create.monthlyTotalEGP).toBe(230);
+      expect(subscriptionUpsert.mock.calls[0][0].create.homeworkAddonActive).toBe(false);
+      expect(subscriptionUpsert.mock.calls[0][0].create.homeworkAddonPendingActive).toBe(true);
+      expect(subscriptionUpsert.mock.calls[0][0].create.homeworkAddonPendingAmountEGP).toBe(80);
+      expect(subscriptionUpsert.mock.calls[0][0].create.homeworkAddonPendingAllowance).toBe(10);
+    });
+
+    it("charges the 250 EGP tier for 20 monthly exercises and snapshots that allowance", async () => {
+      const subscriptionUpsert = jest.fn().mockResolvedValue({ id: "sub-1" });
+      const prisma = makePrismaMock({ subjects: [{ id: "math", nameEn: "Math", priceEGP: 150 }], subscriptionUpsert, homeworkAddonPrice10: 150, homeworkAddonPrice20: 250 });
+      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
+
+      await service.startCheckout("user-1", { subjectIds: ["math"], homeworkAddon: true, homeworkAddonAllowance: 20 });
+
+      expect(subscriptionUpsert.mock.calls[0][0].create.homeworkAddonPendingAllowance).toBe(20);
+      expect(subscriptionUpsert.mock.calls[0][0].create.homeworkAddonPendingAmountEGP).toBe(250);
+      expect(subscriptionUpsert.mock.calls[0][0].create.monthlyTotalEGP).toBe(400);
+    });
+
+    it("fails closed when the add-on price is not configured", async () => {
+      const prisma = makePrismaMock({
+        subjects: [{ id: "math", nameEn: "Math", priceEGP: 150 }],
+        homeworkAddonPrice: null,
+      });
+      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
+
+      await expect(service.startCheckout("user-1", { subjectIds: ["math"], homeworkAddon: true } as any)).rejects.toThrow(/not yet available/);
+    });
+
+    it("keeps an active add-on disabled while a paid upgrade is pending", async () => {
+      const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+      const prisma = makePrismaMock({ subjects: [{ id: "math", nameEn: "Math", priceEGP: 150 }], homeworkAddonPrice: 80,
+        subscriptionUpdateMany: updateMany,
+        subscriptionFindUnique: { id: "sub-1", studentId: "student-1", status: "active", selectedSubjectIds: ["math"], monthlyTotalEGP: 150,
+          homeworkAddonActive: false, pendingSubjectChange: null, paymentProvider: "stripe", externalProviderSubscriptionId: "sub_stripe" } });
+      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
+
+      await service.startCheckout("user-1", { subjectIds: ["math"], homeworkAddon: true });
+
+      expect(updateMany.mock.calls[0][0].data).toMatchObject({ homeworkAddonPendingActive: true, homeworkAddonPendingAmountEGP: 80,
+        pendingSubjectChange: { homeworkAddonActive: true, monthlyTotalEGP: 230 } });
+      expect(prisma.client.subscription.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ pendingSubjectChange: expect.objectContaining({ homeworkAddonActive: true, checkoutUrl: "https://example.test/upgrade" }) }),
+      }));
+    });
+
+    it("activates the add-on and its price snapshot only from a verified activation event", async () => {
+      const prisma = makePrismaMock({ subscriptionFindFirst: { id: "sub-1", studentId: "student-1", status: "pending", selectedSubjectIds: ["math"],
+        paymentProvider: "stripe", externalSubscriptionId: "sess_1", homeworkAddonPendingActive: true, homeworkAddonPendingAmountEGP: 80, homeworkAddonPendingAllowance: 20 } });
+      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
+
+      await service.applyWebhookEvent("stripe", { type: "subscription.activated", externalSubscriptionId: "sess_1", externalEventId: "evt_1" });
+
+      expect(prisma.client.subscription.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+        status: "active", homeworkAddonActive: true, homeworkAddonMonthlyAmountEGP: 80, homeworkAddonMonthlyAllowance: 20,
+        homeworkAddonPendingActive: null, homeworkAddonPendingAmountEGP: null, homeworkAddonPendingAllowance: null,
+      }) }));
+    });
+  });
+
   describe("cancelSubscription", () => {
     function makeCancelPrisma(subscription: any) {
       const prisma = makePrismaMock();
@@ -134,7 +219,15 @@ describe("BillingService", () => {
       expect(providerFactory.getProviderByKey).not.toHaveBeenCalled();
       expect(prisma.client.subscription.update).toHaveBeenCalledWith({
         where: { id: "sub-1" },
-        data: { status: "canceled" },
+        data: {
+          status: "canceled",
+          homeworkAddonActive: false,
+          homeworkAddonMonthlyAmountEGP: null,
+          homeworkAddonMonthlyAllowance: null,
+          homeworkAddonPendingActive: null,
+          homeworkAddonPendingAmountEGP: null,
+          homeworkAddonPendingAllowance: null,
+        },
         include: { pricingPlan: true },
       });
     });

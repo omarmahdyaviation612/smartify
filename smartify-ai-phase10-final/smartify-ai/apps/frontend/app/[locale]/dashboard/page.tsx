@@ -222,6 +222,10 @@ export default function DashboardPage() {
           ) : (
             <ComingSoonCard title={copy.sections.aiTutor.title} body={copy.sections.aiTutor.body} badgeLabel={copy.comingSoon} />
           )}
+          <Link href={`/${locale}/homework`} className="rounded-sf-lg border border-ai-200 bg-white p-6 transition-colors hover:border-ai-500">
+            <h2 className="font-semibold text-navy-900">{isAr ? "مساعد حل الواجب" : "Homework Helper"}</h2>
+            <p className="mt-1 text-sm text-neutral-600">{isAr ? "حلّ واجبك خطوة بخطوة من منهجك" : "Work through homework step by step from your curriculum"}</p>
+          </Link>
           {/* Lessons — real, every Topic for the student's selected subjects (title-only ones generate on first open) + this student's own LessonSession status */}
           <div className="rounded-sf-lg border border-neutral-200 bg-white p-6 lg:col-span-2">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">

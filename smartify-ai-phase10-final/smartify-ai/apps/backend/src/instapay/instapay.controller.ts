@@ -20,7 +20,7 @@ export class InstapayController {
   }
 
   @Post("subscription/initiate")
-  initiateSubscription(@CurrentUser() user: any, @Body() body: { subjectIds: string[] }) {
+  initiateSubscription(@CurrentUser() user: any, @Body() body: { subjectIds: string[]; homeworkAddon?: boolean; homeworkAddonAllowance?: number }) {
     return this.service.initiateSubscription(user.id, body);
   }
 

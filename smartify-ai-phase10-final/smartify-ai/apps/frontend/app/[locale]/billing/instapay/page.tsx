@@ -31,6 +31,8 @@ export default function InstapayCheckoutPage() {
 
   const kind = searchParams.get("kind") === "pack" ? "pack" : "subscription";
   const subjectIdsParam = searchParams.get("subjectIds");
+  const homeworkAddon = searchParams.get("homeworkAddon") === "true";
+  const homeworkAddonAllowance = Number(searchParams.get("homeworkAddonAllowance")) || undefined;
   const subjectId = searchParams.get("subjectId") ?? "";
 
   const [loading, setLoading] = useState(true);
@@ -50,7 +52,7 @@ export default function InstapayCheckoutPage() {
         const body =
           kind === "pack"
             ? { subjectId }
-            : { subjectIds: subjectIdsParam ? subjectIdsParam.split(",").filter(Boolean) : [] };
+            : { subjectIds: subjectIdsParam ? subjectIdsParam.split(",").filter(Boolean) : [], homeworkAddon, ...(homeworkAddon ? { homeworkAddonAllowance } : {}) };
         const path = kind === "pack" ? "/instapay/question-pack/initiate" : "/instapay/subscription/initiate";
         const result = await apiFetch<InitiateResult>(path, { method: "POST", body: JSON.stringify(body) });
         setInitiated(result);
