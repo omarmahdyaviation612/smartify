@@ -221,7 +221,11 @@ async function main() {
 
     const result = await applyPlan(db, plan);
     const stamp = result.appliedAt.replace(/[:.]/g, "-");
-    const outDir = path.resolve(__dirname, "../../../../../docs");
+    // Compiled __dirname is <project>/apps/backend/dist/scripts, so the
+    // project's docs/ is exactly four levels up. (The original five-level
+    // literal resolved to smartify-ai-phase10-final/docs — outside the package
+    // — and aborted AFTER the transaction had already committed.)
+    const outDir = path.resolve(__dirname, "../../../../docs");
     fs.writeFileSync(path.join(outDir, `shared-subjects-apply-report-${stamp}.json`), `${JSON.stringify({ result, plan }, null, 2)}\n`);
     fs.writeFileSync(path.join(outDir, `shared-subjects-reverse-map-${stamp}.json`), `${JSON.stringify(reverseMapFor(plan), null, 2)}\n`);
     process.stdout.write(`\nAPPLIED ${JSON.stringify(result)}\n`);

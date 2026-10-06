@@ -1,0 +1,73 @@
+{
+  "result": {
+    "offeringsCreated": 0,
+    "offeringsDeactivated": 0,
+    "subjectsDeactivated": 0,
+    "entitlementsRepointed": 0,
+    "entitlementsDeduplicated": 0,
+    "appliedAt": "2026-10-06T14:45:09.774Z"
+  },
+  "plan": {
+    "links": [],
+    "withdrawals": [],
+    "blocked": [],
+    "entitlementRepoints": [],
+    "notes": [
+      {
+        "code": "NO_REFERENCE_SUBJECT",
+        "curriculumCode": "BRITISH_INTL",
+        "level": 7
+      },
+      {
+        "code": "NO_REFERENCE_SUBJECT",
+        "curriculumCode": "BRITISH_INTL",
+        "level": 7
+      },
+      {
+        "code": "NO_REFERENCE_SUBJECT",
+        "curriculumCode": "BRITISH_INTL",
+        "level": 1
+      },
+      {
+        "code": "NO_REFERENCE_SUBJECT",
+        "curriculumCode": "BRITISH_INTL",
+        "level": 2
+      },
+      {
+        "code": "NO_REFERENCE_SUBJECT",
+        "curriculumCode": "BRITISH_INTL",
+        "level": 3
+      },
+      {
+        "code": "NO_REFERENCE_SUBJECT",
+        "curriculumCode": "BRITISH_INTL",
+        "level": 1
+      },
+      {
+        "code": "NO_REFERENCE_SUBJECT",
+        "curriculumCode": "BRITISH_INTL",
+        "level": 3
+      },
+      {
+        "code": "NO_REFERENCE_SUBJECT",
+        "curriculumCode": "AMERICAN_INTL",
+        "level": 7
+      },
+      {
+        "code": "NO_REFERENCE_SUBJECT",
+        "curriculumCode": "AMERICAN_INTL",
+        "level": 7
+      },
+      {
+        "code": "NO_REFERENCE_SUBJECT",
+        "curriculumCode": "LOCAL",
+        "level": 7
+      },
+      {
+        "code": "NO_REFERENCE_SUBJECT",
+        "curriculumCode": "LOCAL",
+        "level": 7
+      }
+    ]
+  }
+}
