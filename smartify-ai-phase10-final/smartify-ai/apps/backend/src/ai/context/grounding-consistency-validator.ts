@@ -30,7 +30,74 @@ function significantWords(phrase: string): string[] {
     .filter((w) => w.length > 2 && !STOPWORDS.has(w));
 }
 
-export function checkGroundingConsistency(generatedTexts: string[], groundingSlice: GroundingSlice): string[] {
+/**
+ * 2026-10-03 (Wave B "Decimals to the Thousandths"): a correct lesson that
+ * says "decimal" was rejected against the anchor "decimals" — the substring
+ * check already accepts a plural in the text for a singular anchor, but not
+ * the reverse. This returns the regular English SINGULAR of a plural anchor
+ * word ("decimals" -> "decimal", "properties" -> "property", "matches" ->
+ * "match"), or null. Deliberately narrow: ASCII-letter words of 5+ characters
+ * only (Arabic and every other script untouched), regular plural endings only,
+ * no fuzzy/semantic matching. The variant is matched as a WHOLE word, so a
+ * short stem can never hit inside an unrelated longer word.
+ */
+export function singularVariant(word: string): string | null {
+  if (!/^[a-z]{5,}$/.test(word)) return null;
+  if (word.endsWith("ies")) return `${word.slice(0, -3)}y`;
+  if (/(ches|shes|sses|xes|zes)$/.test(word)) return word.slice(0, -2);
+  if (/(ss|us|is)$/.test(word)) return null;
+  if (word.endsWith("s")) return word.slice(0, -1);
+  return null;
+}
+
+/**
+ * 2026-10-03 (Wave B word-problem pools): an operation noun anchor's verb
+ * family, so a correct explanation saying "subtract 12 from 50" references the
+ * anchor "subtraction". General English noun->verb morphology only — no
+ * curriculum dictionary — for ASCII words of 6+ letters:
+ *   -ication -> -y      multiplication -> multiply (also classify, simplify)
+ *   -ision   -> -ide    division -> divide (also decide, collide)
+ *   -ction   -> -ct     subtraction -> subtract (also construct, collect)
+ *   -ition   -> (drop)  addition -> add — ONLY when the stem ends in a doubled
+ *                       consonant; most -ition nouns are irregular
+ *                       (partition/part, petition/pet must never match)
+ * plus the verb's regular -s/-ed/-ing forms. Every form is matched as a WHOLE
+ * word only, so "individual", "subdivision", "multiple(s)" and "additional"
+ * never match through this path.
+ */
+export function verbFamily(word: string): string[] {
+  if (!/^[a-z]{6,}$/.test(word)) return [];
+  let verb: string | null = null;
+  if (word.endsWith("ication")) verb = `${word.slice(0, -7)}y`;
+  else if (word.endsWith("ision")) verb = `${word.slice(0, -5)}ide`;
+  else if (word.endsWith("ction")) verb = word.slice(0, -3);
+  else if (word.endsWith("ition") && /([b-df-hj-np-tv-z])\1$/.test(word.slice(0, -5))) verb = word.slice(0, -5);
+  if (!verb || verb.length < 3) return [];
+  if (/[^aeiou]y$/.test(verb)) return [verb, `${verb.slice(0, -1)}ies`, `${verb.slice(0, -1)}ied`, `${verb}ing`];
+  if (verb.endsWith("e")) return [verb, `${verb}s`, `${verb}d`, `${verb.slice(0, -1)}ing`];
+  return [verb, `${verb}s`, `${verb}ed`, `${verb}ing`];
+}
+
+const wholeWord = (text: string, form: string) => new RegExp(`(^|[^a-z])${form}([^a-z]|$)`).test(text);
+
+function referencesAnchor(generatedText: string, word: string, wordForms: boolean): boolean {
+  if (generatedText.includes(word)) return true;
+  const singular = singularVariant(word);
+  if (singular && wholeWord(generatedText, singular)) return true;
+  return wordForms && verbFamily(word).some((form) => wholeWord(generatedText, form));
+}
+
+/**
+ * `wordForms` (opt-in, 2026-10-03): also accept an anchor's verb family
+ * (verbFamily above). Only the admin Question-authoring paths pass it; lesson
+ * validation and the student lazy top-up keep the behavior they had before.
+ */
+/** The anchor words the drift check accepts for a slice (concept names + vocabulary terms). */
+export function groundingAnchorWords(groundingSlice: Pick<GroundingSlice, "concepts" | "vocabulary">): string[] {
+  return [...groundingSlice.concepts.map((c) => c.name), ...groundingSlice.vocabulary.map((v) => v.term)].flatMap(significantWords);
+}
+
+export function checkGroundingConsistency(generatedTexts: string[], groundingSlice: GroundingSlice, opts: { wordForms?: boolean } = {}): string[] {
   const errors: string[] = [];
   const generatedText = generatedTexts.join(" \n ").toLowerCase();
 
@@ -43,8 +110,8 @@ export function checkGroundingConsistency(generatedTexts: string[], groundingSli
     }
   }
 
-  const groundingWords = [...groundingSlice.concepts.map((c) => c.name), ...groundingSlice.vocabulary.map((v) => v.term)].flatMap(significantWords);
-  if (groundingWords.length > 0 && !groundingWords.some((w) => generatedText.includes(w))) {
+  const groundingWords = groundingAnchorWords(groundingSlice);
+  if (groundingWords.length > 0 && !groundingWords.some((w) => referencesAnchor(generatedText, w, !!opts.wordForms))) {
     errors.push("Generated content does not reference any concept or term from the supplied grounding — it may have drifted from the intended curriculum scope.");
   }
 

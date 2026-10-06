@@ -17,7 +17,13 @@ export function gradeOfferingWhere(gradeId: string, subjectIds?: string[]) {
   return {
     gradeId,
     isActive: true,
-    subject: { isActive: true },
+    // Publication gate (merged from main 2026-10-06): a subject is only
+    // available through a grade that is itself active, under an active
+    // curriculum — and the subject row must be active too. Expressed through
+    // relations rather than an extra parameter, so every existing call site
+    // (which has no curriculumId to hand) keeps working unchanged.
+    subject: { isActive: true, grade: { isActive: true, curriculum: { isActive: true } } },
+    grade: { isActive: true, curriculum: { isActive: true } },
     ...(subjectIds !== undefined ? { subjectId: { in: subjectIds } } : {}),
   };
 }

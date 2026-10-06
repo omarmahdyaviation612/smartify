@@ -5,7 +5,8 @@ import { QuestionDraftGeneratorService } from "../question-bank/question-draft-g
 import { Difficulty } from "@smartify/shared-types";
 import { pickDifficultyWeights } from "./difficulty-weights";
 import { TrialService } from "../trial/trial.service";
-import { hasSubjectEntitlementInList } from "../common/subject-entitlement.util";
+import { AccessProfile, resolveSubjectAccess } from "../common/subject-access";
+import { questionServabilityByTopic, QUESTION_PROVENANCE_SELECT, TOPIC_GATE_INCLUDE, UNIT_GATE_SELECT } from "../ai/context/topic-content-provenance.util";
 
 @Injectable()
 export class PracticeService {
@@ -24,14 +25,10 @@ export class PracticeService {
   private async getProfileOrThrow(userId: string) {
     const profile = await this.prisma.client.studentProfile.findUnique({
       where: { userId },
-      include: { subjects: true },
+      include: { subjects: true, user: { select: { role: true, isTestStudent: true } } },
     });
     if (!profile) throw new NotFoundException("Complete onboarding before practicing.");
     return profile;
-  }
-
-  private hasOwnedAccess(profile: { subjects: Array<{ subjectId: string; expiresAt?: Date | null }> }, subjectId: string): boolean {
-    return hasSubjectEntitlementInList(profile.subjects, subjectId);
   }
 
   /**
@@ -43,11 +40,11 @@ export class PracticeService {
    * student can pick which Topic to try).
    */
   private async assertSubjectAccessible(
-    profile: { id: string; subjects: Array<{ subjectId: string; expiresAt?: Date | null }> },
+    profile: AccessProfile,
     subjectId: string,
     opts: { topicId?: string; browseOnly?: boolean } = {},
   ) {
-    if (this.hasOwnedAccess(profile, subjectId)) return;
+    if ((await resolveSubjectAccess(this.prisma, profile, subjectId)).active) return;
     if (opts.browseOnly && (await this.trialService.isSubjectTrialBrowsable(profile.id, subjectId))) return;
     if (opts.topicId && (await this.trialService.isTopicTrialAccessible(profile.id, subjectId, opts.topicId))) return;
     throw new ForbiddenException("This subject is not part of your selected subjects.");
@@ -86,7 +83,7 @@ export class PracticeService {
     await this.assertSubjectAccessible(profile, subjectId, { topicId });
 
     const topicWhere = topicId ? { id: topicId, unit: { subjectId } } : { unit: { subjectId } };
-    const topics = await this.prisma.client.topic.findMany({ where: topicWhere });
+    const topics = await this.prisma.client.topic.findMany({ where: topicWhere, include: { ...TOPIC_GATE_INCLUDE, unit: { select: UNIT_GATE_SELECT } } });
     if (topics.length === 0) throw new BadRequestException("No topics found for this selection.");
 
     // Launch-speed lazy-generation path (2026-09-19): only for a single
@@ -110,7 +107,7 @@ export class PracticeService {
     // rationale as the diagnostic's own filter (Phase 10D.1) and Quiz's
     // (this phase) — seed/demo placeholder content must never reach a real
     // student assessment flow.
-    const allQuestions = await this.prisma.client.question.findMany({
+    const candidateQuestions = await this.prisma.client.question.findMany({
       where: { topicId: { in: topicIds }, isPlaceholder: false },
       select: {
         id: true,
@@ -121,8 +118,16 @@ export class PracticeService {
         promptAr: true,
         optionsJson: true,
         isPlaceholder: true,
+        ...QUESTION_PROVENANCE_SELECT,
       },
     });
+    // 2026-10-03 Wave B runtime safety: only Questions whose Topic is
+    // READY_CURRENT_NON_EMPTY and whose provenance is servable are ever
+    // returned — a BLOCKED Topic yields an empty pool (the existing "nothing
+    // to practice yet" response), never its old Questions; a Topic with any
+    // CURRENT Question never mixes in its LEGACY ones.
+    const isServable = questionServabilityByTopic(topics as any, candidateQuestions);
+    const allQuestions = candidateQuestions.filter(isServable).map(({ groundingSourceFingerprint: _s, groundingAssignmentFingerprint: _a, retiredAt: _r, ...q }) => q);
 
     // Weighted random sample without replacement, honoring difficulty weights loosely.
     const byDifficulty: Record<string, typeof allQuestions> = { EASY: [], MEDIUM: [], HARD: [] };
@@ -159,10 +164,22 @@ export class PracticeService {
     // has no subjectId in its request shape at all). Selected in the same
     // findMany that already loads the questions, so this stays one query,
     // not one-per-question.
-    const questions = await this.prisma.client.question.findMany({
+    const loaded = await this.prisma.client.question.findMany({
       where: { id: { in: answers.map((a) => a.questionId) } },
-      include: { topic: { select: { unit: { select: { subjectId: true } } } } },
+      include: { topic: { select: { id: true, ...TOPIC_GATE_INCLUDE, unit: { select: { subjectId: true, ...UNIT_GATE_SELECT } } } } },
     });
+    // A Question that could never have been served (its Topic is not
+    // READY_CURRENT_NON_EMPTY, or its provenance is not servable) is treated
+    // exactly like an unresolved questionId: skipped, never graded, and its
+    // correct answer/explanation never returned.
+    // Topic-level precedence needs each Topic's FULL stored pool, not just
+    // the submitted ids (topic-content-provenance.util.ts).
+    const submittedTopicIds = [...new Set(loaded.map((q) => q.topicId))];
+    const topicPool = submittedTopicIds.length
+      ? await this.prisma.client.question.findMany({ where: { topicId: { in: submittedTopicIds }, isPlaceholder: false }, select: { topicId: true, isPlaceholder: true, ...QUESTION_PROVENANCE_SELECT } })
+      : [];
+    const isServable = questionServabilityByTopic(loaded.map((q) => q.topic) as any, topicPool);
+    const questions = loaded.filter(isServable);
     const questionById = new Map(questions.map((q) => [q.id, q]));
 
     // Scope validation BEFORE any write. A student may legitimately submit
@@ -176,7 +193,7 @@ export class PracticeService {
       const q = questionById.get(a.questionId);
       if (!q) continue;
       const subjectId = q.topic.unit.subjectId;
-      if (this.hasOwnedAccess(profile, subjectId)) continue;
+      if ((await resolveSubjectAccess(this.prisma, profile, subjectId)).active) continue;
       if (await this.trialService.isTopicTrialAccessible(profile.id, subjectId, q.topicId)) continue;
       throw new ForbiddenException("One or more submitted questions are not part of your selected subjects.");
     }

@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
+import type { Prisma, QuestionDraft } from "@smartify/database";
 import { validateQuestionDraft } from "./question-draft-validator";
 
 export interface QuestionPublishResult {
@@ -131,6 +132,10 @@ export class QuestionPublishService {
           explanationAr: draft.explanationAr,
           isAiGenerated: draft.isAiGenerated,
           isPlaceholder: false,
+          // 2026-10-03 downstream provenance: copied verbatim from the draft
+          // (null on a draft generated without a READY grounding gate = LEGACY).
+          groundingSourceFingerprint: draft.groundingSourceFingerprint ?? null,
+          groundingAssignmentFingerprint: draft.groundingAssignmentFingerprint ?? null,
         },
       });
 
@@ -176,32 +181,44 @@ export class QuestionPublishService {
       throw new BadRequestException(`Draft failed validation: ${validation.errors.join("; ")}`);
     }
 
-    const result = await this.prisma.client.$transaction(async (tx) => {
-      const question = await tx.question.create({
-        data: {
-          topicId: draft.topicId,
-          type: draft.type,
-          difficulty: draft.difficulty,
-          promptEn: draft.promptEn,
-          promptAr: draft.promptAr,
-          optionsJson: draft.optionsJson as any,
-          correctAnswerJson: draft.correctAnswerJson as any,
-          explanationEn: draft.explanationEn,
-          explanationAr: draft.explanationAr,
-          isAiGenerated: true,
-          needsReview: true, // AI-authored bilingual content, never human-reviewed — see this method's doc comment
-          isPlaceholder: false,
-        },
-      });
-
-      await tx.questionDraft.update({
-        where: { id: draft.id },
-        data: { status: "published", publishedQuestionId: question.id, publishedAt: new Date() },
-      });
-
-      return question;
-    });
+    const result = await this.prisma.client.$transaction(async (tx) => installAutoQuestionDraft(tx, draft));
 
     return { questionId: result.id, alreadyPublished: false };
   }
+}
+
+/**
+ * The in-transaction publish of one already-validated auto-generated
+ * QuestionDraft — extracted verbatim from autoPublish (2026-10-03) so the
+ * staged atomic assignment repair can publish its staged drafts inside the
+ * same transaction as the assignment compare-and-set.
+ */
+export async function installAutoQuestionDraft(tx: Prisma.TransactionClient, draft: QuestionDraft) {
+  const question = await tx.question.create({
+    data: {
+      topicId: draft.topicId,
+      type: draft.type,
+      difficulty: draft.difficulty,
+      promptEn: draft.promptEn,
+      promptAr: draft.promptAr,
+      optionsJson: draft.optionsJson as any,
+      correctAnswerJson: draft.correctAnswerJson as any,
+      explanationEn: draft.explanationEn,
+      explanationAr: draft.explanationAr,
+      isAiGenerated: true,
+      needsReview: true, // AI-authored bilingual content, never human-reviewed — see autoPublish's doc comment
+      isPlaceholder: false,
+      // 2026-10-03 downstream provenance: copied verbatim from the draft
+      // (null on a draft generated without a READY grounding gate = LEGACY).
+      groundingSourceFingerprint: draft.groundingSourceFingerprint ?? null,
+      groundingAssignmentFingerprint: draft.groundingAssignmentFingerprint ?? null,
+    },
+  });
+
+  await tx.questionDraft.update({
+    where: { id: draft.id },
+    data: { status: "published", publishedQuestionId: question.id, publishedAt: new Date() },
+  });
+
+  return question;
 }

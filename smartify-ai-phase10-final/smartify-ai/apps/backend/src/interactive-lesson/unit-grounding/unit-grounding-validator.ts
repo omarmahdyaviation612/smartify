@@ -1,4 +1,4 @@
-import type { GroundingNotes } from "./unit-grounding.types";
+import type { RawGroundingNotes } from "./unit-grounding.types";
 
 /**
  * Structural validation for the offline grounding-extraction model's
@@ -16,7 +16,7 @@ const MAX_ITEM_TEXT_LENGTH = 400; // a "not verbatim-copied" guard — a genuine
 
 export interface GroundingValidationResult {
   valid: boolean;
-  notes?: GroundingNotes;
+  notes?: RawGroundingNotes;
   errors: string[];
 }
 
@@ -24,14 +24,41 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((v) => typeof v === "string");
 }
 
-function isPageArray(value: unknown, requestedPageRange: { start: number; end: number }): value is number[] {
-  if (!Array.isArray(value)) return false;
-  return value.every((v) => typeof v === "number" && Number.isInteger(v) && v >= requestedPageRange.start && v <= requestedPageRange.end);
+// Page-provenance hotfix (2026-09-25): the model is never validated
+// against an absolute page number — see unit-grounding.types.ts's
+// RawGroundingNotes doc comment for why. `imageCount` is the exact
+// number of images actually sent for this chunk; a valid
+// sourceImageIndex is a non-empty array of 1-based integers, each
+// referring to one of those images. Deliberately strict — 0, negatives,
+// non-integers, out-of-range, and empty arrays are all rejected outright,
+// never clamped or coerced, matching this validator's existing
+// "prefer extraction failed over storing bad data" philosophy.
+function isImageIndexArray(value: unknown, imageCount: number): value is number[] {
+  if (!Array.isArray(value) || value.length === 0) return false;
+  return value.every((v) => typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= imageCount);
+}
+
+/**
+ * The model may report the subject in the book's own language. A reported
+ * subject is accepted only for THIS Subject's stored identity: the existing
+ * English rule (case-insensitive substring of the English name's first word),
+ * or an exact whitespace-normalized match of the stored Arabic name. The only
+ * Arabic alias is a single leading definite article "ال" on either side
+ * (observed: stored "الرياضيات", reported "رياضيات"). No fuzzy matching, no
+ * translation; a missing nameAr keeps English-only behavior.
+ */
+export function subjectMatchesExpected(reported: string, subjectNameEn: string, subjectNameAr?: string | null): boolean {
+  if (reported.toLowerCase().includes(subjectNameEn.toLowerCase().split(" ")[0])) return true;
+  if (!subjectNameAr || !subjectNameAr.trim()) return false;
+  const norm = (s: string) => s.trim().replace(/\s+/g, " ");
+  const withoutArticle = (s: string) => (s.startsWith("ال") ? s.slice(2) : s);
+  const r = norm(reported), a = norm(subjectNameAr);
+  return r === a || (withoutArticle(r) === withoutArticle(a) && withoutArticle(a).length > 0);
 }
 
 export function validateGroundingNotes(
   raw: unknown,
-  expected: { unitNameEn: string; subjectNameEn: string; requestedPageRange: { start: number; end: number } },
+  expected: { unitNameEn: string; subjectNameEn: string; subjectNameAr?: string | null; imageCount: number },
 ): GroundingValidationResult {
   const errors: string[] = [];
 
@@ -47,7 +74,7 @@ export function validateGroundingNotes(
   // this validator.
   if (typeof obj.subject !== "string" || !obj.subject.trim()) {
     errors.push("Missing subject.");
-  } else if (!obj.subject.toLowerCase().includes(expected.subjectNameEn.toLowerCase().split(" ")[0])) {
+  } else if (!subjectMatchesExpected(obj.subject, expected.subjectNameEn, expected.subjectNameAr)) {
     errors.push(`subject "${obj.subject}" does not appear to match expected subject "${expected.subjectNameEn}" — possible unrelated-subject leakage.`);
   }
 
@@ -75,9 +102,9 @@ export function validateGroundingNotes(
         errors.push(`${fieldName}[${index}] is implausibly long (${text.length} chars) — possible verbatim textbook copying, rejected.`);
       }
       if (requirePages && item && typeof item === "object") {
-        const pages = (item as Record<string, unknown>).sourcePages;
-        if (!isPageArray(pages, expected.requestedPageRange)) {
-          errors.push(`${fieldName}[${index}].sourcePages is missing or contains a page outside the requested range ${expected.requestedPageRange.start}-${expected.requestedPageRange.end}.`);
+        const sourceImageIndex = (item as Record<string, unknown>).sourceImageIndex;
+        if (!isImageIndexArray(sourceImageIndex, expected.imageCount)) {
+          errors.push(`${fieldName}[${index}].sourceImageIndex is missing, empty, or references an image outside the sent range 1-${expected.imageCount}.`);
         }
       }
     });
@@ -131,11 +158,11 @@ export function validateGroundingNotes(
       gradeLevel: typeof obj.gradeLevel === "string" ? obj.gradeLevel : "",
       subject: obj.subject as string,
       learningObjectives: obj.learningObjectives as string[],
-      concepts: obj.concepts as GroundingNotes["concepts"],
-      facts: (obj.facts ?? []) as GroundingNotes["facts"],
-      vocabulary: (obj.vocabulary ?? []) as GroundingNotes["vocabulary"],
+      concepts: obj.concepts as RawGroundingNotes["concepts"],
+      facts: (obj.facts ?? []) as RawGroundingNotes["facts"],
+      vocabulary: (obj.vocabulary ?? []) as RawGroundingNotes["vocabulary"],
       skills: (obj.skills ?? []) as string[],
-      topicHints: (obj.topicHints ?? []) as GroundingNotes["topicHints"],
+      topicHints: (obj.topicHints ?? []) as RawGroundingNotes["topicHints"],
       scopeNotes: (obj.scopeNotes ?? []) as string[],
     },
   };

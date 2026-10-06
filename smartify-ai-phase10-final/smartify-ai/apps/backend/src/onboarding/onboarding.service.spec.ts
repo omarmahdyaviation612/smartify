@@ -1,4 +1,5 @@
 import { BadRequestException } from "@nestjs/common";
+import { withReadyGate } from "../ai/context/topic-content-gate.fixtures.testspec";
 import { studentOnboardingSchema } from "@smartify/validation";
 import { OnboardingService } from "./onboarding.service";
 
@@ -104,6 +105,77 @@ describe("OnboardingService", () => {
       expect(prisma.client.studentSubject.createMany).toHaveBeenCalledWith({
         data: [{ studentId: "student-1", subjectId: sharedArabic.id }],
       });
+    });
+  });
+
+  /**
+   * Student school info V1 (2026-09-25): governorate/area are passed
+   * through as-is (no cross-entity check needed — they're plain scalars),
+   * but schoolId is re-verified server-side against the real School table
+   * rather than trusted from the client, matching the same
+   * never-trust-the-frontend pattern as curriculum/grade/subject above.
+   */
+  describe("saveProfile — school info", () => {
+    const activeSchool = { id: "school-1", governorate: "CAIRO", isActive: true };
+
+    it("persists governorate and area as submitted", async () => {
+      const prisma = makePrismaMock();
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
+
+      await service.saveProfile("user-1", { ...baseInput, governorate: "CAIRO" as any, area: "Nasr City" });
+
+      const upsertArgs = prisma.client.studentProfile.upsert.mock.calls[0][0];
+      expect(upsertArgs.create.governorate).toBe("CAIRO");
+      expect(upsertArgs.create.area).toBe("Nasr City");
+    });
+
+    it("persists a selected schoolId once the School is verified to exist and be active", async () => {
+      const prisma = makePrismaMock({ school: activeSchool });
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
+
+      await service.saveProfile("user-1", { ...baseInput, governorate: "CAIRO" as any, schoolId: "school-1" });
+
+      const upsertArgs = prisma.client.studentProfile.upsert.mock.calls[0][0];
+      expect(upsertArgs.create.schoolId).toBe("school-1");
+      expect(upsertArgs.create.schoolNameManual).toBeNull();
+    });
+
+    it("persists a manually-entered school name when no schoolId is given", async () => {
+      const prisma = makePrismaMock();
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
+
+      await service.saveProfile("user-1", { ...baseInput, schoolNameManual: "My Unlisted School" });
+
+      const upsertArgs = prisma.client.studentProfile.upsert.mock.calls[0][0];
+      expect(upsertArgs.create.schoolId).toBeNull();
+      expect(upsertArgs.create.schoolNameManual).toBe("My Unlisted School");
+    });
+
+    it("rejects a schoolId that does not exist in the School table", async () => {
+      const prisma = makePrismaMock({ school: null });
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
+
+      await expect(
+        service.saveProfile("user-1", { ...baseInput, schoolId: "does-not-exist" }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("rejects a schoolId that references an inactive School", async () => {
+      const prisma = makePrismaMock({ school: { ...activeSchool, isActive: false } });
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
+
+      await expect(
+        service.saveProfile("user-1", { ...baseInput, schoolId: "school-1" }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("rejects when the selected School's governorate doesn't match the submitted governorate", async () => {
+      const prisma = makePrismaMock({ school: { ...activeSchool, governorate: "GIZA" } });
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
+
+      await expect(
+        service.saveProfile("user-1", { ...baseInput, governorate: "CAIRO" as any, schoolId: "school-1" }),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -303,8 +375,9 @@ describe("OnboardingService", () => {
     function makeQuestion(id: string, subjectId: string, correctAnswer: string) {
       return {
         id,
+        topicId: `topic-${id}`,
         correctAnswerJson: correctAnswer,
-        topic: { unit: { subject: { id: subjectId, nameEn: `Subject ${subjectId}`, nameAr: "مادة" } } },
+        topic: withReadyGate({ id: `topic-${id}`, unit: { subject: { id: subjectId, nameEn: `Subject ${subjectId}`, nameAr: "مادة" } } }),
       };
     }
 

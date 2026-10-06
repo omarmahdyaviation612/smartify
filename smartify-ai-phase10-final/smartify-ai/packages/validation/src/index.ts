@@ -143,6 +143,10 @@ export const updateAISpendingControlsSchema = z
   .object({
     globalDailyBudgetUsd: z.number().positive().finite().optional(),
     perUserDailyBudgetUsd: z.number().positive().finite().optional(),
+    // Independent platform content-authoring circuit breaker (2026-09-25)
+    // — a separate cap from perUserDailyBudgetUsd, never reused. See
+    // AIUsageService.assertWithinBudget/reserveBudget.
+    platformContentAuthoringDailyBudgetUsd: z.number().positive().finite().optional(),
     dailyQuestionsPerSubject: z.number().int().positive().optional(),
   })
   .strict()

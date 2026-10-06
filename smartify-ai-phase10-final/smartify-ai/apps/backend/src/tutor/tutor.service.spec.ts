@@ -1,5 +1,7 @@
+import { subjectAccessFixture } from "../common/subject-access.fixtures.testspec";
 import { BadRequestException, ForbiddenException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { TutorService } from "./tutor.service";
+import { TOPIC_GROUNDING_ASSIGNMENT_VERSION } from "../ai/context/topic-grounding-assignment.util";
 
 /**
  * Covers the Phase 10 hardening added to the AI Tutor: input-length
@@ -94,7 +96,7 @@ describe("TutorService", () => {
       find: jest.fn().mockResolvedValue(null),
       save: jest.fn().mockResolvedValue(undefined),
     } as any;
-    return { service: new TutorService(prisma, providerFactory, contextBuilder, usageService, questionPacks, answerCache), prisma, contextBuilder, usageService, answerCache, releaseDailySlot, releaseBudget, questionPacks };
+    return { service: new TutorService(subjectAccessFixture(prisma), providerFactory, contextBuilder, usageService, questionPacks, answerCache), prisma, contextBuilder, usageService, answerCache, releaseDailySlot, releaseBudget, questionPacks };
   }
 
   it("rejects an empty message before reserving a slot or calling the provider", async () => {
@@ -336,14 +338,25 @@ describe("TutorService", () => {
     it("passes only the selected Topic's grounded curriculum slice to the Tutor prompt", async () => {
       const topic = {
         nameEn: "Subtraction within 10",
+        groundingAssignment: {
+          unitGroundingVersion: 1,
+          unitSourceFingerprint: "fp-1",
+          assignmentVersion: TOPIC_GROUNDING_ASSIGNMENT_VERSION,
+          status: "READY",
+          matchedConceptNames: ["Subtraction within 10"],
+          matchedHintTitles: ["Subtraction within 10"],
+        },
         unit: {
           subjectId: "subject-1",
+          groundingVersion: 1,
+          groundingSourceFingerprint: "fp-1",
           groundingNotesJson: {
             learningObjectives: ["Subtract within 10."],
             concepts: [{ name: "Subtraction within 10", description: "Take away.", sourcePages: [5], importance: "core" }],
             facts: [], vocabulary: [], skills: [], scopeNotes: [],
             topicHints: [{ topicTitle: "Subtraction within 10", relevantConcepts: ["Subtraction within 10"], sourcePages: [5] }],
           },
+          _count: { topics: 1 },
         },
       };
       const { service, contextBuilder } = makeService({ topic });

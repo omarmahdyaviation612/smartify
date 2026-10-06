@@ -8,11 +8,28 @@ import { QuestionPublishService } from "./question-publish.service";
 import { LessonDraftGeneratorService } from "../../interactive-lesson/lesson-draft-generator/lesson-draft-generator.service";
 import type { QuestionGenerationInput, ResolvedTopicContext } from "./question-draft.types";
 import type { GroundingNotes } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
-import { selectRelevantGrounding } from "../../ai/context/grounding-selector.util";
+import { evaluateTopicGroundingGate, isActiveCurrentQuestion, questionServabilityByTopic, QUESTION_PROVENANCE_SELECT, TOPIC_GATE_INCLUDE, UNIT_GATE_SELECT, type TopicGroundingGate } from "../../ai/context/topic-content-provenance.util";
 import { checkGroundingConsistency } from "../../ai/context/grounding-consistency-validator";
+import { checkArithmeticConsistency, type ArithmeticResult } from "./arithmetic-consistency";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
 
 const AUTO_BATCH_MAX_ATTEMPTS = 2;
+
+// The provider's default (600) is sized for a single question or lesson-
+// step-plan response. A bilingual question batch needs more room than that
+// no matter how small `count` is, so the FIRST attempt always uses this
+// fixed budget — never scaled by `count` (that "proactively size every
+// attempt" approach was tried and explicitly rejected: it grows unbounded
+// with `count` and masks the real signal, which is whether a *specific*
+// response was actually truncated). Only a detected truncation on attempt 1
+// escalates to AUTO_BATCH_TRUNCATION_RETRY_MAX_OUTPUT_TOKENS, exactly once.
+const AUTO_BATCH_MAX_OUTPUT_TOKENS = 4000;
+
+// Used for exactly one retry, only when attempt 1's failure looks like it
+// was caused by hitting the output-token ceiling (invalid/truncated JSON) —
+// never for a normal successful attempt and never for an unrelated
+// validation failure (e.g. valid JSON that fails a business-rule check).
+const AUTO_BATCH_TRUNCATION_RETRY_MAX_OUTPUT_TOKENS = 6000;
 
 // Practice serves 8 per session, Mock Exam up to 20 (see PracticeService/
 // QuizzesService's own requestedCount constants) — 8 gives Practice a full
@@ -50,6 +67,33 @@ export class QuestionDraftGenerationError extends Error {
  * validateQuestionDraft's requireReviewedContent: false) QuestionDraft row
  * -> (separately, later) human bilingual review -> approve -> publish.
  */
+/** An already-accepted pool Question as the pool-level grounding rule reads it. */
+export type AcceptedPoolQuestion = { promptEn: string; explanationEn?: string | null };
+
+/** Pool-level grounding text of one Question for admin authoring: English prompt + English explanation (never answers, options or Arabic). */
+const poolTexts = (q: AcceptedPoolQuestion): string[] => [q.promptEn, q.explanationEn].filter((t): t is string => typeof t === "string" && t.length > 0);
+
+/** Exact-duplicate key for a Question prompt: case and whitespace only — never fuzzy. */
+function normalizePrompt(prompt: string | undefined | null): string {
+  return (prompt ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * True when `content` looks like it was cut off mid-response rather than
+ * being deliberately malformed — the signature of hitting maxOutputTokens:
+ * a non-empty string that JSON.parse already rejected, and which doesn't
+ * even end with a closing `}` or `]`. Used ONLY to decide whether to spend
+ * the single bounded retry with a higher maxOutputTokens; never used to
+ * accept the JSON (validation stays exactly as strict as before).
+ */
+function looksLikeTruncatedJson(content: string | null | undefined): boolean {
+  if (!content) return true;
+  const trimmed = content.trim();
+  if (!trimmed) return true;
+  const lastChar = trimmed[trimmed.length - 1];
+  return lastChar !== "}" && lastChar !== "]";
+}
+
 @Injectable()
 export class QuestionDraftGeneratorService {
   private readonly logger = new Logger(QuestionDraftGeneratorService.name);
@@ -68,11 +112,38 @@ export class QuestionDraftGeneratorService {
    * existing Topic -> Unit -> Subject -> Grade -> Curriculum relations —
    * never hand-typed. Mirrors LessonDraftGeneratorService.resolveUnitContext.
    */
+  /**
+   * The single authoritative grounding read for question authoring
+   * (2026-09-27) — see LessonDraftGeneratorService.readAssignedGroundingOutcome.
+   */
+  // 2026-10-03: the shared READY_CURRENT_NON_EMPTY gate
+  // (topic-content-provenance.util.ts) — also yields the provenance every
+  // generated draft is stamped with.
+  private async readGroundingGate(topicId: string): Promise<TopicGroundingGate> {
+    const row = await this.prisma.client.topic.findUnique({
+      where: { id: topicId },
+      select: { ...TOPIC_GATE_INCLUDE, unit: { select: UNIT_GATE_SELECT } },
+    });
+    if (!row) return { state: "UNAVAILABLE", reason: "MISSING" };
+    return evaluateTopicGroundingGate(row as any);
+  }
+
+  /** This Topic's published, active (non-placeholder, non-retired) Questions that are CURRENT under `gate` (English prompt + explanation) — the accepted pool for a current-pool completion. */
+  private async currentPool(topicId: string, gate: Extract<TopicGroundingGate, { state: "READY" }>): Promise<AcceptedPoolQuestion[]> {
+    const rows = await this.prisma.client.question.findMany({
+      where: { topicId, isPlaceholder: false },
+      select: { topicId: true, isPlaceholder: true, promptEn: true, explanationEn: true, ...QUESTION_PROVENANCE_SELECT },
+    });
+    return rows
+      .filter((q) => q.topicId === topicId && isActiveCurrentQuestion(q, gate.provenance))
+      .map((q) => ({ promptEn: q.promptEn, explanationEn: q.explanationEn }));
+  }
+
   async resolveTopicContext(topicId: string): Promise<ResolvedTopicContext & { topicId: string; isPlaceholder: boolean }> {
     const topic = await this.prisma.client.topic.findUnique({
       where: { id: topicId },
       include: {
-        unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } },
+        unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } }, _count: { select: { topics: true } } } },
         lessons: { select: { isPlaceholder: true, objectives: { select: { descriptionEn: true } } } },
       },
     });
@@ -89,6 +160,7 @@ export class QuestionDraftGeneratorService {
       isPlaceholder: !topic.lessons.some((l) => !l.isPlaceholder),
       groundingNotesJson: (topic.unit.groundingNotesJson as unknown as GroundingNotes | null) ?? null,
       groundingVersion: topic.unit.groundingVersion ?? null,
+      unitTopicCount: topic.unit._count.topics,
       // §7/§9: the Topic's own already-generated lesson objectives —
       // second priority after grounding, ahead of unguided model knowledge,
       // for question generation (this Topic's real lesson always generates
@@ -224,25 +296,87 @@ export class QuestionDraftGeneratorService {
    * validateQuestionDraft/approve() already enforce for the human
    * pipeline) — generate the lesson first.
    */
-  async generateAutoQuestionBatch(topicId: string, count: number, requestingUserId: string) {
+  async generateAutoQuestionBatch(
+    topicId: string,
+    count: number,
+    requestingUserId: string,
+    // ADMIN-ONLY staged generation (staged-assignment-repair.ts): an explicit
+    // READY gate for a CANDIDATE assignment not yet live, plus the staged
+    // lesson's objectives in place of the live Lesson's. Validation, budget
+    // and accounting are unchanged. Never passed by any student or lazy path.
+    //
+    // `acceptedPool` (staged completion only): the Questions ALREADY accepted
+    // into this same staged replacement pool (same Topic, same candidate
+    // provenance, already individually validated — the caller guarantees
+    // this). The grounding-consistency rule then judges the FINAL candidate
+    // pool (accepted + this batch), so a batch boundary cannot change whether
+    // identical final content passes.
+    staged?: { gate: Extract<TopicGroundingGate, { state: "READY" }>; lessonObjectives?: string[]; acceptedPool?: AcceptedPoolQuestion[] },
+    // ADMIN-ONLY normal regeneration (regenerate-topic-content.ts, 2026-10-03):
+    // the same accumulated final-pool semantics as a staged completion, where
+    // the accepted pool is this Topic's LIVE published CURRENT Questions. The
+    // pool is read HERE, under the very gate this batch is generated against —
+    // never supplied by the caller — so only exact-provenance (same Topic,
+    // source and assignment fingerprint), non-placeholder Question rows can
+    // contribute; LEGACY, MISMATCH, foreign and unpublished rows never do.
+    // Never passed by any student or lazy path.
+    completion?: { againstCurrentPool: true },
+  ) {
+    if (staged && completion) throw new Error("generateAutoQuestionBatch: staged and current-pool completion are mutually exclusive");
+    // 2026-10-03 Wave B runtime safety: READY_CURRENT_NON_EMPTY is REQUIRED —
+    // checked before any budget check, provider call or write. There is no
+    // title-only fallback: a missing/stale/BLOCKED/EMPTY assignment means zero
+    // provider calls, zero QuestionDraft rows and zero Question rows.
+    const gate: TopicGroundingGate = staged?.gate ?? (await this.readGroundingGate(topicId));
+    if (gate.state !== "READY") {
+      this.logger.warn(`TEXTBOOK_TOPIC_GENERATION_BLOCKED topicId=${topicId} kind=questions reason=assignment-${gate.reason.toLowerCase()}`);
+      throw new ServiceUnavailableException("Questions are not available for this topic yet.");
+    }
+    const groundingSlice = gate.slice;
+    const provenance = gate.provenance;
+    const acceptedPool = staged?.acceptedPool ?? (completion?.againstCurrentPool ? await this.currentPool(topicId, gate) : []);
+    // Exact-duplicate guard, only when a pool context is supplied: a candidate
+    // repeating an accepted Question (or an earlier candidate) adds nothing to
+    // the pool and must not count toward it.
+    const poolContext = !!(staged?.acceptedPool || completion?.againstCurrentPool);
+    // ADMIN authoring (staged or normal regeneration) judges pool-level
+    // grounding on each Question's English prompt AND explanation, with the
+    // verb-family word forms (grounding-consistency-validator.ts) — a natural
+    // story problem shows its operation in the explanation ("subtract 12 from
+    // 50"), not its prompt. The student lazy top-up keeps prompt-only,
+    // exact-form matching, unchanged.
+    const authoring = !!(staged || completion);
     await this.usageService.assertWithinBudget(requestingUserId);
 
     const topicContext = await this.resolveTopicContext(topicId);
-    if (topicContext.isPlaceholder) {
+    // A staged run's lesson is itself staged and installed in the same atomic
+    // transaction as these Questions, so the live-Lesson requirement does not
+    // apply to it (staged-assignment-repair.ts).
+    if (topicContext.isPlaceholder && !staged) {
       throw new ServiceUnavailableException("This topic has no real lesson yet — generate the lesson before questions.");
     }
 
-    // 2026-09-19: same grounding-selection principle as generateAutoDraft —
-    // see its comment. Computed once, outside the retry loop.
-    const groundingSlice = selectRelevantGrounding(topicContext.groundingNotesJson, topicContext.topicNameEn);
-    if (groundingSlice) {
-      this.logger.log(`GROUNDED_TOPIC_GENERATION_STARTED topicId=${topicId} kind=questions`);
-    }
+    // 2026-09-27: same authoritative source as generateAutoDraft — the Topic's
+    // PERSISTED TopicGroundingAssignment, never a fresh title-based inference
+    // and never a live mapper call (gated above).
+    this.logger.log(`GROUNDED_TOPIC_GENERATION_STARTED topicId=${topicId} kind=questions`);
 
     let lastErrors: string[] = [];
     let callsMade = 0;
+    // Fixed budget for every normal attempt. Only bumped, and only for the
+    // single next attempt, when the previous attempt's failure was
+    // specifically a truncation/invalid-JSON signature — see
+    // looksLikeTruncatedJson(). Never scaled by `count` and never bumped
+    // for a normal success or for an unrelated validation failure.
+    let nextMaxOutputTokens = AUTO_BATCH_MAX_OUTPUT_TOKENS;
+    let truncationRetryUsed = false;
 
     for (let attempt = 1; attempt <= AUTO_BATCH_MAX_ATTEMPTS; attempt++) {
+      const maxOutputTokensForThisAttempt = nextMaxOutputTokens;
+      // Reset back to the fixed default unless this attempt's own failure
+      // re-arms the truncation retry below — prevents the bump from ever
+      // silently carrying forward into an unrelated later attempt.
+      nextMaxOutputTokens = AUTO_BATCH_MAX_OUTPUT_TOKENS;
       const systemPrompt = this.contextBuilder.buildAutoQuestionBatchGenerationPrompt(
         {
           curriculumNameEn: topicContext.curriculumNameEn,
@@ -255,7 +389,7 @@ export class QuestionDraftGeneratorService {
         count,
         attempt > 1 ? lastErrors : undefined,
         groundingSlice,
-        topicContext.lessonObjectives,
+        staged?.lessonObjectives ?? topicContext.lessonObjectives,
       );
 
       const { provider, providerKey, model } = await this.providerFactory.getActiveProvider();
@@ -285,7 +419,9 @@ export class QuestionDraftGeneratorService {
           // much more room, or the JSON gets truncated mid-object and
           // every attempt fails as "invalid JSON" (found by hand: an
           // 8-question batch silently truncates at the 600-token default).
-          maxOutputTokens: Math.min(4000, 350 * count + 400),
+          // Fixed per attempt (never scaled by `count`) — only bumped for a
+          // single retry when the previous attempt was actually truncated.
+          maxOutputTokens: maxOutputTokensForThisAttempt,
         });
       } catch (err) {
         await this.usageService.releaseBudget(budgetReservationId).catch(() => undefined);
@@ -301,7 +437,19 @@ export class QuestionDraftGeneratorService {
         parsed = JSON.parse(result.content);
       } catch {
         lastErrors = ["Response was not valid JSON."];
-        this.logger.warn(`Auto question batch generation attempt ${attempt} produced invalid JSON.`);
+        // Only escalate maxOutputTokens for the NEXT attempt when this
+        // failure looks like a truncation (not just malformed JSON for some
+        // other reason), and only once per call — never a third attempt,
+        // never for an already-bumped attempt that truncates again.
+        if (!truncationRetryUsed && looksLikeTruncatedJson(result.content)) {
+          truncationRetryUsed = true;
+          nextMaxOutputTokens = AUTO_BATCH_TRUNCATION_RETRY_MAX_OUTPUT_TOKENS;
+          this.logger.warn(
+            `Auto question batch generation attempt ${attempt} produced truncated/invalid JSON — retrying once with a higher maxOutputTokens.`,
+          );
+        } else {
+          this.logger.warn(`Auto question batch generation attempt ${attempt} produced invalid JSON.`);
+        }
         continue;
       }
 
@@ -314,35 +462,46 @@ export class QuestionDraftGeneratorService {
 
       const perItemErrors: string[] = [];
       const validDrafts: Array<Record<string, unknown>> = [];
+      const seenPrompts = new Set(acceptedPool.map((q) => normalizePrompt(q.promptEn)));
+      let arithmetic: ArithmeticResult;
       rawQuestions.forEach((q, index) => {
         const validation = validateQuestionDraft(
           { ...(q as Record<string, unknown>), topicId },
           { topicExists: true, topicIsPlaceholder: false, requireReviewedContent: true },
         );
-        if (validation.valid) {
-          validDrafts.push(q as Record<string, unknown>);
-        } else {
+        if (!validation.valid) {
           perItemErrors.push(`questions[${index}]: ${validation.errors.join("; ")}`);
+        } else if (poolContext && seenPrompts.has(normalizePrompt((q as Record<string, unknown>).promptEn as string))) {
+          perItemErrors.push(`questions[${index}]: duplicates a Question already in the pool.`);
+        } else if (authoring && (arithmetic = checkArithmeticConsistency(q as Record<string, unknown>)).status === "INVALID") {
+          // Deterministic arithmetic guard (admin authoring only): dropped like any other invalid
+          // candidate when exact arithmetic PROVES a contradiction; UNKNOWN is never a rejection.
+          perItemErrors.push(`questions[${index}]: arithmetic inconsistency — ${arithmetic.findings.map((f) => `${f.code}: ${f.detail}`).join("; ")}`);
+        } else {
+          if (poolContext) seenPrompts.add(normalizePrompt((q as Record<string, unknown>).promptEn as string));
+          validDrafts.push(q as Record<string, unknown>);
         }
       });
 
       // At least one usable question is enough to persist — a partially
       // invalid batch still adds real value to the pool, unlike a single
       // lesson draft where "mostly right" isn't a coherent thing to keep.
+      // 2026-10-03: never persist MORE than requested — a model that returns
+      // extra valid items cannot push a Topic's CURRENT pool past its target
+      // (the extras' tokens are still logged and reconciled like any call).
+      validDrafts.splice(count);
       if (validDrafts.length > 0) {
-        // §10: grounding-consistency check on the accepted subset as a
-        // whole — only when grounding was actually supplied. Feeds the
-        // SAME retry loop as structural validation.
-        if (groundingSlice) {
-          const consistencyErrors = checkGroundingConsistency(
-            validDrafts.map((q) => q.promptEn as string),
-            groundingSlice,
-          );
-          if (consistencyErrors.length > 0) {
-            lastErrors = consistencyErrors;
-            this.logger.warn(`CONTENT_VALIDATION_FAILED topicId=${topicId} kind=questions attempt=${attempt}: ${consistencyErrors.join("; ")}`);
-            continue;
-          }
+        // §10: grounding-consistency check (anchor + verbatim) on the accepted
+        // subset as a whole — for admin authoring, on the final pool
+        // (already-accepted Questions + this batch), prompts AND explanations.
+        // Feeds the SAME retry loop as structural validation.
+        const consistencyErrors = authoring
+          ? checkGroundingConsistency([...acceptedPool, ...(validDrafts as AcceptedPoolQuestion[])].flatMap(poolTexts), groundingSlice, { wordForms: true })
+          : checkGroundingConsistency(validDrafts.map((q) => q.promptEn as string), groundingSlice);
+        if (consistencyErrors.length > 0) {
+          lastErrors = consistencyErrors;
+          this.logger.warn(`CONTENT_VALIDATION_FAILED topicId=${topicId} kind=questions attempt=${attempt}: ${consistencyErrors.join("; ")}`);
+          continue;
         }
 
         const drafts = [];
@@ -363,19 +522,20 @@ export class QuestionDraftGeneratorService {
                 isAiGenerated: true,
                 aiProvider: providerKey,
                 aiModel: model,
+                groundingSourceFingerprint: provenance.groundingSourceFingerprint,
+                groundingAssignmentFingerprint: provenance.groundingAssignmentFingerprint,
               },
             }),
           );
         }
-        if (groundingSlice) {
-          this.logger.log(`GROUNDED_TOPIC_GENERATION_COMPLETED topicId=${topicId} kind=questions`);
-        }
+        this.logger.log(`GROUNDED_TOPIC_GENERATION_COMPLETED topicId=${topicId} kind=questions`);
         return {
           drafts,
           attempts: attempt,
           callsMade,
           rejectedCount: perItemErrors.length,
-          generationSource: groundingSlice ? ("TEXTBOOK_GROUNDED" as const) : ("LEGACY_TITLE_ONLY" as const),
+          generationSource: "TEXTBOOK_GROUNDED" as const,
+          provenance,
         };
       }
 
@@ -423,7 +583,23 @@ export class QuestionDraftGeneratorService {
    * bookkeeping — see its own 2026-09-20 fix comment — never AI spend).
    */
   async ensurePoolForTopic(topicId: string, requestingUserId: string, targetCount = DEFAULT_POOL_TARGET): Promise<void> {
-    const existing = await this.prisma.client.question.count({ where: { topicId, isPlaceholder: false } });
+    // 2026-10-03 Wave B runtime safety: a Topic that is not
+    // READY_CURRENT_NON_EMPTY never triggers lazy lesson OR question
+    // generation — zero provider calls, zero writes. Only SERVABLE Questions
+    // (topic-content-provenance.util.ts) count toward the pool, so a pool made
+    // entirely of MISMATCHED (or, once a Unit is STRICT, LEGACY) Questions is
+    // topped up with current ones rather than leaving the student with none.
+    const topic = await this.prisma.client.topic.findUnique({
+      where: { id: topicId },
+      select: { id: true, ...TOPIC_GATE_INCLUDE, unit: { select: UNIT_GATE_SELECT } },
+    });
+    if (!topic) return;
+    if (evaluateTopicGroundingGate(topic as any).state !== "READY") {
+      this.logger.log(`QUESTION_POOL_TOPUP_SKIPPED topicId=${topicId} reason=grounding-unavailable`);
+      return;
+    }
+    const pool = await this.prisma.client.question.findMany({ where: { topicId, isPlaceholder: false }, select: { topicId: true, isPlaceholder: true, ...QUESTION_PROVENANCE_SELECT } });
+    const existing = pool.filter(questionServabilityByTopic([topic as any], pool)).length;
     if (existing >= targetCount) return;
 
     try {

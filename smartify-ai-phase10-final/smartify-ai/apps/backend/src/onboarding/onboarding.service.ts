@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from "@nestjs/comm
 import { PrismaService } from "../prisma/prisma.service";
 import { findOfferedSubjects } from "../common/grade-subject.util";
 import { QuestionDraftGeneratorService } from "../question-bank/question-draft-generator/question-draft-generator.service";
+import { questionServabilityByTopic, QUESTION_PROVENANCE_SELECT, TOPIC_GATE_INCLUDE } from "../ai/context/topic-content-provenance.util";
 import type { StudentOnboardingInput } from "@smartify/validation";
 
 @Injectable()
@@ -120,7 +121,7 @@ export class OnboardingService {
       where: { studentId: profile.id },
       include: {
         subject: {
-          include: { units: { orderBy: { order: "asc" }, include: { topics: { orderBy: { order: "asc" } } } } },
+          include: { units: { orderBy: { order: "asc" }, include: { topics: { orderBy: { order: "asc" }, include: TOPIC_GATE_INCLUDE } } } },
         },
       },
     });
@@ -153,9 +154,12 @@ export class OnboardingService {
     // placeholder Questions. Without this filter, a subject with nothing
     // but placeholder content would incorrectly look "available" and serve
     // non-curriculum content as if it were real.
-    const questions = await this.prisma.client.question.findMany({
+    // 2026-10-03 Wave B runtime safety: only servable Questions (Topic
+    // READY_CURRENT_NON_EMPTY + servable provenance) may appear — a BLOCKED
+    // Topic contributes nothing. Filtered before the 10-question cut so a
+    // withheld Question never shrinks the diagnostic.
+    const candidates = await this.prisma.client.question.findMany({
       where: { topicId: { in: topicIds }, isPlaceholder: false },
-      take: 10,
       orderBy: { createdAt: "asc" },
       select: {
         id: true,
@@ -166,9 +170,15 @@ export class OnboardingService {
         promptAr: true,
         optionsJson: true,
         isPlaceholder: true,
+        ...QUESTION_PROVENANCE_SELECT,
         topic: { select: { unit: { select: { subject: { select: { id: true, nameEn: true, nameAr: true } } } } } },
       },
     });
+    const isServable = questionServabilityByTopic(
+      studentSubjects.flatMap((ss) => ss.subject.units.flatMap((u) => u.topics.map((t) => ({ ...t, unit: u })))) as any,
+      candidates,
+    );
+    const questions = candidates.filter(isServable).slice(0, 10);
 
     // Correct answers are intentionally omitted from this response.
     return questions.map((q) => ({
@@ -189,10 +199,19 @@ export class OnboardingService {
     const profile = await this.getProfileOrThrow(userId);
     if (answers.length === 0) throw new BadRequestException("No answers submitted.");
 
-    const questions = await this.prisma.client.question.findMany({
+    const loaded = await this.prisma.client.question.findMany({
       where: { id: { in: answers.map((a) => a.questionId) } },
-      include: { topic: { include: { unit: { include: { subject: true } } } } },
+      include: { topic: { include: { ...TOPIC_GATE_INCLUDE, unit: { include: { subject: true } } } } },
     });
+    // Never-servable Questions are treated as unresolved ids (see PracticeService.submitPractice).
+    // Topic-level precedence needs each Topic's FULL stored pool, not just
+    // the submitted ids (topic-content-provenance.util.ts).
+    const submittedTopicIds = [...new Set(loaded.map((q) => q.topicId))];
+    const topicPool = submittedTopicIds.length
+      ? await this.prisma.client.question.findMany({ where: { topicId: { in: submittedTopicIds }, isPlaceholder: false }, select: { topicId: true, isPlaceholder: true, ...QUESTION_PROVENANCE_SELECT } })
+      : [];
+    const isServable = questionServabilityByTopic(loaded.map((q) => q.topic) as any, topicPool);
+    const questions = loaded.filter(isServable);
     const questionById = new Map(questions.map((q) => [q.id, q]));
 
     const perSubject = new Map<string, { nameEn: string; nameAr: string; correct: number; total: number }>();

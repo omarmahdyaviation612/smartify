@@ -10,7 +10,7 @@ import { toUnreviewedBilingualObjectives } from "./lesson-objectives.util";
 import type { GroundingNotes } from "../unit-grounding/unit-grounding.types";
 import { UnitGroundingService } from "../unit-grounding/unit-grounding.service";
 import { resolveEffectiveSourceFile } from "../unit-grounding/unit-effective-source.util";
-import { selectRelevantGrounding } from "../../ai/context/grounding-selector.util";
+import { evaluateTopicGroundingGate, TOPIC_GATE_INCLUDE, UNIT_GATE_SELECT, type TopicContentProvenance, type TopicGroundingGate } from "../../ai/context/topic-content-provenance.util";
 import { checkGroundingConsistency } from "../../ai/context/grounding-consistency-validator";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
 
@@ -89,16 +89,36 @@ export class LessonDraftGeneratorService {
    * Phase 6 fix. Mirrors the exact include chain interactive-lesson.service
    * already uses for `getTopicOrThrow`.
    */
+  /**
+   * The single authoritative grounding read for lesson authoring (2026-09-27):
+   * the Topic's PERSISTED TopicGroundingAssignment, verified against the Unit's
+   * current grounding identity, re-filtered against the Unit's CURRENT
+   * groundingNotesJson. Never calls selectRelevantGrounding() live, and never
+   * the AI mapper.
+   */
+  // 2026-10-03: now the shared READY_CURRENT_NON_EMPTY gate
+  // (topic-content-provenance.util.ts), which also yields the provenance the
+  // generated content is stamped with.
+  async readGroundingGate(topicId: string): Promise<TopicGroundingGate> {
+    const row = await this.prisma.client.topic.findUnique({
+      where: { id: topicId },
+      select: { ...TOPIC_GATE_INCLUDE, unit: { select: UNIT_GATE_SELECT } },
+    });
+    if (!row) return { state: "UNAVAILABLE", reason: "MISSING" };
+    return evaluateTopicGroundingGate(row as any);
+  }
+
   async resolveUnitContext(unitId: string): Promise<ResolvedUnitContext & { unitId: string; subjectId: string; sourceFile: string | null }> {
     const unit = await this.prisma.client.unit.findUnique({
       where: { id: unitId },
-      include: { subject: { include: { grade: { include: { curriculum: true } } } } },
+      include: { subject: { include: { grade: { include: { curriculum: true } } } }, _count: { select: { topics: true } } },
     });
     if (!unit) {
       throw new NotFoundException(`Unit ${unitId} not found — cannot resolve curriculum context.`);
     }
     return {
       unitId: unit.id,
+      unitTopicCount: unit._count.topics,
       subjectId: unit.subjectId,
       sourceFile: resolveEffectiveSourceFile(unit, unit.subject),
       curriculumNameEn: unit.subject.grade.curriculum.nameEn,
@@ -229,25 +249,32 @@ export class LessonDraftGeneratorService {
     topic: { id: string; nameEn: string; nameAr: string; unitId: string },
     opts: { preferredLang: "ar" | "en"; studentAgeRange: string },
     requestingUserId: string,
+    // ADMIN-ONLY staged generation (staged-assignment-repair.ts): generate
+    // against an explicitly supplied READY gate — a CANDIDATE assignment not
+    // yet live — instead of reading the live one. Never passed by any student
+    // or lazy path; omitted, behavior is exactly as before.
+    staged?: { gate: Extract<TopicGroundingGate, { state: "READY" }> },
   ) {
-    await this.usageService.assertWithinBudget(requestingUserId);
     const unitContext = await this.resolveUnitContext(topic.unitId);
-    // 2026-09-19: computed once, outside the retry loop — selection is a
-    // pure function of already-fetched data, not something that changes
-    // between attempts. null whenever the Unit isn't grounded (or has no
-    // concept recognizably related to this Topic's title). A mapped textbook
-    // must supply relevant content; it must never fall back to title-only.
-    const groundingSlice = selectRelevantGrounding(unitContext.groundingNotesJson, topic.nameEn);
+    // 2026-09-27: the Topic's grounding slice is no longer re-inferred from its
+    // title here. It is read from the PERSISTED TopicGroundingAssignment row
+    // decided once by the preparation step, and reconstructed from the Unit's
+    // CURRENT groundingNotesJson by the persisted NAMES (see
+    // topic-grounding-assignment.util.ts). A missing, stale (identity
+    // mismatch) or BLOCKED row yields null and takes exactly the same safe
+    // failure path a "no relevant grounding" selection always took — there is
+    // no live fallback to title inference and no path to the AI mapper here.
+    const gate: TopicGroundingGate = staged?.gate ?? (await this.readGroundingGate(topic.id));
+    const groundingSlice = gate.state === "READY" ? gate.slice : null;
+    const provenance: TopicContentProvenance | null = gate.state === "READY" ? gate.provenance : null;
     const groundingNotes = unitContext.groundingNotesJson;
     const groundingConceptCount = groundingNotes?.concepts.length ?? 0;
     const selectedConceptCount = groundingSlice?.concepts.length ?? 0;
     const groundingSelectionFailureReason = !groundingNotes
       ? "no-grounding-notes"
-      : !groundingSlice
-        ? "selector-no-match"
-        : selectedConceptCount === 0 && groundingSlice.facts.length === 0 && groundingSlice.vocabulary.length === 0
-          ? "selector-empty"
-          : null;
+      : gate.state === "UNAVAILABLE"
+        ? `assignment-${gate.reason.toLowerCase()}`
+        : null;
     this.logger.log(JSON.stringify({
       event: "TEXTBOOK_TOPIC_GROUNDING_SELECTION",
       topicId: topic.id,
@@ -261,12 +288,15 @@ export class LessonDraftGeneratorService {
       selectedConceptCount,
       failureReason: groundingSelectionFailureReason,
     }));
-    if (unitContext.sourceFile && (!groundingSlice || (
-      groundingSlice.concepts.length === 0 && groundingSlice.facts.length === 0 && groundingSlice.vocabulary.length === 0
-    ))) {
+    // READY_CURRENT_NON_EMPTY is required for every Unit with a mapped
+    // textbook — checked BEFORE any budget call or provider call, so a
+    // blocked Topic costs nothing. Only a Unit with no source file at all keeps
+    // the original title-only fallback (0 such Units in production, 2026-10-03).
+    if (unitContext.sourceFile && !groundingSlice) {
       this.logger.warn(`TEXTBOOK_TOPIC_GENERATION_BLOCKED topicId=${topic.id} unitId=${topic.unitId} reason=no-relevant-grounding`);
       throw new ServiceUnavailableException("Textbook grounding is unavailable for this topic. Lesson generation is blocked until the textbook can be grounded. Please try again later or contact support.");
     }
+    await this.usageService.assertWithinBudget(requestingUserId);
     if (groundingSlice) {
       this.logger.log(`GROUNDED_TOPIC_GENERATION_STARTED topicId=${topic.id} unitId=${topic.unitId}`);
     } else {
@@ -367,6 +397,7 @@ export class LessonDraftGeneratorService {
           generationSource: groundingSlice ? ("TEXTBOOK_GROUNDED" as const) : ("LEGACY_TITLE_ONLY" as const),
           groundingVersionUsed: groundingSlice ? unitContext.groundingVersion ?? null : null,
           generationPromptVersion: AUTO_LESSON_GENERATION_PROMPT_VERSION,
+          provenance,
         };
       }
 
@@ -430,7 +461,15 @@ export class LessonDraftGeneratorService {
     if (!topic) throw new NotFoundException(`Topic ${topicId} not found.`);
     if (topic.teachingStepsJson) return topic;
 
-    await this.unitGrounding.ensureUnitGrounded(topic.unitId, CONTENT_AUTHORING_ACTOR_ID);
+    if (typeof (this.unitGrounding as any).prepareNextGroundingChunk !== "function") {
+      await this.unitGrounding.ensureUnitGrounded(topic.unitId, CONTENT_AUTHORING_ACTOR_ID);
+    }
+
+    // Legacy direct callers/tests may provide the pre-Phase-3 grounding stub;
+    // the production service is prepared by InteractiveLessonService first.
+    if (typeof (this.unitGrounding as any).prepareNextGroundingChunk !== "function") {
+      await this.unitGrounding.ensureUnitGrounded(topic.unitId, CONTENT_AUTHORING_ACTOR_ID);
+    }
 
     // Deliberately NOT filtering on teachingStepsJson here — Prisma's
     // JSON-column null filters need the Prisma.JsonNull sentinel, not a
@@ -462,17 +501,29 @@ export class LessonDraftGeneratorService {
     }
 
     try {
-      const { draft, generationSource, groundingVersionUsed, generationPromptVersion } = await this.generateAutoDraft(
+      const { draft, generationSource, groundingVersionUsed, generationPromptVersion, provenance } = await this.generateAutoDraft(
         { id: topic.id, nameEn: topic.nameEn, nameAr: topic.nameAr, unitId: topic.unitId },
         opts,
         CONTENT_AUTHORING_ACTOR_ID,
       );
-      await this.publisher.autoPublishIntoTopic(draft.id, topicId, { generationSource, groundingVersionUsed, generationPromptVersion });
+      await this.publisher.autoPublishIntoTopic(draft.id, topicId, { generationSource, groundingVersionUsed, generationPromptVersion, provenance });
     } finally {
       await this.prisma.client.topic.updateMany({ where: { id: topicId }, data: { generationLockedAt: null, generationLockedBy: null } });
     }
 
     return this.prisma.client.topic.findUniqueOrThrow({ where: { id: topicId } });
+  }
+
+  async prepareTopicGrounding(topicId: string, requestingActorId: string) {
+    const topic = await this.prisma.client.topic.findUnique({ where: { id: topicId }, select: { unitId: true } });
+    if (!topic) throw new NotFoundException(`Topic ${topicId} not found.`);
+    return this.unitGrounding.prepareNextGroundingChunk(topic.unitId, requestingActorId);
+  }
+
+  async getTopicGroundingPreparationStatus(topicId: string) {
+    const topic = await this.prisma.client.topic.findUnique({ where: { id: topicId }, select: { unitId: true } });
+    if (!topic) return { status: "CONFIGURATION_ERROR" as const };
+    return this.unitGrounding.getPreparationStatus(topic.unitId);
   }
 
   /** Returns the computed costUsd so callers can reconcile the matching USD budget reservation to the exact same figure. */

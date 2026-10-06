@@ -29,7 +29,7 @@ jest.mock("fs", () => ({
   rmSync: jest.fn(),
 }));
 
-import { UnitGroundingService, UnitGroundingExtractionError } from "./unit-grounding.service";
+import { UnitGroundingService, UnitGroundingExtractionError, partitionUnitRange } from "./unit-grounding.service";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
 
 const VALID_UNIT = {
@@ -56,7 +56,7 @@ const VALID_EXTRACTION_JSON = JSON.stringify({
   gradeLevel: "Year 5",
   subject: "Science",
   learningObjectives: ["Identify the main parts of a plant."],
-  concepts: [{ name: "Roots", description: "Roots absorb water and nutrients from the soil.", sourcePages: [8], importance: "core" }],
+  concepts: [{ name: "Roots", description: "Roots absorb water and nutrients from the soil.", sourceImageIndex: [1], importance: "core" }],
   facts: [],
   vocabulary: [],
   skills: [],
@@ -127,6 +127,296 @@ function makeHarness(
   const service = new UnitGroundingService(prisma, providerFactory, contextBuilder, usageService, storageFactory);
   return { service, prisma, contextBuilder, generateSpy, updateCalls, updateManyCalls, usageCreateCalls, reserveBudget, reconcileBudget, releaseBudget, storage, storageFactory };
 }
+
+describe("UnitGroundingService.prepareNextGroundingChunk", () => {
+  function boundedHarness(overrides: any = {}) {
+    const h = makeHarness({ unitOverrides: { sourcePageStart: 8, sourcePageEnd: 11, ...overrides.unitOverrides } });
+    const progress = {
+      initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 0 }),
+      claimNextChunk: jest.fn().mockResolvedValue({ chunkId: "8-9", pageStart: 8, pageEnd: 9 }),
+      persistChunk: jest.fn().mockResolvedValue(true),
+      get: jest.fn().mockResolvedValue({ completedChunksJson: [{ chunkId: "8-9", pageStart: 8, pageEnd: 9, notes: JSON.parse(VALID_EXTRACTION_JSON) }] }),
+      releaseLease: jest.fn().mockResolvedValue(true),
+      finalize: jest.fn().mockResolvedValue(true),
+      markRetryable: jest.fn().mockResolvedValue(true),
+      markConfigurationError: jest.fn().mockResolvedValue(true),
+      ...overrides.progressOverrides,
+    };
+    (h.service as any).progressService = progress;
+    jest.spyOn(h.service as any, "extractChunk").mockResolvedValue(JSON.parse(VALID_EXTRACTION_JSON));
+    return { ...h, progress };
+  }
+
+  it("returns READY without progress, source, renderer, or provider work when already grounded", async () => {
+    const h = boundedHarness({ unitOverrides: { groundingNotesJson: JSON.parse(VALID_EXTRACTION_JSON) } });
+    const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+    expect(result).toEqual({ status: "READY" });
+    expect(h.progress.initialize).not.toHaveBeenCalled();
+    expect(h.storage.fetchToTempFile).not.toHaveBeenCalled();
+    expect((h.service as any).extractChunk).not.toHaveBeenCalled();
+  });
+
+  it("claims and persists exactly one chunk, then returns PREPARING", async () => {
+    const h = boundedHarness();
+    const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+    expect(result.status).toBe("PREPARING");
+    expect(h.progress.claimNextChunk).toHaveBeenCalledTimes(1);
+    expect((h.service as any).extractChunk).toHaveBeenCalledTimes(1);
+    expect(h.progress.persistChunk).toHaveBeenCalledTimes(1);
+    expect(h.progress.releaseLease).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a durable retry state without sleeping when the provider is TPM-limited", async () => {
+    const h = boundedHarness();
+    (h.service as any).extractChunk.mockRejectedValueOnce(Object.assign(new Error("429"), { metadata: { remainingTokens: 0, resetTokensMs: 79000, retryAfterMs: 695 } }));
+    const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+    expect(result.status).toBe("RETRYABLE_FAILURE");
+    expect(result.status === "RETRYABLE_FAILURE" && result.retryAfterMs).toBe(5000);
+    expect(h.progress.markRetryable).toHaveBeenCalledTimes(1);
+    expect(h.progress.markConfigurationError).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Production hotfix (2026-09-25) — the "cmucxcubj00eh2qd5kfwohz11"
+   * incident: a missing R2 object was retried 237 times, masked to the
+   * student as endless "PREPARING". A missing source object is
+   * deterministic and must go terminal on the FIRST occurrence, never
+   * retried.
+   */
+  describe("subject-safe... missing-source-object resilience (2026-09-25 hotfix)", () => {
+    it("1. a NoSuchKey storage error transitions to CONFIGURATION_ERROR, not RETRYABLE_FAILURE", async () => {
+      const h = boundedHarness();
+      const noSuchKey = new Error("The specified key does not exist.");
+      noSuchKey.name = "NoSuchKey";
+      h.storage.fetchToTempFile.mockRejectedValueOnce(noSuchKey);
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result).toEqual({ status: "CONFIGURATION_ERROR", reason: "source_object_not_found" });
+      expect(h.progress.markConfigurationError).toHaveBeenCalledWith("unit-1", expect.any(String), "source_object_not_found");
+      expect(h.progress.markRetryable).not.toHaveBeenCalled();
+    });
+
+    it("2. NoSuchKey never increments retryCount forever — a later call sees the terminal status and never re-attempts storage/AI work", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "CONFIGURATION_ERROR", nextEligibleAt: null, retryCount: 1, lastErrorCode: "source_object_not_found" }) } });
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result).toEqual({ status: "CONFIGURATION_ERROR", reason: "source_object_not_found" });
+      // Never falls through to claim/fetch/extract again — this IS what
+      // proves it can't loop: no further work, no further retryCount
+      // increment, ever, once terminal.
+      expect(h.progress.claimNextChunk).not.toHaveBeenCalled();
+      expect(h.storage.fetchToTempFile).not.toHaveBeenCalled();
+      expect(h.progress.markRetryable).not.toHaveBeenCalled();
+      expect(h.progress.markConfigurationError).not.toHaveBeenCalled();
+    });
+
+    it("3. a transient (non-NoSuchKey) failure well below the retry ceiling still returns RETRYABLE_FAILURE, preserving normal retry behavior", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 1 }) } });
+      (h.service as any).extractChunk.mockRejectedValueOnce(new Error("Grounding provider returned no result."));
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result.status).toBe("RETRYABLE_FAILURE");
+      expect(h.progress.markRetryable).toHaveBeenCalledTimes(1);
+      expect(h.progress.markConfigurationError).not.toHaveBeenCalled();
+    });
+
+    it("4. once retryCount reaches the ceiling, a further generic retryable failure transitions terminally instead of retrying again", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 4 }) } });
+      (h.service as any).extractChunk.mockRejectedValueOnce(new Error("Grounding provider returned no result."));
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result).toEqual({ status: "CONFIGURATION_ERROR", reason: "retryable_failure_limit_exceeded" });
+      expect(h.progress.markConfigurationError).toHaveBeenCalledWith("unit-1", expect.any(String), "retryable_failure_limit_exceeded");
+      expect(h.progress.markRetryable).not.toHaveBeenCalled();
+    });
+
+    it("5. a quota/rate-limit retry (BoundedGroundingRetryError) still counts toward the ceiling, but its own timing is preserved below it", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 0 }) } });
+      (h.service as any).extractChunk.mockRejectedValueOnce(Object.assign(new Error("429"), { metadata: { remainingTokens: 0, resetTokensMs: 79000, retryAfterMs: 695 } }));
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      // Same fallback-default 5000ms as the pre-existing TPM test above —
+      // this hotfix does not change quota-retry timing, only whether it
+      // eventually goes terminal.
+      expect(result.status).toBe("RETRYABLE_FAILURE");
+      expect(result.status === "RETRYABLE_FAILURE" && result.retryAfterMs).toBe(5000);
+      expect(h.progress.markConfigurationError).not.toHaveBeenCalled();
+    });
+
+    it("6. never exposes the storage key, bucket, or raw exception message to the returned reason", async () => {
+      const h = boundedHarness();
+      const noSuchKey = new Error("The specified key does not exist: science y5 .pdf in bucket smartify-curriculum-prod");
+      noSuchKey.name = "NoSuchKey";
+      h.storage.fetchToTempFile.mockRejectedValueOnce(noSuchKey);
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result.status === "CONFIGURATION_ERROR" && result.reason).toBe("source_object_not_found");
+      expect(JSON.stringify(result)).not.toContain("science y5 .pdf");
+      expect(JSON.stringify(result)).not.toContain("bucket");
+    });
+
+    it("7. normal successful chunk flow (below the ceiling, no failure at all) is completely unchanged", async () => {
+      const h = boundedHarness();
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+      expect(result.status).toBe("PREPARING");
+      expect(h.progress.persistChunk).toHaveBeenCalledTimes(1);
+      expect(h.progress.markConfigurationError).not.toHaveBeenCalled();
+      expect(h.progress.markRetryable).not.toHaveBeenCalled();
+      // 10. no additional provider calls beyond the existing bounded
+      // behavior — extractChunk (mocked at this harness level) is called
+      // exactly once per successful chunk, never more.
+      expect((h.service as any).extractChunk).toHaveBeenCalledTimes(1);
+    });
+
+    // 5/6. Observability hotfix (2026-09-25): the underlying failure must
+    // be discoverable in logs, never just the generic terminal code.
+    it("5. a raw provider exception is logged with its real name/message before markRetryable, never just a generic label", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 0 }) } });
+      const warnSpy = jest.spyOn((h.service as any).logger, "warn").mockImplementation(() => undefined);
+      (h.service as any).extractChunk.mockRejectedValueOnce(new Error("Grounding provider returned no result."));
+
+      await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      const logged = warnSpy.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(logged).toContain("Grounding provider returned no result.");
+      expect(h.progress.markRetryable).toHaveBeenCalledTimes(1);
+    });
+
+    it("6. when the retry ceiling trips, the last real failure reason is still logged even though the terminal DB reason becomes the generic code", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 4 }) } });
+      const warnSpy = jest.spyOn((h.service as any).logger, "warn").mockImplementation(() => undefined);
+      (h.service as any).extractChunk.mockRejectedValueOnce(new Error("Grounding provider returned no result."));
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result).toEqual({ status: "CONFIGURATION_ERROR", reason: "retryable_failure_limit_exceeded" });
+      const logged = warnSpy.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(logged).toMatch(/UNIT_GROUNDING_RETRY_CEILING_REACHED/);
+      expect(logged).toContain("lastRealReason=Error"); // err.name of a plain Error — the real reason, not the generic terminal code
+    });
+  });
+
+  /**
+   * 2026-09-26 provider-outage incident: 16 Units were wrongly converted to
+   * CONFIGURATION_ERROR because an OpenAI account-level "no credits
+   * remaining" 429 (isQuotaError — a real, stable SDK error code, e.g.
+   * "insufficient_quota", never a fragile message-string match) was
+   * treated identically to any other transient failure and consumed the
+   * same per-Unit retry ceiling. This is not this Unit's fault and will
+   * never resolve by retrying THIS Unit — only by restoring provider
+   * credits — so it must never mark the Unit CONFIGURATION_ERROR, never
+   * touch retryCount, and must be trivially distinguishable from a normal
+   * TPM/RPM rate limit (which keeps its existing pacing/retry behavior,
+   * proven unchanged by the pre-existing tests above).
+   */
+  describe("provider-outage classification (2026-09-26 hotfix)", () => {
+    function quotaError() {
+      return Object.assign(new Error("You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."), { status: 429, code: "insufficient_quota", type: "insufficient_quota" });
+    }
+
+    it("an OpenAI no-credits 429 is classified as PROVIDER_OUTAGE, distinct from CONFIGURATION_ERROR and RETRYABLE_FAILURE", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 0 }) } });
+      (h.service as any).extractChunk.mockRejectedValueOnce(quotaError());
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result).toEqual({ status: "PROVIDER_OUTAGE", reason: "provider_quota_exhausted" });
+    });
+
+    it("does NOT consume the Unit's retry ceiling — never calls markRetryable or markConfigurationError", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 0 }) } });
+      (h.service as any).extractChunk.mockRejectedValueOnce(quotaError());
+
+      await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(h.progress.markRetryable).not.toHaveBeenCalled();
+      expect(h.progress.markConfigurationError).not.toHaveBeenCalled();
+    });
+
+    it("releases the lease so the SAME Unit is immediately retryable once the provider is healthy — never left locked", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 0 }) } });
+      (h.service as any).extractChunk.mockRejectedValueOnce(quotaError());
+
+      await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(h.progress.releaseLease).toHaveBeenCalledTimes(1);
+    });
+
+    it("even at the retry ceiling (retryCount already 4), a quota error still classifies as PROVIDER_OUTAGE, never CONFIGURATION_ERROR — the ceiling is genuinely bypassed, not just delayed", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 4 }) } });
+      (h.service as any).extractChunk.mockRejectedValueOnce(quotaError());
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result).toEqual({ status: "PROVIDER_OUTAGE", reason: "provider_quota_exhausted" });
+      expect(h.progress.markConfigurationError).not.toHaveBeenCalled();
+    });
+
+    it("a normal TPM 429 (no quota code) remains RETRYABLE_FAILURE and unaffected by this change", async () => {
+      const h = boundedHarness();
+      (h.service as any).extractChunk.mockRejectedValueOnce(Object.assign(new Error("429"), { metadata: { remainingTokens: 0, resetTokensMs: 79000, retryAfterMs: 695 } }));
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result.status).toBe("RETRYABLE_FAILURE");
+      expect(h.progress.markRetryable).toHaveBeenCalledTimes(1);
+    });
+
+    it("a genuinely repeated (non-quota) retryable failure can still reach the existing CONFIGURATION_ERROR ceiling — protection for real broken Units is not weakened", async () => {
+      const h = boundedHarness({ progressOverrides: { initialize: jest.fn().mockResolvedValue({ status: "IN_PROGRESS", nextEligibleAt: null, retryCount: 4 }) } });
+      (h.service as any).extractChunk.mockRejectedValueOnce(new Error("Grounding provider returned no result."));
+
+      const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+
+      expect(result).toEqual({ status: "CONFIGURATION_ERROR", reason: "retryable_failure_limit_exceeded" });
+      expect(h.progress.markConfigurationError).toHaveBeenCalledWith("unit-1", expect.any(String), "retryable_failure_limit_exceeded");
+    });
+  });
+
+  // Page-provenance hotfix (2026-09-25): structural coverage of the
+  // OpenAI request payload and extraction-level logging, exercised via
+  // the legacy extractUnitGrounding path (same extractChunk() underneath
+  // — see the two call sites both routing through it).
+  describe("page-provenance request structure & extraction-level logging (2026-09-25 hotfix)", () => {
+    it("labels every attached image with an explicit 'Image N:' text part, never relying only on prompt-described ordering", async () => {
+      const h = makeHarness({
+        generateImpl: async () => ({ content: VALID_EXTRACTION_JSON, inputTokens: 100, outputTokens: 200, model: "gpt-4o-mini" }),
+      });
+      await h.service.extractUnitGrounding("unit-1", {}, "actor-1");
+
+      const call = h.generateSpy.mock.calls[0][0];
+      const content = call.messages[0].content as Array<{ type: string; text?: string }>;
+      const textParts = content.filter((p) => p.type === "text").map((p) => p.text);
+      expect(textParts).toContain("Image 1:");
+    });
+
+    it("2. rejects a model response whose sourceImageIndex is outside the sent image count — never persisted", async () => {
+      const outOfRangeJson = JSON.stringify({ ...JSON.parse(VALID_EXTRACTION_JSON), concepts: [{ name: "Roots", description: "Roots absorb water.", sourceImageIndex: [99], importance: "core" }] });
+      const h = makeHarness({ generateImpl: async () => ({ content: outOfRangeJson, inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }) });
+      await expect(h.service.extractUnitGrounding("unit-1", {}, "actor-1")).rejects.toThrow(UnitGroundingExtractionError);
+      expect(h.updateCalls.some((data: any) => data.groundingNotesJson)).toBe(false);
+    });
+
+    it("6. logs the actual validation errors (not just a generic failure) when extraction is exhausted", async () => {
+      const invalidJson = JSON.stringify({ ...JSON.parse(VALID_EXTRACTION_JSON), concepts: [{ name: "Roots", description: "Roots absorb water.", sourceImageIndex: [99], importance: "core" }] });
+      const h = makeHarness({ generateImpl: async () => ({ content: invalidJson, inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }) });
+      const warnSpy = jest.spyOn((h.service as any).logger, "warn").mockImplementation(() => undefined);
+
+      await expect(h.service.extractUnitGrounding("unit-1", {}, "actor-1")).rejects.toThrow(UnitGroundingExtractionError);
+
+      const logged = warnSpy.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(logged).toContain("GROUNDING_VALIDATION_FAILED");
+      expect(logged).toContain("GROUNDING_EXTRACTION_EXHAUSTED");
+      expect(logged).toMatch(/sourceImageIndex.*outside the sent range/);
+    });
+  });
+});
 
 describe("UnitGroundingService.extractUnitGrounding", () => {
   it("dynamically sends pages 5-28 in order, awaits each request, and persists only once", async () => {
@@ -274,7 +564,7 @@ describe("UnitGroundingService.extractUnitGrounding", () => {
   });
 
   it("an explicit page-range override is honored over the Unit's own stored range", async () => {
-    const overrideJson = JSON.stringify({ ...JSON.parse(VALID_EXTRACTION_JSON), concepts: [{ name: "Roots", description: "Roots absorb water.", sourcePages: [20], importance: "core" }] });
+    const overrideJson = JSON.stringify({ ...JSON.parse(VALID_EXTRACTION_JSON), concepts: [{ name: "Roots", description: "Roots absorb water.", sourceImageIndex: [1], importance: "core" }] });
     const h = makeHarness({ generateImpl: async () => ({ content: overrideJson, inputTokens: 10, outputTokens: 10, model: "gpt-4o-mini" }) });
     await h.service.extractUnitGrounding("unit-1", { pageRangeOverride: [20, 21] }, "actor-1");
     const promptCall = h.contextBuilder.buildUnitGroundingExtractionPrompt.mock.calls.map((call: any[]) => call[0]).find((arg: any) => arg.pageRangeStart === 20 && arg.pageRangeEnd === 21);
@@ -484,4 +774,113 @@ afterEach(() => {
     if (rendererTestOriginalEnv === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = rendererTestOriginalEnv;
   }
+});
+
+describe("large-Unit replacement grounding (bounded windows, no partial replacement)", () => {
+  // Each chunk's system prompt carries its physical page range; the fake provider answers with one
+  // concept per FIRST and LAST image of the chunk, named after the physical page it must map to.
+  const rangeOf = (prompt: string) => { const m = /range (\d+)-(\d+)/.exec(prompt)!; return [Number(m[1]), Number(m[2])]; };
+  const answer = (a: number, b: number) => {
+    const n = b - a + 1;
+    const concepts = [{ name: `P${a}`, description: "Evidence taken from this exact page of the source.", sourceImageIndex: [1], importance: "core" }];
+    if (n > 1) concepts.push({ name: `P${b}`, description: "Evidence taken from this exact page of the source.", sourceImageIndex: [n], importance: "core" });
+    return JSON.stringify({ ...JSON.parse(VALID_EXTRACTION_JSON), concepts });
+  };
+  function largeHarness(start: number, end: number, opts: { failFromPage?: number } = {}) {
+    const calls: Array<[number, number]> = [];
+    const h = makeHarness({
+      unitOverrides: { sourcePageStart: start, sourcePageEnd: end },
+      generateImpl: async (args: any) => {
+        const [a, b] = rangeOf(args.systemPrompt); calls.push([a, b]);
+        const content = opts.failFromPage !== undefined && a >= opts.failFromPage ? "not json" : answer(a, b);
+        return { content, inputTokens: 1000, outputTokens: 100, model: "gpt-4o-mini" };
+      },
+    });
+    h.contextBuilder.buildUnitGroundingExtractionPrompt.mockImplementation((c: any) => `range ${c.pageRangeStart}-${c.pageRangeEnd}`);
+    jest.spyOn(h.service as any, "createTpmPacer").mockReturnValue({ waitBeforeNextChunk: async () => undefined, waitAfterTpm429: async () => undefined, recordSuccessfulResponse: () => undefined });
+    const windowSpy = jest.spyOn(h.service as any, "generateGroundingForRange");
+    return { ...h, calls, windowSpy };
+  }
+  const expectNoWrites = (h: any) => { expect(h.prisma.client.unit.update).not.toHaveBeenCalled(); expect(h.prisma.client.unit.updateMany).not.toHaveBeenCalled(); };
+
+  it("partitions deterministically into contiguous, ordered, bounded, even-aligned windows (no hardcoded sizes)", () => {
+    expect(partitionUnitRange(8, 47, 40)).toEqual([[8, 47]]);
+    expect(partitionUnitRange(12, 52, 40)).toEqual([[12, 33], [34, 52]]);
+    expect(partitionUnitRange(103, 146, 40)).toEqual([[103, 124], [125, 146]]);
+    expect(partitionUnitRange(8, 53, 40)).toEqual([[8, 31], [32, 53]]);
+    expect(partitionUnitRange(56, 102, 40)).toEqual([[56, 79], [80, 102]]);
+    expect(partitionUnitRange(8, 55, 40)).toEqual([[8, 31], [32, 55]]);
+    for (const [s, e, max] of [[1, 41, 40], [1, 100, 40], [5, 205, 40], [1, 81, 40], [3, 30, 7], [1, 9, 1]] as const) {
+      const w = partitionUnitRange(s, e, max);
+      expect(w[0][0]).toBe(s); expect(w[w.length - 1][1]).toBe(e);
+      w.forEach(([a, b], i) => { expect(b - a + 1).toBeLessThanOrEqual(max); if (i) expect(a).toBe(w[i - 1][1] + 1); });
+      expect(w.length).toBe(Math.ceil((e - s + 1) / max));
+      expect(partitionUnitRange(s, e, max)).toEqual(w);
+    }
+    expect(() => partitionUnitRange(5, 4, 40)).toThrow(); expect(() => partitionUnitRange(1, 10, 0)).toThrow();
+  });
+
+  it("1/19: exactly 40 pages keeps the existing single-window path and result", async () => {
+    const h = largeHarness(8, 47);
+    const r = await h.service.generateReplacementGrounding("unit-1", "actor");
+    expect(h.windowSpy).toHaveBeenCalledTimes(1); expect(h.windowSpy.mock.calls[0].slice(3, 5)).toEqual([8, 47]);
+    const direct = await (h.windowSpy.mock.results[0].value as Promise<any>);
+    expect(r.notes).toEqual(direct.merged); expect(r).toMatchObject({ pageStart: 8, pageEnd: 47, chunkCount: 20 });
+    expectNoWrites(h);
+  });
+
+  it.each([[12, 52, 41], [103, 146, 44], [8, 53, 46], [56, 102, 47], [8, 55, 48]])("2/3: %i-%i (%i pages) is processed through bounded windows with exact physical provenance", async (start, end, pages) => {
+    const h = largeHarness(start, end);
+    const r = await h.service.generateReplacementGrounding("unit-1", "actor");
+    const windows = partitionUnitRange(start, end, 40);
+    expect(windows.length).toBeGreaterThan(1);
+    expect(h.windowSpy.mock.calls.map((c: any) => c.slice(3, 5))).toEqual(windows);
+    expect(r).toMatchObject({ pageStart: start, pageEnd: end, sourceKey: "science y5 .pdf" });
+    // Every chunk stays within one window; chunks tile the full range in order.
+    expect(h.calls.length).toBe(r.chunkCount);
+    expect(h.calls[0][0]).toBe(start); expect(h.calls[h.calls.length - 1][1]).toBe(end);
+    h.calls.forEach(([a, b], i) => { if (i) expect(a).toBe(h.calls[i - 1][1] + 1); expect(windows.some(([ws, we]) => a >= ws && b <= we)).toBe(true); });
+    // 12/13/14: every concept maps to exactly the physical page its name encodes; deterministic page order; no duplicates.
+    const pagesCited = r.notes.concepts.map((c: any) => { expect(c.sourcePages).toEqual([Number(c.name.slice(1))]); return c.sourcePages[0]; });
+    expect(pagesCited).toEqual([...pagesCited].sort((x, y) => x - y));
+    expect(new Set(pagesCited).size).toBe(pagesCited.length);
+    expect(pagesCited.every((p: number) => p >= start && p <= end)).toBe(true);
+    for (const [ws, we] of windows) { expect(pagesCited).toContain(ws); expect(pagesCited).toContain(we); }
+    expect(pages).toBe(end - start + 1);
+    // 5/10: no persistence inside the generator; every reservation closed by reconciliation.
+    expectNoWrites(h);
+    expect(h.reconcileBudget).toHaveBeenCalledTimes(h.reserveBudget.mock.calls.length); expect(h.releaseBudget).not.toHaveBeenCalled();
+  });
+
+  it("4: a larger generic range runs as 3 bounded windows", async () => {
+    const h = largeHarness(1, 81);
+    const r = await h.service.generateReplacementGrounding("unit-1", "actor");
+    expect(h.windowSpy.mock.calls.map((c: any) => c.slice(3, 5))).toEqual([[1, 28], [29, 56], [57, 81]]);
+    expect(r.notes.concepts[0].sourcePages).toEqual([1]); expect(r.notes.concepts[r.notes.concepts.length - 1].sourcePages).toEqual([81]);
+  });
+
+  it("6/8/9/11: first window succeeds, later window fails -> throws, zero writes, retry bound kept, all billable spend reconciled, nothing left open", async () => {
+    const h = largeHarness(8, 55, { failFromPage: 40 });
+    await expect(h.service.generateReplacementGrounding("unit-1", "actor")).rejects.toThrow(/failed validation/);
+    expectNoWrites(h);
+    expect(h.calls.filter(([a]) => a === 40)).toHaveLength(2); // existing two-attempt bound for the failing chunk
+    expect(h.calls.some(([a]) => a > 40)).toBe(false); // stops at the first failing chunk
+    expect(h.reserveBudget.mock.calls.length).toBeGreaterThan(1);
+    expect(h.reconcileBudget).toHaveBeenCalledTimes(h.reserveBudget.mock.calls.length); // incl. the failed chunk's actual spend
+    expect(h.releaseBudget).not.toHaveBeenCalled();
+  });
+
+  it("7: failure in the final window -> throws, zero writes, all reservations reconciled", async () => {
+    const h = largeHarness(8, 55, { failFromPage: 54 });
+    await expect(h.service.generateReplacementGrounding("unit-1", "actor")).rejects.toThrow();
+    expectNoWrites(h);
+    expect(h.reconcileBudget).toHaveBeenCalledTimes(h.reserveBudget.mock.calls.length); expect(h.releaseBudget).not.toHaveBeenCalled();
+  });
+
+  it("refuses to merge windows produced by different active models", async () => {
+    const h = largeHarness(8, 55);
+    let n = 0; h.windowSpy.mockImplementation(async () => ({ merged: JSON.parse(VALID_EXTRACTION_JSON), chunkNotes: [JSON.parse(VALID_EXTRACTION_JSON)], model: n++ === 0 ? "gpt-4o-mini" : "other-model", chunkCount: 1, pdfFingerprint: "x" }));
+    await expect(h.service.generateReplacementGrounding("unit-1", "actor")).rejects.toThrow(/model changed/);
+    expectNoWrites(h);
+  });
 });

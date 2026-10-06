@@ -1,0 +1,1186 @@
+{
+ "version": 1,
+ "generatedFrom": "2026-10-01/02 read-only curriculum pagination audit; local PDFs verified byte-identical to R2 via upload sha256 records",
+ "books": [
+  {
+   "subjectId": "cmucxctey00052qd5su3dqbh4",
+   "label": "BRITISH_INTL G1 English Language",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "british-intl/grade-1/english-language/y1-english-learner-s-book.pdf",
+   "sourceSha256": "e73fded43555c452cd423f435d9174fcd84987304651a94874ae5d7763cd2163",
+   "physicalPageCount": 179,
+   "offset": 1,
+   "offsetEvidence": "P6=5,P102=101,P173=172",
+   "finalUnitContentEnd": 175,
+   "finalUnitBoundaryEvidence": "Unit 9 content ends P175; P176-177 term 'Quiz 3', P178 series info, P179 back cover",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxctf300072qd5jelu3k9c",
+     "order": 1,
+     "persistedStart": 5,
+     "persistedEnd": 28
+    },
+    {
+     "unitId": "cmucxctfd000b2qd54oz3i7dl",
+     "order": 2,
+     "persistedStart": 29,
+     "persistedEnd": 45
+    },
+    {
+     "unitId": "cmucxctfk000f2qd5nx2v5yd0",
+     "order": 3,
+     "persistedStart": 46,
+     "persistedEnd": 63
+    },
+    {
+     "unitId": "cmucxctfq000j2qd58uf9r2ws",
+     "order": 4,
+     "persistedStart": 64,
+     "persistedEnd": 86
+    },
+    {
+     "unitId": "cmucxctfv000n2qd5jkf9yt9b",
+     "order": 5,
+     "persistedStart": 87,
+     "persistedEnd": 100
+    },
+    {
+     "unitId": "cmucxctg0000r2qd5wf58gbzi",
+     "order": 6,
+     "persistedStart": 101,
+     "persistedEnd": 117
+    },
+    {
+     "unitId": "cmucxctg7000v2qd5aad5q41g",
+     "order": 7,
+     "persistedStart": 118,
+     "persistedEnd": 142
+    },
+    {
+     "unitId": "cmucxctge000z2qd5kuvjr7cb",
+     "order": 8,
+     "persistedStart": 143,
+     "persistedEnd": 158
+    },
+    {
+     "unitId": "cmucxctgp00132qd5hw4z1zgy",
+     "order": 9,
+     "persistedStart": 159,
+     "persistedEnd": 179
+    }
+   ]
+  },
+  {
+   "subjectId": "cmucxcth600172qd5z7y827w5",
+   "label": "BRITISH_INTL G1 Mathematics",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "british-intl/grade-1/mathematics/y1-maths-learner-s-book.pdf",
+   "sourceSha256": "3e18df673789634152e244bca4d511ded38ee05fcbc9df1c403e52b0bb5e052c",
+   "physicalPageCount": 202,
+   "offset": 2,
+   "offsetEvidence": "P7=5,P90=88,P184=182,P196=194",
+   "finalUnitContentEnd": 193,
+   "finalUnitBoundaryEvidence": "P193 'Unit 18 Time and measurement - Quiz'; P194-195 'Term 3 Review Units 13-18', P196-200 Mathematical dictionary, P201 info, P202 back cover",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxcth900192qd547gxdka2",
+     "order": 1,
+     "persistedStart": 6,
+     "persistedEnd": 13
+    },
+    {
+     "unitId": "cmucxcthj001d2qd50p1gctc1",
+     "order": 2,
+     "persistedStart": 14,
+     "persistedEnd": 30
+    },
+    {
+     "unitId": "cmucxctht001h2qd5vuy5esoq",
+     "order": 3,
+     "persistedStart": 31,
+     "persistedEnd": 38
+    },
+    {
+     "unitId": "cmucxcti0001l2qd5hh3ki8tg",
+     "order": 4,
+     "persistedStart": 39,
+     "persistedEnd": 45
+    },
+    {
+     "unitId": "cmucxcti4001p2qd5lpw6hm9r",
+     "order": 5,
+     "persistedStart": 46,
+     "persistedEnd": 54
+    },
+    {
+     "unitId": "cmucxctib001t2qd57b4odopy",
+     "order": 6,
+     "persistedStart": 55,
+     "persistedEnd": 63
+    },
+    {
+     "unitId": "cmucxctig001x2qd5kfw8lyxf",
+     "order": 7,
+     "persistedStart": 64,
+     "persistedEnd": 71
+    },
+    {
+     "unitId": "cmucxctik00212qd5wgd2d452",
+     "order": 8,
+     "persistedStart": 72,
+     "persistedEnd": 79
+    },
+    {
+     "unitId": "cmucxctip00252qd5w9xzgeqm",
+     "order": 9,
+     "persistedStart": 80,
+     "persistedEnd": 88
+    },
+    {
+     "unitId": "cmucxctiv00292qd5b2eps99q",
+     "order": 10,
+     "persistedStart": 89,
+     "persistedEnd": 96
+    },
+    {
+     "unitId": "cmucxctj0002d2qd5jcpz1ven",
+     "order": 11,
+     "persistedStart": 97,
+     "persistedEnd": 113
+    },
+    {
+     "unitId": "cmucxctj6002h2qd5rjj9poqg",
+     "order": 12,
+     "persistedStart": 114,
+     "persistedEnd": 122
+    },
+    {
+     "unitId": "cmucxctjb002l2qd5lrchsbcj",
+     "order": 13,
+     "persistedStart": 123,
+     "persistedEnd": 131
+    },
+    {
+     "unitId": "cmucxctjf002p2qd5p2xu9nt6",
+     "order": 14,
+     "persistedStart": 132,
+     "persistedEnd": 159
+    },
+    {
+     "unitId": "cmucxctjl002t2qd556kf66pf",
+     "order": 15,
+     "persistedStart": 160,
+     "persistedEnd": 169
+    },
+    {
+     "unitId": "cmucxctjq002x2qd524js5h2v",
+     "order": 16,
+     "persistedStart": 170,
+     "persistedEnd": 176
+    },
+    {
+     "unitId": "cmucxctjv00312qd5a1s0tmrn",
+     "order": 17,
+     "persistedStart": 177,
+     "persistedEnd": 181
+    },
+    {
+     "unitId": "cmucxctk400352qd5woivrloy",
+     "order": 18,
+     "persistedStart": 182,
+     "persistedEnd": 202
+    }
+   ]
+  },
+  {
+   "subjectId": "cmucxctkh00392qd57uu63e4c",
+   "label": "BRITISH_INTL G1 Science",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "british-intl/grade-1/science/y1-science-learner-s-book.pdf",
+   "sourceSha256": "ea796fce8214b2cd423cd29891481202af478e0aa9c634e2e63398093b34635c",
+   "physicalPageCount": 147,
+   "offset": 1,
+   "offsetEvidence": "P9=8,P76=75,P132=131,P141=140",
+   "finalUnitContentEnd": 138,
+   "finalUnitBoundaryEvidence": "P138 'Unit 9 - What have you learnt'; P139 strand 'Quiz 4 Earth and space', P140-145 Science dictionary, P146 info, P147 back cover",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxctlj003b2qd5owfijeh7",
+     "order": 1,
+     "persistedStart": 8,
+     "persistedEnd": 16
+    },
+    {
+     "unitId": "cmucxctlp003f2qd57yi0e13w",
+     "order": 2,
+     "persistedStart": 17,
+     "persistedEnd": 30
+    },
+    {
+     "unitId": "cmucxctlw003j2qd5xq1jwi42",
+     "order": 3,
+     "persistedStart": 31,
+     "persistedEnd": 51
+    },
+    {
+     "unitId": "cmucxctm1003n2qd57kgqjgpu",
+     "order": 4,
+     "persistedStart": 52,
+     "persistedEnd": 74
+    },
+    {
+     "unitId": "cmucxctm5003r2qd5yyvo3j8d",
+     "order": 5,
+     "persistedStart": 75,
+     "persistedEnd": 90
+    },
+    {
+     "unitId": "cmucxctma003v2qd5f9pec7xi",
+     "order": 6,
+     "persistedStart": 91,
+     "persistedEnd": 103
+    },
+    {
+     "unitId": "cmucxctmh003z2qd5n01kwnmk",
+     "order": 7,
+     "persistedStart": 104,
+     "persistedEnd": 116
+    },
+    {
+     "unitId": "cmucxctmm00432qd558da9d5n",
+     "order": 8,
+     "persistedStart": 117,
+     "persistedEnd": 130
+    },
+    {
+     "unitId": "cmucxctmr00472qd5wokz49il",
+     "order": 9,
+     "persistedStart": 131,
+     "persistedEnd": 147
+    }
+   ]
+  },
+  {
+   "subjectId": "cmucxcu00009z2qd51fgrijd2",
+   "label": "BRITISH_INTL G4 English Language",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "british-intl/grade-4/english-language/english-y4-british.pdf",
+   "sourceSha256": "ea2632c6a2142abf3725d66b8e11a2b9480f162c936ddbffbb37987d6f8913de",
+   "physicalPageCount": 180,
+   "offset": 2,
+   "offsetEvidence": "P6=4,P77=75,P158=156,P174=172",
+   "finalUnitContentEnd": 174,
+   "finalUnitBoundaryEvidence": "Unit 9 content ends P174; P175-178 'Review 3' (term), P179 series info, P180 back cover",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxcu0400a12qd51qpq09qh",
+     "order": 1,
+     "persistedStart": 5,
+     "persistedEnd": 25
+    },
+    {
+     "unitId": "cmucxcu0g00a52qd5d9mjq5d2",
+     "order": 2,
+     "persistedStart": 26,
+     "persistedEnd": 40
+    },
+    {
+     "unitId": "cmucxcu0m00a92qd5pc8t5oq9",
+     "order": 3,
+     "persistedStart": 41,
+     "persistedEnd": 59
+    },
+    {
+     "unitId": "cmucxcu0r00ad2qd5asu9te4v",
+     "order": 4,
+     "persistedStart": 60,
+     "persistedEnd": 75
+    },
+    {
+     "unitId": "cmucxcu0x00ah2qd5vwyx817r",
+     "order": 5,
+     "persistedStart": 76,
+     "persistedEnd": 90
+    },
+    {
+     "unitId": "cmucxcu1300al2qd5svs90kdb",
+     "order": 6,
+     "persistedStart": 91,
+     "persistedEnd": 115
+    },
+    {
+     "unitId": "cmucxcu1d00ap2qd5s81yjlym",
+     "order": 7,
+     "persistedStart": 116,
+     "persistedEnd": 138
+    },
+    {
+     "unitId": "cmucxcu1j00at2qd5p3hdqkpu",
+     "order": 8,
+     "persistedStart": 139,
+     "persistedEnd": 155
+    },
+    {
+     "unitId": "cmucxcu1q00ax2qd5uglr1p7a",
+     "order": 9,
+     "persistedStart": 156,
+     "persistedEnd": 180
+    }
+   ]
+  },
+  {
+   "subjectId": "cmucxcuu000od2qd5sbgih0ln",
+   "label": "EG_NATIONAL G2 Mathematics",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "eg-national/grade-2/mathematics/math-ar-prim2-t1.pdf",
+   "sourceSha256": "acc963034c7593c38492b5970a326d12067c1ea6579a955b53450d5618366a3c",
+   "physicalPageCount": 128,
+   "offset": 2,
+   "offsetEvidence": "P18=16,P32=30,P58=56,P100=98,P120=118",
+   "finalUnitContentEnd": 125,
+   "finalUnitBoundaryEvidence": "P125 final instructional page; P126-127 blank notes, P128 back cover (matches 2026-09-27 verified override)",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxcuu300of2qd5pn815wgz",
+     "order": 1,
+     "persistedStart": 6,
+     "persistedEnd": 17
+    },
+    {
+     "unitId": "cmucxcuu900oj2qd5jd72u5dv",
+     "order": 2,
+     "persistedStart": 18,
+     "persistedEnd": 31
+    },
+    {
+     "unitId": "cmucxcuue00on2qd5kqpme7go",
+     "order": 3,
+     "persistedStart": 32,
+     "persistedEnd": 49
+    },
+    {
+     "unitId": "cmucxcuum00or2qd532l8s50b",
+     "order": 4,
+     "persistedStart": 50,
+     "persistedEnd": 57
+    },
+    {
+     "unitId": "cmucxcuut00ov2qd5l8whj5ei",
+     "order": 5,
+     "persistedStart": 58,
+     "persistedEnd": 69
+    },
+    {
+     "unitId": "cmucxcuuz00oz2qd56t5mtbf5",
+     "order": 6,
+     "persistedStart": 70,
+     "persistedEnd": 99
+    },
+    {
+     "unitId": "cmucxcuvb00p32qd59do4qf7c",
+     "order": 7,
+     "persistedStart": 100,
+     "persistedEnd": 105
+    },
+    {
+     "unitId": "cmucxcuvg00p72qd52oji5j5h",
+     "order": 8,
+     "persistedStart": 106,
+     "persistedEnd": 119
+    },
+    {
+     "unitId": "cmucxcuvl00pb2qd5ptpa04qr",
+     "order": 9,
+     "persistedStart": 120,
+     "persistedEnd": 125
+    }
+   ]
+  },
+  {
+   "subjectId": "cmucxcv7p00wt2qd531l7qrnd",
+   "label": "EG_NATIONAL G4 Arabic Language",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "eg-national/grade-4/arabic-language/arabic-language-prim4-t1.pdf",
+   "sourceSha256": "3de9364ebb8d97b0c9e5b6edda398d02bd1dc61a6986de65d982efe3aecbf91d",
+   "physicalPageCount": 154,
+   "offset": 1,
+   "offsetEvidence": "P8=7,P56=55,P103=102,P148=147",
+   "finalUnitContentEnd": 146,
+   "finalUnitBoundaryEvidence": "Unit 3 lesson content ends P146; P147-150 'نصوص استماع الوحدات' all-unit listening appendix, P151 blank, P152-154 colophon/covers",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxcv7r00wv2qd51j0au175",
+     "order": 1,
+     "persistedStart": 7,
+     "persistedEnd": 54
+    },
+    {
+     "unitId": "cmucxcv8f00x52qd5fsk29tlx",
+     "order": 2,
+     "persistedStart": 55,
+     "persistedEnd": 101
+    },
+    {
+     "unitId": "cmucxcv8z00xf2qd5l9o1rdlb",
+     "order": 3,
+     "persistedStart": 102,
+     "persistedEnd": 150
+    }
+   ]
+  },
+  {
+   "subjectId": "cmucxcv9h00xp2qd5jhsxddxt",
+   "label": "EG_NATIONAL G4 Mathematics",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "eg-national/grade-4/mathematics/math-ar-prim4-t1.pdf",
+   "sourceSha256": "504388e8259623c9dbdef83b885d37b3fa735442fe1b039a53c58580f77174e9",
+   "physicalPageCount": 136,
+   "offset": 8,
+   "offsetEvidence": "P72=64,P125=117,P130=122 (+P100-125 earlier)",
+   "finalUnitContentEnd": 135,
+   "finalUnitBoundaryEvidence": "Unit 8 content ends P135; P136 colophon/back",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxcv9k00xr2qd5ox9up9w3",
+     "order": 1,
+     "persistedStart": 3,
+     "persistedEnd": 23
+    },
+    {
+     "unitId": "cmucxcvag00y92qd5wn93e68c",
+     "order": 2,
+     "persistedStart": 24,
+     "persistedEnd": 39
+    },
+    {
+     "unitId": "cmucxcvbb00yl2qd56xk1tbrh",
+     "order": 3,
+     "persistedStart": 40,
+     "persistedEnd": 58
+    },
+    {
+     "unitId": "cmucxcvc200z12qd5i2qg2631",
+     "order": 4,
+     "persistedStart": 59,
+     "persistedEnd": 70
+    },
+    {
+     "unitId": "cmucxcvcd00zb2qd50p9kg2m6",
+     "order": 5,
+     "persistedStart": 71,
+     "persistedEnd": 85
+    },
+    {
+     "unitId": "cmucxcvcx00zr2qd5auie2zy5",
+     "order": 6,
+     "persistedStart": 86,
+     "persistedEnd": 99
+    },
+    {
+     "unitId": "cmucxcvdn01052qd5414732fw",
+     "order": 7,
+     "persistedStart": 100,
+     "persistedEnd": 123
+    },
+    {
+     "unitId": "cmucxcveu010t2qd5ps9qk6g8",
+     "order": 8,
+     "persistedStart": 124,
+     "persistedEnd": 136
+    }
+   ]
+  },
+  {
+   "subjectId": "cmucxcvib012t2qd5yehrw2aq",
+   "label": "EG_NATIONAL G4 Islamic Religious Education",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "eg-national/grade-4/islamic-religious-education/islamic-religion-prim4-t1.pdf",
+   "sourceSha256": "bf4b3f8e7e544b0223327c37002baaa52b73513d0495c0689942ad61eca2cf3f",
+   "physicalPageCount": 98,
+   "offset": 1,
+   "offsetEvidence": "P8=7,P37=36,P66=65,P92=91",
+   "finalUnitContentEnd": 92,
+   "finalUnitBoundaryEvidence": "P91-92 'مراجعة على الوحدة الثالثة'; P93-96 general term assessments, P97 colophon, P98 back cover",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxcvig012v2qd5z0yxdy6s",
+     "order": 1,
+     "persistedStart": 7,
+     "persistedEnd": 35
+    },
+    {
+     "unitId": "cmucxcvjb013b2qd5ty7w5a0i",
+     "order": 2,
+     "persistedStart": 36,
+     "persistedEnd": 64
+    },
+    {
+     "unitId": "cmucxcvk2013r2qd5to3tb302",
+     "order": 3,
+     "persistedStart": 65,
+     "persistedEnd": 98
+    }
+   ]
+  },
+  {
+   "subjectId": "cmucxcvks01472qd5crlkw4el",
+   "label": "EG_NATIONAL G4 Social Studies",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "eg-national/grade-4/social-studies/social-studies-prim4-t1.pdf",
+   "sourceSha256": "e86ecaa2485dc8cb7c2b0b5d52595949d0f963008e3582d0ad9a305f0b9c90d1",
+   "physicalPageCount": 114,
+   "offset": 1,
+   "offsetEvidence": "text layer: 97/97 points offset +1",
+   "finalUnitContentEnd": 108,
+   "finalUnitBoundaryEvidence": "P107-108 'تقييم الوحدة الثالثة'; P109-111 term review, P112 references, P113 colophon, P114 back cover",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxcvkv01492qd5aapjpsnh",
+     "order": 1,
+     "persistedStart": 10,
+     "persistedEnd": 39
+    },
+    {
+     "unitId": "cmucxcvlf014j2qd5sfa0fqzc",
+     "order": 2,
+     "persistedStart": 40,
+     "persistedEnd": 71
+    },
+    {
+     "unitId": "cmucxcvm9014v2qd5aohzvhl4",
+     "order": 3,
+     "persistedStart": 72,
+     "persistedEnd": 112
+    }
+   ]
+  },
+  {
+   "subjectId": "cmucxcvor01612qd59g7kpv8n",
+   "label": "EG_NATIONAL G4 Science",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "eg-national/grade-4/science/science-ar-prim4-t1.pdf",
+   "sourceSha256": "cae25315d4d823530cb219edbcefaac3e7c67413d31eac665080c3d5a4e86144",
+   "physicalPageCount": 106,
+   "offset": 1,
+   "offsetEvidence": "text layer: 59/59 points offset +1",
+   "finalUnitContentEnd": 100,
+   "finalUnitBoundaryEvidence": "Lesson 1-8 content ends P100; P101-104 general science-skills appendix, P105 colophon, P106 back cover",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxcvot01632qd5e62ab9tk",
+     "order": 1,
+     "persistedStart": 6,
+     "persistedEnd": 25
+    },
+    {
+     "unitId": "cmucxcvp101672qd5oditdn3p",
+     "order": 2,
+     "persistedStart": 26,
+     "persistedEnd": 35
+    },
+    {
+     "unitId": "cmucxcvp7016b2qd55ls9bz5n",
+     "order": 3,
+     "persistedStart": 36,
+     "persistedEnd": 49
+    },
+    {
+     "unitId": "cmucxcvpd016f2qd5sa5i831s",
+     "order": 4,
+     "persistedStart": 50,
+     "persistedEnd": 67
+    },
+    {
+     "unitId": "cmucxcvph016j2qd5r01ua0vu",
+     "order": 5,
+     "persistedStart": 68,
+     "persistedEnd": 77
+    },
+    {
+     "unitId": "cmucxcvpt016n2qd5ux8r06v9",
+     "order": 6,
+     "persistedStart": 78,
+     "persistedEnd": 83
+    },
+    {
+     "unitId": "cmucxcvq4016r2qd5wnrxull8",
+     "order": 7,
+     "persistedStart": 84,
+     "persistedEnd": 91
+    },
+    {
+     "unitId": "cmucxcvq9016v2qd5kn1763eh",
+     "order": 8,
+     "persistedStart": 92,
+     "persistedEnd": 106
+    }
+   ]
+  },
+  {
+   "subjectId": "cmucxcvqh01712qd5joicbbq3",
+   "label": "EG_NATIONAL G5 Arabic Language",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "eg-national/grade-5/arabic-language/arabic-langugae-prim5-t1.pdf",
+   "sourceSha256": "9d09641b074b40d93ba2d8f9560bc5d91cfe717d80f90fc15d05b8539c5065d8",
+   "physicalPageCount": 154,
+   "offset": 1,
+   "offsetEvidence": "P8=7,P54=53,P100=99,P148=147",
+   "finalUnitContentEnd": 145,
+   "finalUnitBoundaryEvidence": "Unit 3 content ends P145; P146-150 listening-texts appendix, P151-154 title/colophon/covers",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxcvqk01732qd5fj8o1cfe",
+     "order": 1,
+     "persistedStart": 7,
+     "persistedEnd": 52
+    },
+    {
+     "unitId": "cmucxcvqz017d2qd50fjv7p7q",
+     "order": 2,
+     "persistedStart": 53,
+     "persistedEnd": 98
+    },
+    {
+     "unitId": "cmucxcvrb017n2qd50r6eyw1v",
+     "order": 3,
+     "persistedStart": 99,
+     "persistedEnd": 150
+    }
+   ]
+  },
+  {
+   "subjectId": "cmucxcvrs017x2qd53uns1slq",
+   "label": "EG_NATIONAL G5 Mathematics",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "eg-national/grade-5/mathematics/math-ar-prim5-t1.pdf",
+   "sourceSha256": "1d1b5ad6c275e338f172a178dbcd5ce34246ec7f8681a59c8be74ad631f6f38f",
+   "physicalPageCount": 142,
+   "offset": 9,
+   "offsetEvidence": "P82=73,P122=113,P136=127",
+   "finalUnitContentEnd": 139,
+   "finalUnitBoundaryEvidence": "Unit 6 content ends P139; P140 decorative frame page, P141 colophon, P142 back cover",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxcvs0017z2qd5s6rim1j2",
+     "order": 1,
+     "persistedStart": 3,
+     "persistedEnd": 43
+    },
+    {
+     "unitId": "cmucxcvte018n2qd5by5i5z0g",
+     "order": 2,
+     "persistedStart": 44,
+     "persistedEnd": 64
+    },
+    {
+     "unitId": "cmucxcvu201952qd5huiyunq8",
+     "order": 3,
+     "persistedStart": 65,
+     "persistedEnd": 80
+    },
+    {
+     "unitId": "cmucxcvug019h2qd5toqhw17y",
+     "order": 4,
+     "persistedStart": 81,
+     "persistedEnd": 91
+    },
+    {
+     "unitId": "cmucxcvux019t2qd5zxshhj07",
+     "order": 5,
+     "persistedStart": 92,
+     "persistedEnd": 120
+    },
+    {
+     "unitId": "cmucxcvw201al2qd5fx3txroz",
+     "order": 6,
+     "persistedStart": 121,
+     "persistedEnd": 142
+    }
+   ]
+  },
+  {
+   "subjectId": "cmucxcw2b01dr2qd56mrjztgr",
+   "label": "EG_NATIONAL G5 Science",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "eg-national/grade-5/science/science-ar-prim5-t1.pdf",
+   "sourceSha256": "67f645ab1f2ee0fd8a576df32c743a1961a259e2c2253e882357069b80ebefa7",
+   "physicalPageCount": 113,
+   "offset": 3,
+   "offsetEvidence": "P53=50,P93=90,P107=104",
+   "finalUnitContentEnd": 106,
+   "finalUnitBoundaryEvidence": "P105-106 chapter 9 enrichment corner; P107-110 general skills appendix, P111 blank, P112 colophon, P113 back cover",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxcw2d01dt2qd5kmo5n19n",
+     "order": 1,
+     "persistedStart": 6,
+     "persistedEnd": 19
+    },
+    {
+     "unitId": "cmucxcw2k01dx2qd55wpkhzqx",
+     "order": 2,
+     "persistedStart": 20,
+     "persistedEnd": 27
+    },
+    {
+     "unitId": "cmucxcw2t01e12qd5lg8y6cds",
+     "order": 3,
+     "persistedStart": 28,
+     "persistedEnd": 43
+    },
+    {
+     "unitId": "cmucxcw3601e52qd53gehuw2f",
+     "order": 4,
+     "persistedStart": 44,
+     "persistedEnd": 51
+    },
+    {
+     "unitId": "cmucxcw3d01e92qd58erwsawl",
+     "order": 5,
+     "persistedStart": 52,
+     "persistedEnd": 63
+    },
+    {
+     "unitId": "cmucxcw3k01ed2qd5zdx20rqt",
+     "order": 6,
+     "persistedStart": 64,
+     "persistedEnd": 71
+    },
+    {
+     "unitId": "cmucxcw3q01eh2qd5mq9yyt5v",
+     "order": 7,
+     "persistedStart": 72,
+     "persistedEnd": 79
+    },
+    {
+     "unitId": "cmucxcw4201el2qd5h9rkiy52",
+     "order": 8,
+     "persistedStart": 80,
+     "persistedEnd": 91
+    },
+    {
+     "unitId": "cmucxcw4d01ep2qd5iboyq742",
+     "order": 9,
+     "persistedStart": 92,
+     "persistedEnd": 113
+    }
+   ]
+  },
+  {
+   "subjectId": "cmucxcwb001gj2qd5s0ppynjo",
+   "label": "EG_NATIONAL G6 Arabic Language",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "eg-national/grade-6/arabic-language/arabic-primary6-t1.pdf",
+   "sourceSha256": "01b48ef92011b9b3819a2a50b4497707bfbaeecba4e29c915c48d747aa45d85e",
+   "physicalPageCount": 154,
+   "offset": 1,
+   "offsetEvidence": "P8=7,P54=53,P101=100,P148=147",
+   "finalUnitContentEnd": 145,
+   "finalUnitBoundaryEvidence": "Unit 3 content ends P145; P146-150 listening-texts appendix, P151-154 blank/colophon/covers (matches prior override)",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxcwbh01gl2qd5t4msjrdv",
+     "order": 1,
+     "persistedStart": 7,
+     "persistedEnd": 52
+    },
+    {
+     "unitId": "cmucxcwdx01gv2qd5u0m17zui",
+     "order": 2,
+     "persistedStart": 53,
+     "persistedEnd": 99
+    },
+    {
+     "unitId": "cmucxcwey01h52qd5uxwje5s1",
+     "order": 3,
+     "persistedStart": 100,
+     "persistedEnd": 145
+    }
+   ]
+  },
+  {
+   "subjectId": "cmucxcwfs01hf2qd55hfkccfe",
+   "label": "EG_NATIONAL G6 Mathematics",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "eg-national/grade-6/mathematics/math-primary6-t1.pdf",
+   "sourceSha256": "1a4728dbc41d350b53b64b486fac74beaea61934500043a29336e5e768a43058",
+   "physicalPageCount": 122,
+   "offset": 9,
+   "offsetEvidence": "P60=51,P100=91,P116=107 (+P10-P120 earlier)",
+   "finalUnitContentEnd": 120,
+   "finalUnitBoundaryEvidence": "Unit 7 content ends P120; P121 colophon, P122 back cover",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxcwfx01hh2qd50ixjsqyb",
+     "order": 1,
+     "persistedStart": 1,
+     "persistedEnd": 14
+    },
+    {
+     "unitId": "cmucxcwh001hr2qd57tzrqnwi",
+     "order": 2,
+     "persistedStart": 15,
+     "persistedEnd": 34
+    },
+    {
+     "unitId": "cmucxcwi301i52qd5ja33d3h4",
+     "order": 3,
+     "persistedStart": 35,
+     "persistedEnd": 58
+    },
+    {
+     "unitId": "cmucxcwji01il2qd5jr5u0i0o",
+     "order": 4,
+     "persistedStart": 59,
+     "persistedEnd": 68
+    },
+    {
+     "unitId": "cmucxcwjx01it2qd5yn3eh2h8",
+     "order": 5,
+     "persistedStart": 69,
+     "persistedEnd": 80
+    },
+    {
+     "unitId": "cmucxcwkg01j32qd5wrkdje47",
+     "order": 6,
+     "persistedStart": 81,
+     "persistedEnd": 98
+    },
+    {
+     "unitId": "cmucxcwkz01jf2qd50jljt46j",
+     "order": 7,
+     "persistedStart": 99,
+     "persistedEnd": 122
+    }
+   ]
+  },
+  {
+   "subjectId": "cmucxcwt901mv2qd5u4la5ply",
+   "label": "EG_NATIONAL G6 Science",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "eg-national/grade-6/science/science-primary6-t1.pdf",
+   "sourceSha256": "84cc3a24e55d12f3d12c499ff4d2b5627c46c05e438ab742b317ff793bfc5f18",
+   "physicalPageCount": 98,
+   "offset": 1,
+   "offsetEvidence": "P7=6,P55=54,P92=91",
+   "finalUnitContentEnd": 93,
+   "finalUnitBoundaryEvidence": "P88-89 lesson 10 review, P90-93 chapter 10 enrichment corner; P94-96 lab-safety appendix, P97 colophon, P98 back cover",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxcwtc01mx2qd5yk0awt93",
+     "order": 1,
+     "persistedStart": 6,
+     "persistedEnd": 17
+    },
+    {
+     "unitId": "cmucxcwtm01n12qd5u21qrki1",
+     "order": 2,
+     "persistedStart": 18,
+     "persistedEnd": 23
+    },
+    {
+     "unitId": "cmucxcwtr01n52qd52sspundu",
+     "order": 3,
+     "persistedStart": 24,
+     "persistedEnd": 33
+    },
+    {
+     "unitId": "cmucxcwtz01n92qd5yxb8n3ik",
+     "order": 4,
+     "persistedStart": 34,
+     "persistedEnd": 45
+    },
+    {
+     "unitId": "cmucxcwu701nd2qd5oabzu4jr",
+     "order": 5,
+     "persistedStart": 46,
+     "persistedEnd": 53
+    },
+    {
+     "unitId": "cmucxcwug01nh2qd5l07yhol9",
+     "order": 6,
+     "persistedStart": 54,
+     "persistedEnd": 61
+    },
+    {
+     "unitId": "cmucxcwum01nl2qd5pqjuhg56",
+     "order": 7,
+     "persistedStart": 62,
+     "persistedEnd": 67
+    },
+    {
+     "unitId": "cmucxcwux01np2qd51qp64rlm",
+     "order": 8,
+     "persistedStart": 68,
+     "persistedEnd": 73
+    },
+    {
+     "unitId": "cmucxcwv501nt2qd5ro5o0739",
+     "order": 9,
+     "persistedStart": 74,
+     "persistedEnd": 81
+    },
+    {
+     "unitId": "cmucxcwvg01nx2qd592xqxw9g",
+     "order": 10,
+     "persistedStart": 82,
+     "persistedEnd": 98
+    }
+   ]
+  },
+  {
+   "subjectId": "cmucxcww001o12qd5uj6wg47o",
+   "label": "EG_NATIONAL G6 Social Studies",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "eg-national/grade-6/social-studies/social-studies-primary6-t1.pdf",
+   "sourceSha256": "de9dab19e19cec9ffe23fa6a3718f70a62765f624f460e40b5e6da888ca2a296",
+   "physicalPageCount": 114,
+   "offset": 1,
+   "offsetEvidence": "P9=8,P43=42,P108=107",
+   "finalUnitContentEnd": 108,
+   "finalUnitBoundaryEvidence": "P107-108 'تقييم الوحدة الثالثة'; P109-112 term review, P113 colophon, P114 back cover",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxcww301o32qd5obqcf379",
+     "order": 1,
+     "persistedStart": 8,
+     "persistedEnd": 41
+    },
+    {
+     "unitId": "cmucxcwwr01od2qd58pi55fad",
+     "order": 2,
+     "persistedStart": 42,
+     "persistedEnd": 75
+    },
+    {
+     "unitId": "cmucxcwx601on2qd5wjp74scb",
+     "order": 3,
+     "persistedStart": 76,
+     "persistedEnd": 114
+    }
+   ]
+  },
+  {
+   "subjectId": "cmucxcw4q01et2qd5zrl5hrv4",
+   "label": "EG_NATIONAL G5 Social Studies",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "eg-national/grade-5/social-studies/social-studies-prim5-t1.pdf",
+   "sourceSha256": "6fc1db7102ae5dde9f17aa63590752063ff4d70c28f78ec9159d602cb625f8a4",
+   "physicalPageCount": 98,
+   "offset": 1,
+   "offsetEvidence": "P9=8,P41=40,P92=91",
+   "finalUnitContentEnd": 93,
+   "finalUnitBoundaryEvidence": "P92-93 'تقييم الوحدة الثالثة'; P94-96 term review, P97 colophon, P98 back cover",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxcw4s01ev2qd568t4eic5",
+     "order": 1,
+     "persistedStart": 8,
+     "persistedEnd": 39
+    },
+    {
+     "unitId": "cmucxcw5p01f52qd5eu5m3pwz",
+     "order": 2,
+     "persistedStart": 40,
+     "persistedEnd": 67
+    },
+    {
+     "unitId": "cmucxcw7001ff2qd59crm0f0m",
+     "order": 3,
+     "persistedStart": 68,
+     "persistedEnd": 98
+    }
+   ]
+  },
+  {
+   "subjectId": "cmucxcwqg01lj2qd5jyc3a89h",
+   "label": "EG_NATIONAL G6 Islamic Religious Education",
+   "classification": "OFFSET_CONSTANT",
+   "sourceFile": "eg-national/grade-6/islamic-religious-education/islamic-education-primary6-t1.pdf",
+   "sourceSha256": "093d44068a9c1a5a1d283ec9b80cc7357bf69ec2648dd89330b6bbe5b881d2f9",
+   "physicalPageCount": 98,
+   "offset": 1,
+   "offsetEvidence": "text layer: 46/47 points offset +1",
+   "finalUnitContentEnd": 94,
+   "finalUnitBoundaryEvidence": "P94 'مراجعة على الوحدة الثالثة'; P95-96 final assessments, P97 colophon, P98 back cover",
+   "expectedUnits": [
+    {
+     "unitId": "cmucxcwqi01ll2qd5mqkdqvqk",
+     "order": 1,
+     "persistedStart": 7,
+     "persistedEnd": 39
+    },
+    {
+     "unitId": "cmucxcwr801m12qd5mgijbubd",
+     "order": 2,
+     "persistedStart": 40,
+     "persistedEnd": 69
+    },
+    {
+     "unitId": "cmucxcws001mh2qd5tzeueh93",
+     "order": 3,
+     "persistedStart": 70,
+     "persistedEnd": 98
+    }
+   ]
+  }
+ ],
+ "excluded": [
+  {
+   "subjectId": "cmucxctob004d2qd5ajweuz1n",
+   "label": "BRITISH_INTL G3 English Language",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): P6=6,P104=104,P170=170"
+  },
+  {
+   "subjectId": "cmucxctr7005f2qd5b94tz37g",
+   "label": "BRITISH_INTL G3 Mathematics",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): P7=7,P103=103,P184=184,P195=195"
+  },
+  {
+   "subjectId": "cmucxctuz007h2qd509z05jhf",
+   "label": "BRITISH_INTL G3 Science",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): P13=13,P81=81,P133=133,P139=139"
+  },
+  {
+   "subjectId": "cmucxctxs008t2qd5byvyk0ft",
+   "label": "BRITISH_INTL G4 Science",
+   "classification": "OFFSET_NONCONSTANT",
+   "reason": "piecewise +2 (Unit 1) / +1"
+  },
+  {
+   "subjectId": "cmucxcu2100b12qd53jgefke6",
+   "label": "BRITISH_INTL G4 Mathematics",
+   "classification": "OFFSET_NONCONSTANT",
+   "reason": "piecewise -2/-3/-4; printed pages missing from scan (incl. Unit 10 opener)"
+  },
+  {
+   "subjectId": "cmucxcu9500d52qd5zakdijbf",
+   "label": "BRITISH_INTL G5 Science",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): P9=9,P75=75,P131=131,P140=140"
+  },
+  {
+   "subjectId": "cmucxcuf700gf2qd5t5q38tcx",
+   "label": "BRITISH_INTL G6 English Language",
+   "classification": "OFFSET_NONCONSTANT",
+   "reason": "two printed pages per scan page; physical = floor(printed/2)+2"
+  },
+  {
+   "subjectId": "cmucxcugu00hh2qd5gjpr3q2s",
+   "label": "BRITISH_INTL G6 Mathematics",
+   "classification": "OFFSET_NONCONSTANT",
+   "reason": "piecewise 0/+1/+2"
+  },
+  {
+   "subjectId": "cmucxcukc00jj2qd5z4hry58h",
+   "label": "BRITISH_INTL G6 Science",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): P9=9,P69=69,P127=127,P137=137"
+  },
+  {
+   "subjectId": "cmucxcun700kn2qd5ajc9fhd1",
+   "label": "EG_NATIONAL G1 English Language",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): text layer: 50/51 footer points offset 0"
+  },
+  {
+   "subjectId": "cmucxcurp00n12qd52mwjl05c",
+   "label": "EG_NATIONAL G2 Arabic Language",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): text layer: 18/20 points offset 0"
+  },
+  {
+   "subjectId": "cmucxcuvs00pf2qd5a5zrr74g",
+   "label": "EG_NATIONAL G2 English Language",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): P6=6,P50=50,P83=83,P98=98"
+  },
+  {
+   "subjectId": "cmucxcuwy00q52qd554pikgig",
+   "label": "EG_NATIONAL G2 Islamic Religious Education",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): P9=9,P37=37,P65=65,P82=82"
+  },
+  {
+   "subjectId": "cmucxcv1k00sp2qd5c6ekf2jo",
+   "label": "EG_NATIONAL G3 Mathematics",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): text layer: 110/110 points offset 0"
+  },
+  {
+   "subjectId": "cmucxcv3500tv2qd57rywrgoh",
+   "label": "EG_NATIONAL G3 English Language",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): P6=6,P68=68,P100=100,P114=114"
+  },
+  {
+   "subjectId": "cmucxcv5l00vj2qd5164wippr",
+   "label": "EG_NATIONAL G3 Islamic Religious Education",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): text layer: 19/19 points offset 0"
+  },
+  {
+   "subjectId": "cmucxcvwi01av2qd5zfuqd37z",
+   "label": "EG_NATIONAL G5 English Language",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): P8=8,P62=62,P94=94,P107=107"
+  },
+  {
+   "subjectId": "cmucxcvzb01cj2qd563injcar",
+   "label": "EG_NATIONAL G5 Islamic Religious Education",
+   "classification": "EDITION_MISMATCH",
+   "reason": "catalog Units/Topics are a verbatim copy of G3 Islamic; PDF TOC differs"
+  },
+  {
+   "subjectId": "cmucxcw7q01fn2qd5dtts57f0",
+   "label": "EG_NATIONAL G5 Information and Communication Technology",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): text layer: 37/37 points offset 0"
+  },
+  {
+   "subjectId": "cmucxcwlp01jp2qd5ef7c1jpm",
+   "label": "EG_NATIONAL G6 English Language",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): P8=8,P55=55,P87=87,P107=107"
+  },
+  {
+   "subjectId": "cmucxcwxs01ox2qd5e9r4w908",
+   "label": "EG_NATIONAL G6 Information and Communication Technology",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): text layer: 16/16 points offset 0"
+  },
+  {
+   "subjectId": "cmucxcub400eb2qd5a7xngtj7",
+   "label": "BRITISH_INTL G5 Mathematics",
+   "classification": "UNKNOWN",
+   "reason": "no verified local copy of the R2 source"
+  },
+  {
+   "subjectId": "cmucxcuoy00ld2qd5uhgaj4o1",
+   "label": "EG_NATIONAL G1 Islamic Religious Education",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): text layer: 54/54 points offset 0"
+  },
+  {
+   "subjectId": "cmucxcuzf00rt2qd5mokbdrcr",
+   "label": "EG_NATIONAL G3 Arabic Language",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): P8=8,P46=46,P85=85,P122=122"
+  },
+  {
+   "subjectId": "cmucxcvf6010z2qd5vwcgz7ge",
+   "label": "EG_NATIONAL G4 English Language",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): P62=62,P97=97,P115=115"
+  },
+  {
+   "subjectId": "cmucxcvn301572qd5tudvpy7j",
+   "label": "EG_NATIONAL G4 Information and Communication Technology",
+   "classification": "OK",
+   "reason": "persisted ranges are physical (offset 0): P6=6,P31=31,P49=49"
+  }
+ ]
+}

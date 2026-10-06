@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getBillingCopy } from "@/content/billing";
@@ -15,17 +15,22 @@ interface BillingSubject {
   nameEn: string;
   nameAr: string;
   priceEGP: number | null;
+  entitlement: "ACTIVE" | "LOCKED";
+  grade: { nameEn: string; nameAr: string };
+  curriculum: { nameEn: string; nameAr: string };
 }
 interface Subscription {
   id: string;
   status: string;
   monthlyTotalEGP: string;
   subjects: Array<{ id: string; nameEn: string; nameAr: string }>;
+  pendingSubjectChange?: { subjectIds: string[]; checkoutUrl?: string } | null;
 }
 
 export default function BillingPage() {
   const { locale } = useParams<{ locale: Locale }>();
   const router = useRouter();
+  const requestedSubjectId = useSearchParams().get("subjectId");
   const isAr = locale === "ar";
   const copy = getBillingCopy(locale);
   const instapayCopy = getInstapayCopy(locale);
@@ -47,6 +52,7 @@ export default function BillingPage() {
       .then(([subjectData, subData]) => {
         setSubjects(subjectData);
         setSubscription(subData);
+        setSelectedSubjectIds(subjectData.filter(s => s.id === requestedSubjectId || (subData?.status === "active" && subData.subjects.some(owned => owned.id === s.id))).filter(s => s.priceEGP != null).map(s => s.id));
       })
       .catch((err) => {
         if (err instanceof ApiError && err.status === 404) {
@@ -116,6 +122,12 @@ export default function BillingPage() {
         <SmartifyContainer className="mx-auto max-w-2xl">
           <h1 className="text-2xl font-bold text-navy-900">{copy.title}</h1>
           <p className="mt-2 text-neutral-600">{copy.body}</p>
+          {requestedSubjectId && subjects?.some(s => s.id === requestedSubjectId) && (
+            <p className="mt-4 rounded-sf bg-amber-50 p-4 text-sm text-amber-900">
+              {isAr ? "إضافة مادة إلى اشتراكك: " : "Add a subject to your subscription: "}
+              {subjects.filter(s => s.id === requestedSubjectId).map(s => `${isAr ? s.nameAr : s.nameEn} · ${isAr ? s.grade.nameAr : s.grade.nameEn} · ${isAr ? s.curriculum.nameAr : s.curriculum.nameEn} · ${s.priceEGP == null ? copy.unpriced : `${s.priceEGP} ${copy.monthSuffix}`}`).join("")}
+            </p>
+          )}
 
           <div className="mt-8 rounded-sf-lg border border-neutral-200 bg-white p-6">
             <h2 className="mb-3 font-semibold text-navy-900">{copy.currentPlanTitle}</h2>
@@ -128,6 +140,11 @@ export default function BillingPage() {
                 <p className="text-neutral-500">
                   {copy.statusLabel}: <span className="font-medium text-navy-900">{subscription.status}</span>
                 </p>
+                {subscription.pendingSubjectChange && (
+                  <a className="inline-block font-medium text-ai-600 underline" href={subscription.pendingSubjectChange.checkoutUrl ?? `/${locale}/billing/instapay?kind=subscription&subjectIds=${encodeURIComponent(subscription.pendingSubjectChange.subjectIds.join(","))}`}>
+                    {isAr ? "متابعة الدفع لإضافة المادة" : "Continue payment to add your subject"}
+                  </a>
+                )}
                 {subscription.status === "active" && (
                   <SmartifyButton variant="secondary" onClick={handleCancel} className="mt-2">
                     {copy.cancelLabel}
@@ -182,7 +199,7 @@ export default function BillingPage() {
                         </span>
                         <input
                           type="checkbox"
-                          disabled={unpriced}
+                          disabled={unpriced || (subscription?.status === "active" && subscription.subjects.some(owned => owned.id === subject.id))}
                           checked={checked}
                           onChange={() =>
                             setSelectedSubjectIds((ids) =>

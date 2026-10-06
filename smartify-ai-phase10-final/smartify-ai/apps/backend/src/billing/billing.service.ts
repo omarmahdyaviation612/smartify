@@ -6,6 +6,9 @@ import { loadBackendEnv } from "@smartify/config";
 import { TutorQuestionPacksService } from "../tutor-question-packs/tutor-question-packs.service";
 import { ReferralService } from "../referral/referral.service";
 import { findOfferedSubjects } from "../common/grade-subject.util";
+import { isTestStudent } from "../common/subject-access";
+import { hasSubjectEntitlementInList } from "../common/subject-entitlement.util";
+import { Prisma } from "@smartify/database";
 
 /**
  * Subject-based pricing (2026-09-20) — Subscription.selectedSubjectIds is a
@@ -18,6 +21,11 @@ import { findOfferedSubjects } from "../common/grade-subject.util";
 function parseSelectedSubjectIds(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((v): v is string => typeof v === "string");
+}
+
+function pendingChange(subscription: { pendingSubjectChange?: unknown }) {
+  const value = subscription.pendingSubjectChange as any;
+  return value && Array.isArray(value.subjectIds) && Number.isFinite(value.monthlyTotalEGP) ? value as { subjectIds: string[]; monthlyTotalEGP: number; checkoutUrl?: string } : null;
 }
 
 @Injectable()
@@ -51,7 +59,7 @@ export class BillingService {
   }
 
   private async getProfileOrThrow(userId: string) {
-    const profile = await this.prisma.client.studentProfile.findUnique({ where: { userId } });
+    const profile = await this.prisma.client.studentProfile.findUnique({ where: { userId }, include: { subjects: true, user: { select: { role: true, isTestStudent: true } }, grade: true, curriculum: true } });
     if (!profile) throw new NotFoundException("Complete onboarding before subscribing.");
     return profile;
   }
@@ -69,13 +77,17 @@ export class BillingService {
     // Every Subject this grade OFFERS — including shared Arabic / Social
     // Studies whose content home is the Egyptian grade. priceEGP is always
     // read from the content-home Subject row, so the price is unified across
-    // every system that offers it.
+    // every system that offers it. The publication gate (active grade under an
+    // active curriculum) is applied by subjectDiscoveryWhere inside the helper.
     const subjects = await findOfferedSubjects(this.prisma.client, profile.gradeId);
     return subjects.map((subject) => ({
       id: subject.id,
       nameEn: subject.nameEn,
       nameAr: subject.nameAr,
       priceEGP: subject.priceEGP != null ? Number(subject.priceEGP) : null,
+      entitlement: isTestStudent(profile) || hasSubjectEntitlementInList(profile.subjects, subject.id) ? "ACTIVE" : "LOCKED",
+      grade: { nameEn: profile.grade.nameEn, nameAr: profile.grade.nameAr },
+      curriculum: { nameEn: profile.curriculum.nameEn, nameAr: profile.curriculum.nameAr },
     }));
   }
 
@@ -91,7 +103,9 @@ export class BillingService {
     // pricingPlan populated and selectedSubjectIds null; a new
     // subject-priced row has the reverse. Resolve the real subject names
     // for display either way, without trusting the JSON list blindly.
-    const selectedSubjectIds = parseSelectedSubjectIds(subscription.selectedSubjectIds);
+    const selectedSubjectIds = subscription.selectedSubjectIds == null
+      ? profile.subjects.filter(s => hasSubjectEntitlementInList(profile.subjects, s.subjectId)).map(s => s.subjectId)
+      : parseSelectedSubjectIds(subscription.selectedSubjectIds);
     const subjects = selectedSubjectIds.length > 0
       ? await this.prisma.client.subject.findMany({ where: { id: { in: selectedSubjectIds } }, select: { id: true, nameEn: true, nameAr: true } })
       : [];
@@ -113,9 +127,9 @@ export class BillingService {
         externalSessionId: subscription.externalSubscriptionId,
         studentUserId: userId,
         subscriptionId: subscription.id,
-        amountEGP: Number(subscription.monthlyTotalEGP),
+        amountEGP: pendingChange(subscription)?.monthlyTotalEGP ?? Number(subscription.monthlyTotalEGP),
       });
-      if (result === "paid") return { status: subscription.status === "active" ? "verified" : "pending" };
+      if (result === "paid") return { status: subscription.status === "active" && !pendingChange(subscription) ? "verified" : "pending" };
       return { status: result === "pending" || result === "failed" ? result : "unverified" };
     } catch {
       // Missing credentials, provider outage, or legacy session: never infer payment.
@@ -153,6 +167,22 @@ export class BillingService {
 
     const monthlyTotalEGP = subjects.reduce((sum, subject) => sum + Number(subject.priceEGP), 0);
 
+    const existing = await this.prisma.client.subscription.findUnique({ where: { studentId: profile.id } });
+    if (existing?.status === "active") {
+      const previousIds = existing.selectedSubjectIds == null ? profile.subjects.filter(s => hasSubjectEntitlementInList(profile.subjects, s.subjectId)).map(s => s.subjectId) : parseSelectedSubjectIds(existing.selectedSubjectIds);
+      if (previousIds.some(id => !selectedSubjectIds.includes(id))) throw new BadRequestException("Keep your current subjects selected when adding a subject.");
+      if (selectedSubjectIds.every(id => previousIds.includes(id))) throw new BadRequestException("Select an additional subject.");
+      const pending = pendingChange(existing);
+      if (pending) {
+        if (pending.subjectIds.length !== selectedSubjectIds.length || pending.subjectIds.some(id => !selectedSubjectIds.includes(id))) throw new BadRequestException("A subject change is already awaiting payment. Complete it before starting another.");
+        return { subjects, monthlyTotalEGP: pending.monthlyTotalEGP, subscription: existing, change: pending, resume: true };
+      }
+      const claimed = await this.prisma.client.subscription.updateMany({ where: { id: existing.id, status: "active", pendingSubjectChange: { equals: Prisma.DbNull } },
+        data: { pendingSubjectChange: { subjectIds: selectedSubjectIds, monthlyTotalEGP } } });
+      if (claimed.count !== 1) throw new BadRequestException("A subject change is already awaiting payment.");
+      return { subjects, monthlyTotalEGP, subscription: existing, change: { subjectIds: selectedSubjectIds, monthlyTotalEGP }, resume: false };
+    }
+
     const subscription = await this.prisma.client.subscription.upsert({
       where: { studentId: profile.id },
       update: { pricingPlanId: null, additionalSubjectsCount: 0, selectedSubjectIds, monthlyTotalEGP, status: "pending" },
@@ -166,7 +196,7 @@ export class BillingService {
       },
     });
 
-    return { subjects, monthlyTotalEGP, subscription };
+    return { subjects, monthlyTotalEGP, subscription, change: null, resume: false };
   }
 
   /**
@@ -177,23 +207,38 @@ export class BillingService {
    * money actually moves.
    */
   async startCheckout(userId: string, input: { subjectIds: string[] }) {
-    const { subjects, monthlyTotalEGP, subscription } = await this.resolvePendingSubscription(userId, input);
-
     const { provider, providerKey } = await this.providerFactory.getActiveProvider();
+    const { subjects, monthlyTotalEGP, subscription, change, resume } = await this.resolvePendingSubscription(userId, input);
+    if (resume) {
+      if (!change?.checkoutUrl) throw new BadRequestException("Continue your pending payment with its original payment method.");
+      return { checkoutUrl: change.checkoutUrl };
+    }
     const env = loadBackendEnv();
 
-    const session = await provider.createCheckoutSession({
+    const params = {
       studentUserId: userId,
       subscriptionId: subscription.id,
       amountEGP: monthlyTotalEGP,
       description: `Smartify AI — ${subjects.map((s) => s.nameEn).join(", ")}`,
       successUrl: `${env.FRONTEND_URL}/billing/success`,
       cancelUrl: `${env.FRONTEND_URL}/billing`,
-    });
+    };
+    let session;
+    try { if (change) {
+      if (subscription.paymentProvider !== providerKey || !subscription.externalProviderSubscriptionId || !provider.createSubscriptionUpgrade) {
+        throw new ServiceUnavailableException("Your existing payment provider cannot add subjects online yet. Contact support to update your subscription.");
+      }
+      session = await provider.createSubscriptionUpgrade({ ...params, externalProviderSubscriptionId: subscription.externalProviderSubscriptionId });
+    } else session = await provider.createCheckoutSession(params);
+    } catch (error) {
+      if (change) await this.prisma.client.subscription.updateMany({ where: { id: subscription.id, pendingSubjectChange: { equals: change } }, data: { pendingSubjectChange: Prisma.DbNull } });
+      throw error;
+    }
 
     await this.prisma.client.subscription.update({
       where: { id: subscription.id },
-      data: { paymentProvider: providerKey, externalSubscriptionId: session.externalSessionId },
+      data: { paymentProvider: providerKey, externalSubscriptionId: session.externalSessionId,
+        ...(change ? { pendingSubjectChange: { ...change, checkoutUrl: session.checkoutUrl } } : {}) },
     });
 
     return { checkoutUrl: session.checkoutUrl };
@@ -212,14 +257,18 @@ export class BillingService {
     if (!env.INSTAPAY_RECIPIENT_NAME || !env.INSTAPAY_RECIPIENT_HANDLE) {
       throw new ServiceUnavailableException("InstaPay is not configured on this environment yet.");
     }
-    const { monthlyTotalEGP, subscription } = await this.resolvePendingSubscription(userId, input);
+    const { monthlyTotalEGP, subscription, change, resume } = await this.resolvePendingSubscription(userId, input);
+    if (change && subscription.paymentProvider !== "instapay") {
+      await this.prisma.client.subscription.updateMany({ where: { id: subscription.id, pendingSubjectChange: { equals: change } }, data: { pendingSubjectChange: Prisma.DbNull } });
+      throw new BadRequestException("Use your existing payment provider to add subjects.");
+    }
 
     // "S-" prefix distinguishes this from a question-pack reference so
     // InstapayService can resolve which table to query without ambiguity.
-    const referenceId = `SMAI-S-${randomUUID().slice(0, 8).toUpperCase()}`;
-    await this.prisma.client.subscription.update({
+    const referenceId = resume ? subscription.externalSubscriptionId! : `SMAI-S-${randomUUID().slice(0, 8).toUpperCase()}`;
+    if (!resume) await this.prisma.client.subscription.update({
       where: { id: subscription.id },
-      data: { paymentProvider: "instapay", externalSubscriptionId: referenceId },
+      data: { paymentProvider: "instapay", externalSubscriptionId: referenceId, ...(change ? { pendingSubjectChange: change } : {}) },
     });
 
     return {
@@ -325,15 +374,17 @@ export class BillingService {
         // and request a retry rather than permanently losing the update.
         if (!subscription) throw new NotFoundException("Checkout is not available for reconciliation yet.");
         if (isActivation) {
+          const change = pendingChange(subscription);
           const now = new Date();
           const periodEnd = new Date(now);
           periodEnd.setMonth(periodEnd.getMonth() + 1);
-          await tx.subscription.updateMany({
-            where: { id: subscription.id, status: "pending", paymentProvider: providerKey, externalSubscriptionId: lookupValue },
+          const activated = await tx.subscription.updateMany({
+            where: { id: subscription.id, status: change ? "active" : "pending", paymentProvider: providerKey, externalSubscriptionId: lookupValue },
             data: {
               status: "active",
               currentPeriodStart: now,
               currentPeriodEnd: periodEnd,
+              ...(change ? { selectedSubjectIds: change.subjectIds, monthlyTotalEGP: change.monthlyTotalEGP, pendingSubjectChange: Prisma.DbNull } : {}),
               // Captured here — the first verified backend point a real
               // provider subscription id becomes available. Never trusted
               // from client input; this comes only from the signature-
@@ -341,11 +392,12 @@ export class BillingService {
               ...(event.externalProviderSubscriptionId ? { externalProviderSubscriptionId: event.externalProviderSubscriptionId } : {}),
             },
           });
+          if (activated.count !== 1) return;
           // Subject-based pricing (2026-09-20): grant access to exactly
           // what was paid for, in the SAME transaction as activation —
           // either both commit or neither does. No-op for a historical
           // plan-based row (selectedSubjectIds null).
-          await this.grantSelectedSubjects(tx, subscription.studentId, subscription.selectedSubjectIds);
+          await this.grantSelectedSubjects(tx, subscription.studentId, change?.subjectIds ?? subscription.selectedSubjectIds);
           // Referral V1 (2026-09-20): this is the referred student's
           // FIRST successful paid activation trigger point — see
           // ReferralService.earnRewardWithinTransaction's own doc comment
@@ -387,7 +439,7 @@ export class BillingService {
    * same WebhookEventLog idempotency guarantee as applyWebhookEvent so a
    * retried confirm() still can't double-activate.
    */
-  async activateInstapaySubscription(subscriptionId: string, externalEventId: string) {
+  async activateInstapaySubscription(subscriptionId: string, externalEventId: string, referenceId?: string) {
     try {
       await this.prisma.client.$transaction(async (tx) => {
         await tx.webhookEventLog.create({
@@ -395,16 +447,20 @@ export class BillingService {
         });
         const subscription = await tx.subscription.findUnique({ where: { id: subscriptionId } });
         if (!subscription) throw new NotFoundException("Subscription not found for this payment.");
+        const change = pendingChange(subscription);
+        if (change && referenceId !== subscription.externalSubscriptionId) throw new BadRequestException("This receipt does not match the pending subject change.");
         const now = new Date();
         const periodEnd = new Date(now);
         periodEnd.setMonth(periodEnd.getMonth() + 1);
-        await tx.subscription.updateMany({
-          where: { id: subscription.id, status: "pending" },
-          data: { status: "active", currentPeriodStart: now, currentPeriodEnd: periodEnd },
+        const activated = await tx.subscription.updateMany({
+          where: { id: subscription.id, status: change ? "active" : "pending" },
+          data: { status: "active", currentPeriodStart: now, currentPeriodEnd: periodEnd,
+            ...(change ? { selectedSubjectIds: change.subjectIds, monthlyTotalEGP: change.monthlyTotalEGP, pendingSubjectChange: Prisma.DbNull } : {}) },
         });
+        if (activated.count !== 1) return;
         // Subject-based pricing (2026-09-20) — see applyWebhookEvent's
         // identical call for the full rationale.
-        await this.grantSelectedSubjects(tx, subscription.studentId, subscription.selectedSubjectIds);
+        await this.grantSelectedSubjects(tx, subscription.studentId, change?.subjectIds ?? subscription.selectedSubjectIds);
         // Referral V1 (2026-09-20) — see applyWebhookEvent's identical call.
         await this.referralService.earnRewardWithinTransaction(tx, subscription.studentId);
       });

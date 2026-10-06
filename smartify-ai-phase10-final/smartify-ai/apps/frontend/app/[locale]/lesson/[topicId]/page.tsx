@@ -6,11 +6,25 @@ import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getLessonCopy } from "@/content/lesson";
 import { getMarketingCopy } from "@/content/marketing";
 import { Navbar } from "@/components/Navbar";
-import { useApiClient } from "@/lib/api-client";
+import { ApiError, useApiClient } from "@/lib/api-client";
 import { renderTutorMessage } from "@/lib/render-tutor-message";
 import type { Locale } from "@/content/marketing";
 import type { VisualInstruction } from "@smartify/shared-types";
 import { TutorVisual } from "@/components/TutorVisual";
+
+// Production hotfix (2026-09-25): a raw browser-level transport failure
+// (fetch() rejecting before any HTTP response exists — offline, DNS, CORS,
+// etc.) surfaces as a plain Error whose message is the native string
+// "Failed to fetch" (Chrome) / "NetworkError when attempting to fetch
+// resource." (Firefox) — never something a student should see. Only an
+// ApiError (see lib/api-client.ts) carries a message actually meant for
+// display: it's always derived from a real HTTP response, either the
+// backend's own localized/safe error message or apiFetch's own generic
+// "Request failed (status)" fallback. Anything else falls back to the
+// page's existing localized generic/transient copy instead.
+function displayableErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? err.message : fallback;
+}
 
 interface LessonTurn {
   role: "student" | "teacher";
@@ -18,7 +32,7 @@ interface LessonTurn {
 }
 
 interface LessonState {
-  started: boolean;
+  started?: boolean;
   sessionId?: string;
   conversationId?: string;
   topicId?: string;
@@ -33,6 +47,9 @@ interface LessonState {
   completed?: boolean;
   visual?: { type: string; status: "NOT_GENERATED" | "GENERATED"; url: string | null } | null;
   responseVisual?: VisualInstruction | null;
+  preparation?: { status: "PREPARING" | "READY" | "CONFIGURATION_ERROR"; retryAfterMs?: number; stage?: "grounding" | "authoring" };
+  retryAfterMs?: number;
+  stage?: "grounding" | "authoring";
 }
 
 interface LessonCheckQuestion {
@@ -62,6 +79,17 @@ export default function InteractiveLessonPage() {
   const [resumed, setResumed] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [preparing, setPreparing] = useState(false);
+  // Truthful, stage-aware waiting copy for first-time lazy generation
+  // (2026-09-26): no fake percentage, just an honest label for whichever
+  // REAL backend phase is actually happening — "grounding" (the textbook is
+  // being read/understood, one durable chunk at a time) or "authoring" (the
+  // lesson itself is being written, which happens synchronously right after
+  // grounding finishes). Falls back to elapsed time only to rotate within
+  // the (real, ongoing) grounding phase, never to claim a phase that isn't
+  // actually happening.
+  const [preparingStage, setPreparingStage] = useState<"grounding" | "authoring" | null>(null);
+  const preparingSinceRef = useRef<number | null>(null);
   const [slowStart, setSlowStart] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notAvailable, setNotAvailable] = useState(false);
@@ -98,6 +126,9 @@ export default function InteractiveLessonPage() {
   // visual.
   const visualBlobUrls = useRef<Record<string, string>>({});
   const [visualObjectUrl, setVisualObjectUrl] = useState<string | null>(null);
+  const preparationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const preparationRunRef = useRef(0);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     const SpeechRecognitionCtor = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
@@ -109,7 +140,11 @@ export default function InteractiveLessonPage() {
     const elements = audioElements.current;
     const urls = audioUrls.current;
     const visualUrls = visualBlobUrls.current;
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
+      preparationRunRef.current += 1;
+      if (preparationTimerRef.current) clearTimeout(preparationTimerRef.current);
       Object.values(elements).forEach((audio) => audio.pause());
       Object.values(urls).forEach((url) => URL.revokeObjectURL(url));
       Object.values(visualUrls).forEach((url) => URL.revokeObjectURL(url));
@@ -187,19 +222,89 @@ export default function InteractiveLessonPage() {
     micTimeoutRef.current = setTimeout(() => recognition.stop(), 30_000);
   }
 
+  // Honest, stage-derived waiting copy — never a fake percentage. The
+  // stage itself always comes from the backend's real, already-computed
+  // state (see LessonState.preparation.stage); elapsed time only rotates
+  // the wording WITHIN a real ongoing stage (grounding genuinely does take
+  // longer the further in it is), never invents a stage that isn't
+  // actually happening.
+  function preparingMessage(): string {
+    const elapsed = preparingSinceRef.current != null ? Date.now() - preparingSinceRef.current : 0;
+    if (preparingStage === "authoring") return elapsed > 15_000 ? copy.almostReady : copy.creatingLesson;
+    if (elapsed > 25_000) return copy.almostReady;
+    if (elapsed > 8_000) return copy.understandingLesson;
+    return copy.preparingTextbook;
+  }
+
+  function markPreparing(stage?: "grounding" | "authoring") {
+    if (preparingSinceRef.current == null) preparingSinceRef.current = Date.now();
+    setPreparing(true);
+    if (stage) setPreparingStage(stage);
+  }
+
+  function clearPreparing() {
+    preparingSinceRef.current = null;
+    setPreparingStage(null);
+    setPreparing(false);
+  }
+
   useEffect(() => {
+    const run = ++preparationRunRef.current;
     apiFetch<LessonState>(`/lesson/topics/${topicId}/state`)
       .then((data) => {
+        if (!mountedRef.current || run !== preparationRunRef.current) return;
         setState(data);
+        if (!data.started && data.preparation?.status === "PREPARING") {
+          markPreparing(data.preparation.stage ?? "grounding");
+          schedulePreparation(run, data.preparation.retryAfterMs);
+          return;
+        }
+        if (!data.started && data.preparation?.status === "READY") {
+          // Grounding just finished — lesson authoring runs next, synchronously,
+          // inside the advance() call this immediately triggers.
+          markPreparing(data.preparation.stage ?? "authoring");
+          schedulePreparation(run, 0);
+          return;
+        }
         if (data.started && data.content) {
           setResumed(!data.completed);
           setTurns([{ role: "teacher", content: data.content }]);
           if (autoPlay && !data.completed) playTurn(0, data.content, data.conversationId);
         }
       })
-      .catch(() => setNotAvailable(true));
+      .catch(() => { if (mountedRef.current && run === preparationRunRef.current) setNotAvailable(true); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topicId]);
+
+  function schedulePreparation(run: number, retryAfterMs = 1500) {
+    if (preparationTimerRef.current) clearTimeout(preparationTimerRef.current);
+    const delay = Math.min(30_000, Math.max(500, Number.isFinite(retryAfterMs) ? retryAfterMs : 1500));
+    preparationTimerRef.current = setTimeout(() => { void advancePreparation(run); }, delay);
+  }
+
+  async function advancePreparation(run: number) {
+    if (!mountedRef.current || run !== preparationRunRef.current) return;
+    try {
+      const result = await apiFetch<LessonState>(`/lesson/topics/${topicId}/advance`, { method: "POST" });
+      if (!mountedRef.current || run !== preparationRunRef.current) return;
+      if (result.status === "PREPARING") {
+        markPreparing(result.stage ?? "grounding");
+        schedulePreparation(run, result.retryAfterMs);
+        return;
+      }
+      clearPreparing();
+      setState(result);
+      if (result.content) {
+        setTurns([{ role: "teacher", content: result.content }]);
+        if (autoPlay) playTurn(0, result.content, result.conversationId);
+      }
+    } catch (err: any) {
+      if (mountedRef.current && run === preparationRunRef.current) {
+        clearPreparing();
+        setError(displayableErrorMessage(err, copy.genericError));
+      }
+    }
+  }
 
   // A load failure on one step's visual must not silently hide a later
   // step's own (different) visual — reset per-visual state whenever the
@@ -268,6 +373,7 @@ export default function InteractiveLessonPage() {
   }
 
   async function handleStart() {
+    if (preparing || busy) return;
     setBusy(true);
     setError(null);
     // A never-opened Topic can trigger real, first-time content generation
@@ -280,13 +386,19 @@ export default function InteractiveLessonPage() {
     const slowStartTimer = setTimeout(() => setSlowStart(true), 6000);
     try {
       const result = await apiFetch<LessonState>(`/lesson/topics/${topicId}/advance`, { method: "POST" });
+      if (result.status === "PREPARING") {
+        const run = ++preparationRunRef.current;
+        markPreparing(result.stage ?? "grounding");
+        schedulePreparation(run, result.retryAfterMs);
+        return;
+      }
       setState(result);
       if (result.content) {
         setTurns([{ role: "teacher", content: result.content }]);
         if (autoPlay) playTurn(0, result.content, result.conversationId);
       }
     } catch (err: any) {
-      setError(err?.message ?? copy.genericError);
+      setError(displayableErrorMessage(err, copy.genericError));
     } finally {
       clearTimeout(slowStartTimer);
       setSlowStart(false);
@@ -306,7 +418,7 @@ export default function InteractiveLessonPage() {
         if (autoPlay) playTurn(nextIndex, result.content, result.conversationId);
       }
     } catch (err: any) {
-      setError(err?.message ?? copy.genericError);
+      setError(displayableErrorMessage(err, copy.genericError));
     } finally {
       setBusy(false);
     }
@@ -333,7 +445,7 @@ export default function InteractiveLessonPage() {
         if (autoPlay) playTurn(teacherIndex, result.content, result.conversationId);
       }
     } catch (err: any) {
-      setError(err?.message ?? copy.genericError);
+      setError(displayableErrorMessage(err, copy.genericError));
     } finally {
       setBusy(false);
     }
@@ -388,9 +500,13 @@ export default function InteractiveLessonPage() {
           <div className="flex-1 space-y-4 overflow-y-auto rounded-sf-lg border border-neutral-200 bg-white p-6">
             {turns.length === 0 && !started && (
               <div className="flex h-full flex-col items-center justify-center gap-4">
-                <SmartifyButton type="button" variant="ai" onClick={handleStart} disabled={busy}>
-                  {busy ? (slowStart ? copy.startingFirstTime : copy.starting) : copy.startLesson}
-                </SmartifyButton>
+                {preparing ? (
+                  <p role="status" aria-live="polite" className="text-sm text-neutral-500">{preparingMessage()}</p>
+                ) : (
+                  <SmartifyButton type="button" variant="ai" onClick={handleStart} disabled={busy}>
+                    {busy ? (slowStart ? copy.startingFirstTime : copy.starting) : copy.startLesson}
+                  </SmartifyButton>
+                )}
               </div>
             )}
             {turns.map((t, i) => {

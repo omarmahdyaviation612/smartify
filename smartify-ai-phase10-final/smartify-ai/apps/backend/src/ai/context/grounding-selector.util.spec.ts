@@ -86,3 +86,92 @@ describe("selectRelevantGrounding", () => {
     expect(slice).toBeNull();
   });
 });
+
+/**
+ * 2026-09-26 single-Topic Unit fallback (the "Chapter 1" incident): a
+ * Unit's SOLE Topic given a generic, non-descriptive name has zero lexical
+ * overlap with its own real, correct grounding and was wrongly blocked as
+ * if unsupported — even though there is no cross-topic ambiguity to guard
+ * against when a Unit has exactly one Topic. This never applies to a
+ * multi-Topic Unit, and never permits any fact/example beyond what the
+ * real grounding already contains — it only widens WHICH slice of that
+ * real grounding a lone Topic receives.
+ */
+describe("selectRelevantGrounding — single-Topic Unit fallback (2026-09-26)", () => {
+  const singleTopicUnit: GroundingNotes = {
+    unitTitle: "Story — Anne & Dolphine",
+    gradeLevel: "Year 3",
+    subject: "English Language",
+    learningObjectives: ["Understand character interactions."],
+    concepts: [
+      { name: "Character Description", description: "Anna is a playful character.", sourcePages: [1], importance: "core" },
+      { name: "Dolphins", description: "Dolphins are friendly and help people.", sourcePages: [13], importance: "core" },
+    ],
+    facts: [{ fact: "Anna befriends a dolphin.", sourcePages: [9], importance: "core" }],
+    vocabulary: [{ term: "Dolphin", meaning: "A playful sea mammal.", sourcePages: [8] }],
+    skills: [],
+    topicHints: [
+      { topicTitle: "Character Interactions", relevantConcepts: ["Character Description"], sourcePages: [1] },
+      { topicTitle: "Dolphins and Friendship", relevantConcepts: ["Dolphins"], sourcePages: [13] },
+    ],
+    scopeNotes: [],
+  };
+
+  // 2026-10-03: the sole-Topic rule now takes PRECEDENCE over hint and
+  // keyword matching (Wave B "Planet Earth": a one-word title overlap narrowed
+  // a Unit's only Topic to 1 of its 21 concepts). Replaces the 2026-09-26
+  // expectation that a sole Topic's hint match still won.
+  it("2: one Topic + an exact topicHints match: the WHOLE Unit (SINGLE_TOPIC_UNIT), not the hint's narrow slice", () => {
+    const slice = selectRelevantGrounding(singleTopicUnit, "Character Interactions", 1);
+    expect(slice!.matchedVia).toBe("SINGLE_TOPIC_UNIT");
+    expect(slice!.matchedViaHint).toBe(false);
+    expect(slice!.concepts).toEqual(singleTopicUnit.concepts);
+    expect(slice!.facts).toEqual(singleTopicUnit.facts);
+    expect(slice!.vocabulary).toEqual(singleTopicUnit.vocabulary);
+  });
+
+  it("1: one Topic + keyword overlap with a single concept: the WHOLE Unit (SINGLE_TOPIC_UNIT), not the overlapping concept", () => {
+    const slice = selectRelevantGrounding(singleTopicUnit, "Friendly Dolphins", 1);
+    expect(slice!.matchedVia).toBe("SINGLE_TOPIC_UNIT");
+    expect(slice!.concepts.map((c) => c.name)).toEqual(["Character Description", "Dolphins"]);
+    expect(slice!.facts).toEqual(singleTopicUnit.facts);
+    expect(slice!.vocabulary).toEqual(singleTopicUnit.vocabulary);
+  });
+
+  it("3: one Topic + zero lexical match (e.g. a generic 'Chapter 1' name): falls back to the Unit's FULL grounding rather than blocking", () => {
+    const slice = selectRelevantGrounding(singleTopicUnit, "Chapter 1", 1);
+    expect(slice).not.toBeNull();
+    expect(slice!.matchedViaHint).toBe(false);
+    expect(slice!.concepts.map((c) => c.name)).toEqual(["Character Description", "Dolphins"]);
+    expect(slice!.facts).toEqual(singleTopicUnit.facts);
+    expect(slice!.vocabulary).toEqual(singleTopicUnit.vocabulary);
+    expect(slice!.learningObjectives).toEqual(singleTopicUnit.learningObjectives);
+  });
+
+  it("multiple Topics (2+) + zero lexical match: still returns null — the fallback must never apply when cross-topic ambiguity is possible", () => {
+    const sliceWithCount2 = selectRelevantGrounding(singleTopicUnit, "Chapter 1", 2);
+    expect(sliceWithCount2).toBeNull();
+  });
+
+  it("unitTopicCount omitted entirely (existing callers untouched by this change): behaves exactly as before — null, never the fallback", () => {
+    const sliceNoCount = selectRelevantGrounding(singleTopicUnit, "Chapter 1");
+    expect(sliceNoCount).toBeNull();
+  });
+
+  it("missing grounding entirely: still blocks regardless of Topic count", () => {
+    expect(selectRelevantGrounding(null, "Chapter 1", 1)).toBeNull();
+  });
+
+  it("the fallback never invents content outside the real grounding — every fact/concept in the fallback slice is verbatim from groundingNotesJson", () => {
+    const slice = selectRelevantGrounding(singleTopicUnit, "Chapter 1", 1);
+    for (const concept of slice!.concepts) expect(singleTopicUnit.concepts).toContainEqual(concept);
+    for (const fact of slice!.facts) expect(singleTopicUnit.facts).toContainEqual(fact);
+  });
+});
+
+describe("selectRelevantGrounding — purity (no provider/DB calls)", () => {
+  it("is a synchronous, pure function — calling it can never itself introduce a provider call", () => {
+    const result = selectRelevantGrounding(null, "anything", 1);
+    expect(result instanceof Promise).toBe(false);
+  });
+});

@@ -11,6 +11,7 @@ interface AdminUser {
   email: string;
   role: string;
   isActive: boolean;
+  isTestStudent: boolean;
   createdAt: string;
 }
 
@@ -23,6 +24,16 @@ function UsersTable() {
 
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [updatingTestAccess, setUpdatingTestAccess] = useState<string | null>(null);
+
+  async function updateTestAccess(u: AdminUser) {
+    setUpdatingTestAccess(u.id);
+    try {
+      const updated = await apiFetch<{ isTestStudent: boolean }>(`/users/${u.id}/test-access`, { method: "PATCH", body: JSON.stringify({ enabled: !u.isTestStudent }) });
+      setUsers(prev => prev?.map(row => row.id === u.id ? { ...row, isTestStudent: updated.isTestStudent } : row) ?? null);
+    } catch { setError("Couldn't update student test access."); }
+    finally { setUpdatingTestAccess(null); }
+  }
 
   useEffect(() => {
     apiFetch<AdminUser[]>("/users")
@@ -52,6 +63,7 @@ function UsersTable() {
             <th className="px-4 py-3 text-start font-medium text-neutral-500">Role</th>
             <th className="px-4 py-3 text-start font-medium text-neutral-500">Active</th>
             <th className="px-4 py-3 text-start font-medium text-neutral-500">Joined</th>
+            <th className="px-4 py-3 text-start font-medium text-neutral-500">Student test access</th>
           </tr>
         </thead>
         <tbody>
@@ -77,6 +89,12 @@ function UsersTable() {
               </td>
               <td className="px-4 py-3 text-neutral-500">{u.isActive ? "Yes" : "No"}</td>
               <td className="px-4 py-3 text-neutral-500">{new Date(u.createdAt).toLocaleDateString()}</td>
+              <td className="px-4 py-3 text-neutral-500">
+                {u.role === "STUDENT" ? (me?.role === "SUPER_ADMIN" && u.isActive ?
+                  <button type="button" disabled={updatingTestAccess !== null} onClick={() => updateTestAccess(u)} className="rounded-sf border border-neutral-300 px-3 py-1" aria-label={`${u.isTestStudent ? "Disable" : "Enable"} test access for ${u.email}`}>
+                    {u.isTestStudent ? "Enabled — disable" : "Disabled — enable"}
+                  </button> : u.isTestStudent ? "Enabled" : "Disabled") : "—"}
+              </td>
             </tr>
           ))}
         </tbody>

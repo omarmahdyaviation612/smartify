@@ -5,7 +5,8 @@ import { AIContextBuilderService } from "../ai/context/ai-context-builder.servic
 import { AIUsageService } from "../ai/usage/ai-usage.service";
 import { TutorQuestionPacksService } from "../tutor-question-packs/tutor-question-packs.service";
 import { TutorAnswerCacheService } from "./tutor-answer-cache.service";
-import { selectRelevantGrounding } from "../ai/context/grounding-selector.util";
+import { isTestStudent, resolveSubjectAccess } from "../common/subject-access";
+import { assignedGroundingSliceOrNull } from "../ai/context/topic-grounding-assignment.util";
 import type { GroundingNotes } from "../interactive-lesson/unit-grounding/unit-grounding.types";
 import { buildAdaptiveMathTeachingPlan } from "./adaptive-math-teaching.util";
 import { deriveMathVisualWithContext, parseTutorVisual } from "./visual-instruction.util";
@@ -33,7 +34,7 @@ export class TutorService {
   private async getProfileOrThrow(userId: string) {
     const profile = await this.prisma.client.studentProfile.findUnique({
       where: { userId },
-      include: { curriculum: true, grade: true, subjects: { include: { subject: true } } },
+      include: { user: { select: { role: true, isTestStudent: true } }, curriculum: true, grade: true, subjects: { include: { subject: true } } },
     });
     if (!profile) throw new NotFoundException("Complete onboarding before using the AI Tutor.");
     return profile;
@@ -57,8 +58,10 @@ export class TutorService {
    */
   async getRemainingToday(userId: string, subjectId: string) {
     const profile = await this.getProfileOrThrow(userId);
+    const access = await resolveSubjectAccess(this.prisma, profile, subjectId);
+    if (!access.active) throw new ForbiddenException("Purchase this subject before using the Tutor.");
     const subscription = await this.prisma.client.subscription.findUnique({ where: { studentId: profile.id } });
-    if (!subscription || subscription.status !== "active") {
+    if (!isTestStudent(profile) && (!subscription || subscription.status !== "active")) {
       const trial = await this.prisma.client.freeTutorTrial.findUnique({ where: { studentId: profile.id } });
       const trialRemaining = trial && trial.subjectId === subjectId ? Math.max(0, 2 - trial.questionsUsed) : trial ? 0 : 2;
       return {
@@ -165,8 +168,8 @@ export class TutorService {
   async sendMessage(userId: string, input: { subjectId: string; topicId?: string; conversationId?: string; message: string }) {
     const profile = await this.getProfileOrThrow(userId);
 
-    const studentSubject = profile.subjects.find((s) => s.subjectId === input.subjectId);
-    if (!studentSubject) {
+    const access = await resolveSubjectAccess(this.prisma, profile, input.subjectId);
+    if (!access.active) {
       throw new ForbiddenException("This subject is not part of your selected subjects.");
     }
 
@@ -178,6 +181,7 @@ export class TutorService {
     if (trimmed.length > MAX_MESSAGE_CHARS) {
       throw new BadRequestException(`Message is too long (max ${MAX_MESSAGE_CHARS} characters).`);
     }
+    const studentSubject = { subject: access.subject };
     const currentTurnMathPlan = buildAdaptiveMathTeachingPlan(studentSubject.subject.nameEn, [{ role: "user", content: trimmed }]);
     const canUseAnswerCache = !input.conversationId && (!currentTurnMathPlan || currentTurnMathPlan.stage === "CURRICULUM_FIRST");
 
@@ -189,7 +193,7 @@ export class TutorService {
     // Active subscribers use the normal daily/extra-question allowance.
     // Other signed-in students receive one account-bound, two-question trial.
     const subscription = await this.prisma.client.subscription.findUnique({ where: { studentId: profile.id } });
-    const hasActiveSubscription = subscription?.status === "active";
+    const hasActiveSubscription = isTestStudent(profile) || subscription?.status === "active";
 
     // --- Atomic rate-limit reservation (concurrency-safe — see AIUsageService.reserveDailySlot) ---
     const reservation = hasActiveSubscription
@@ -251,14 +255,25 @@ export class TutorService {
       if (input.topicId) {
         const topic = await this.prisma.client.topic.findUnique({
           where: { id: input.topicId },
-          include: { unit: { select: { subjectId: true, groundingNotesJson: true } } },
+          include: {
+            // 2026-09-27: the Topic's PERSISTED grounding assignment, read in
+            // the same query — the Tutor no longer re-infers relevance from the
+            // Topic title on every turn.
+            groundingAssignment: true,
+            topicSourceEvidence: true,
+            unit: { select: { subjectId: true, groundingNotesJson: true, groundingVersion: true, groundingSourceFingerprint: true } },
+          },
         });
         // A client-supplied Topic must belong to the selected Subject before
         // it can influence this tutor turn. Its Unit grounding is then
         // narrowed to this Topic rather than exposing a whole Unit.
         if (topic?.unit?.subjectId === input.subjectId) {
           topicNameEn = topic.nameEn;
-          groundingSlice = selectRelevantGrounding(topic.unit.groundingNotesJson as GroundingNotes | null, topic.nameEn);
+          groundingSlice = assignedGroundingSliceOrNull(topic.groundingAssignment, {
+            groundingVersion: topic.unit.groundingVersion,
+            groundingSourceFingerprint: topic.unit.groundingSourceFingerprint,
+            groundingNotesJson: topic.unit.groundingNotesJson as GroundingNotes | null,
+          }, topic.topicSourceEvidence);
         }
       }
 

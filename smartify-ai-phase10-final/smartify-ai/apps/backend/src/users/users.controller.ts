@@ -25,6 +25,13 @@ export class UsersController {
     return this.usersService.findAll();
   }
 
+  @Patch(":id/test-access")
+  @Roles(UserRole.SUPER_ADMIN)
+  setTestAccess(@CurrentUser() actor: any, @Param("id") id: string, @Body() body: { enabled?: unknown }) {
+    if (typeof body?.enabled !== "boolean") throw new BadRequestException("An explicit boolean enabled value is required.");
+    return this.usersService.setTestStudentAccess(actor.id, actor.role, id, body.enabled);
+  }
+
   /** Role changes are an explicit admin action — never inferred from Clerk. */
   @Patch(":id/role")
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)

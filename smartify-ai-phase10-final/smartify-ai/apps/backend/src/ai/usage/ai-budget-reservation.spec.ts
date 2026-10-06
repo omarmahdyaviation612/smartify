@@ -1,4 +1,5 @@
 import { AIUsageService } from "./ai-usage.service";
+import { CONTENT_AUTHORING_ACTOR_ID } from "../content-authoring-actor.const";
 
 /**
  * Phase 9.4C: covers the atomic USD reservation/reconciliation/release
@@ -24,11 +25,13 @@ describe("AIUsageService — Phase 9.4C atomic USD budget reservation", () => {
   function makeSequencedService(opts: {
     globalBudget?: number;
     perUserBudget?: number;
+    platformBudget?: number;
     queryRawSequence?: unknown[][];
   }) {
     const systemConfigValues: Record<string, number> = {};
     if (opts.globalBudget !== undefined) systemConfigValues.global_daily_ai_budget_usd = opts.globalBudget;
     if (opts.perUserBudget !== undefined) systemConfigValues.per_user_daily_ai_budget_usd = opts.perUserBudget;
+    if (opts.platformBudget !== undefined) systemConfigValues.platform_content_authoring_daily_ai_budget_usd = opts.platformBudget;
 
     let callIndex = 0;
     const queryRaw = jest.fn().mockImplementation(() => {
@@ -116,6 +119,77 @@ describe("AIUsageService — Phase 9.4C atomic USD budget reservation", () => {
       await expect(service.reserveBudget("user-1", -1)).rejects.toThrow(/invalid estimatedUsd/);
       await expect(service.reserveBudget("user-1", NaN)).rejects.toThrow(/invalid estimatedUsd/);
       await expect(service.reserveBudget("user-1", Infinity)).rejects.toThrow(/invalid estimatedUsd/);
+    });
+  });
+
+  /**
+   * Platform content-authoring circuit breaker hotfix (2026-09-25) —
+   * reserveBudget's real, atomic-reservation side of the fix. Mirrors the
+   * "decision logic" tests above exactly, but for CONTENT_AUTHORING_ACTOR_ID
+   * reserving against ("global","global") + ("platform", actorId) instead
+   * of ("global","global") + ("user", userId).
+   */
+  describe("reserveBudget — platform tier (2026-09-25 hotfix)", () => {
+    it("succeeds against BOTH the global and platform tiers, never touching the per-user config", async () => {
+      const { service, createReservation, prisma } = makeSequencedService({
+        globalBudget: 5,
+        platformBudget: 5,
+        queryRawSequence: [[{ committedUsd: 0.04 }], [{ committedUsd: 0.04 }]],
+      });
+      const result = await service.reserveBudget(CONTENT_AUTHORING_ACTOR_ID, 0.04);
+      expect(result).toEqual({ ok: true, reservationId: expect.any(String) });
+      expect(createReservation).toHaveBeenCalledWith({ data: { userId: CONTENT_AUTHORING_ACTOR_ID, usageDate: expect.any(Date), estimatedUsd: 0.04, status: "RESERVED" } });
+      expect(prisma.client.systemConfig.findUnique).not.toHaveBeenCalledWith(expect.objectContaining({ where: { key: "per_user_daily_ai_budget_usd" } }));
+    });
+
+    it("blocks with reason 'platform_exceeded' (never 'user_exceeded') when the platform tier's WHERE clause excludes it, rolling back the global slice", async () => {
+      const { service, queryRaw, executeRaw, createReservation } = makeSequencedService({
+        globalBudget: 5,
+        platformBudget: 0.25,
+        queryRawSequence: [[{ committedUsd: 0.04 }], []], // global succeeds, platform tier excluded
+      });
+      const result = await service.reserveBudget(CONTENT_AUTHORING_ACTOR_ID, 0.04);
+      expect(result).toEqual({ ok: false, reason: "platform_exceeded" });
+      expect(createReservation).not.toHaveBeenCalled();
+      expect(queryRaw).toHaveBeenCalledTimes(2);
+      expect(executeRaw).toHaveBeenCalledTimes(3); // 2 ensure-exists + 1 rollback, same shape as the per-user case
+    });
+
+    it("misconfigured: fails closed when the platform budget key is missing/invalid, even though global is valid — and never blocks a real student's reservation for the same reason", async () => {
+      const { service: platformService } = makeSequencedService({ globalBudget: 5 }); // platformBudget unset
+      const platformResult = await platformService.reserveBudget(CONTENT_AUTHORING_ACTOR_ID, 0.04);
+      expect(platformResult).toEqual({ ok: false, reason: "misconfigured" });
+
+      const { service: studentService } = makeSequencedService({
+        globalBudget: 5,
+        perUserBudget: 0.25,
+        queryRawSequence: [[{ committedUsd: 0.01 }], [{ committedUsd: 0.01 }]],
+      });
+      const studentResult = await studentService.reserveBudget("real-student-1", 0.01);
+      expect(studentResult.ok).toBe(true); // unaffected by the platform key being unset
+    });
+  });
+
+  describe("reconcileBudget / releaseBudget — platform tier (2026-09-25 hotfix)", () => {
+    it("reconciling a platform-attributed reservation adjusts the 'platform' accumulator row, never 'user' — accounting (userId) unchanged", async () => {
+      const { service, queryRaw, executeRaw } = makeSequencedService({
+        queryRawSequence: [[{ userId: CONTENT_AUTHORING_ACTOR_ID, usageDate: new Date("2026-09-25"), estimatedUsd: 0.04 }]],
+      });
+      await service.reconcileBudget("reservation-1", 0.008);
+      expect(queryRaw).toHaveBeenCalledTimes(1);
+      expect(executeRaw).toHaveBeenCalledTimes(2); // global + platform, same shape as global + user
+      const scopesTouched = executeRaw.mock.calls.map((call: any[]) => call.slice(1)); // [deltaUsd, scope, scopeKey, usageDate]
+      expect(scopesTouched.some((args: any[]) => args[1] === "platform" && args[2] === CONTENT_AUTHORING_ACTOR_ID)).toBe(true);
+      expect(scopesTouched.some((args: any[]) => args[1] === "user")).toBe(false);
+    });
+
+    it("releasing a platform-attributed reservation adjusts the 'platform' accumulator row, never 'user'", async () => {
+      const { service, executeRaw } = makeSequencedService({
+        queryRawSequence: [[{ userId: CONTENT_AUTHORING_ACTOR_ID, usageDate: new Date("2026-09-25"), estimatedUsd: 0.04 }]],
+      });
+      await service.releaseBudget("reservation-1");
+      const scopesTouched = executeRaw.mock.calls.map((call: any[]) => call.slice(1));
+      expect(scopesTouched.some((args: any[]) => args[1] === "platform" && args[2] === CONTENT_AUTHORING_ACTOR_ID)).toBe(true);
     });
   });
 
@@ -229,7 +303,7 @@ describe("AIUsageService — Phase 9.4C atomic USD budget reservation", () => {
    * racing for the same (scope, scopeKey, day) row can never both
    * observe the pre-increment value.
    */
-  function makeConcurrencyFakeDb(opts: { globalBudget: number; perUserBudget: number }) {
+  function makeConcurrencyFakeDb(opts: { globalBudget: number; perUserBudget: number; platformBudget?: number }) {
     const committed = new Map<string, number>();
     const key = (scope: string, scopeKey: string) => `${scope}:${scopeKey}`;
 
@@ -278,7 +352,9 @@ describe("AIUsageService — Phase 9.4C atomic USD budget reservation", () => {
                 ? { value: opts.globalBudget }
                 : k === "per_user_daily_ai_budget_usd"
                   ? { value: opts.perUserBudget }
-                  : null,
+                  : k === "platform_content_authoring_daily_ai_budget_usd" && opts.platformBudget !== undefined
+                    ? { value: opts.platformBudget }
+                    : null,
             ),
           ),
         },
@@ -311,6 +387,27 @@ describe("AIUsageService — Phase 9.4C atomic USD budget reservation", () => {
       const results = [a, b];
       expect(results.filter((r) => r.ok)).toHaveLength(1);
       expect(results.filter((r) => !r.ok && r.reason === "user_exceeded")).toHaveLength(1);
+    });
+
+    it("platform tier (2026-09-25 hotfix): two concurrent platform-attributed reservations cannot both exceed the independent platform budget", async () => {
+      // $5 platform cap, two concurrent $3 grounding-chunk reservations —
+      // only one can fit, exactly mirroring test 5's per-user shape but
+      // against the new "platform" scope/CONTENT_AUTHORING_ACTOR_ID key.
+      const { service } = makeConcurrencyFakeDb({ globalBudget: 100, perUserBudget: 100, platformBudget: 5 });
+      const [a, b] = await Promise.all([
+        service.reserveBudget(CONTENT_AUTHORING_ACTOR_ID, 3),
+        service.reserveBudget(CONTENT_AUTHORING_ACTOR_ID, 3),
+      ]);
+      const results = [a, b];
+      expect(results.filter((r) => r.ok)).toHaveLength(1);
+      expect(results.filter((r) => !r.ok && r.reason === "platform_exceeded")).toHaveLength(1);
+    });
+
+    it("a real student's concurrent reservations never touch or affect the platform accumulator, and vice versa", async () => {
+      const { service, committed } = makeConcurrencyFakeDb({ globalBudget: 100, perUserBudget: 1, platformBudget: 5 });
+      await Promise.all([service.reserveBudget("real-student-1", 0.5), service.reserveBudget(CONTENT_AUTHORING_ACTOR_ID, 3)]);
+      expect(committed.get("user:real-student-1")).toBe(0.5);
+      expect(committed.get(`platform:${CONTENT_AUTHORING_ACTOR_ID}`)).toBe(3);
     });
 
     it("test 9 (allowed case): a request within both budgets is allowed through when spend is genuinely available", async () => {

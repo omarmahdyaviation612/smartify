@@ -41,8 +41,8 @@ for (const locale of ['en','ar']) {
       assert.equal(page.find('button', locale === 'ar' ? (flow === 'practice' ? 'إرسال الإجابات' : 'إرسال الاختبار') : (flow === 'practice' ? 'Submit Answers' : 'Submit Quiz')), undefined);
     });
   }
-  test(`${locale} billing: Grade 3 displays existing Grade 1-5 plan without a subscription`, async () => {
-    const page = await mount('app/[locale]/billing/page.tsx', async url => url === '/billing/subscription' ? null : [{id:'p',gradeLevel:3,levelCodeEn:'Grade 1-5',levelCodeAr:'الصف 1-5',monthlyPriceEGP:'500',includedSubjects:3,additionalSubjectPriceEGP:'200',subjects:[],basicSubjectIds:[]}], locale);
+  test(`${locale} billing: displays the server's subject price without a subscription`, async () => {
+    const page = await mount('app/[locale]/billing/page.tsx', async url => url === '/billing/subscription' ? null : [{id:'s',nameEn:'Mathematics',nameAr:'رياضيات',priceEGP:500,entitlement:'LOCKED',grade:{nameEn:'Grade 3',nameAr:'الصف الثالث'},curriculum:{nameEn:'British',nameAr:'بريطاني'}}], locale);
     assert.match(page.text(), /500/);
   });
   test(`${locale} billing: load failure remains visible without a selected plan`, async () => {

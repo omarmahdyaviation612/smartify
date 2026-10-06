@@ -1,5 +1,6 @@
 import { ServiceUnavailableException } from "@nestjs/common";
 import { AIUsageService } from "./ai-usage.service";
+import { CONTENT_AUTHORING_ACTOR_ID } from "../content-authoring-actor.const";
 
 /**
  * Covers the daily per-subject question limit — the real business rule
@@ -23,13 +24,17 @@ describe("AIUsageService", () => {
     queryRawRows?: Array<{ count: number }>;
     globalBudget?: number;
     perUserBudget?: number;
+    platformBudget?: number;
     globalSpend?: number;
     userSpend?: number;
+    /** Spend attributed specifically to CONTENT_AUTHORING_ACTOR_ID — distinct from userSpend, which the platform branch must never read. */
+    platformSpend?: number;
   }) {
     const systemConfigValues: Record<string, number> = {};
     if (opts.configuredLimit !== undefined) systemConfigValues.default_daily_ai_questions_per_subject = opts.configuredLimit;
     if (opts.globalBudget !== undefined) systemConfigValues.global_daily_ai_budget_usd = opts.globalBudget;
     if (opts.perUserBudget !== undefined) systemConfigValues.per_user_daily_ai_budget_usd = opts.perUserBudget;
+    if (opts.platformBudget !== undefined) systemConfigValues.platform_content_authoring_daily_ai_budget_usd = opts.platformBudget;
 
     const prisma = {
       client: {
@@ -46,9 +51,11 @@ describe("AIUsageService", () => {
         $queryRaw: jest.fn().mockResolvedValue(opts.queryRawRows ?? [{ count: 1 }]),
         $executeRaw: jest.fn().mockResolvedValue(1),
         aIUsage: {
-          aggregate: jest.fn().mockImplementation(({ where }: any) =>
-            Promise.resolve({ _sum: { costUsd: where?.userId ? opts.userSpend ?? 0 : opts.globalSpend ?? 0 } }),
-          ),
+          aggregate: jest.fn().mockImplementation(({ where }: any) => {
+            if (where?.userId === CONTENT_AUTHORING_ACTOR_ID) return Promise.resolve({ _sum: { costUsd: opts.platformSpend ?? 0 } });
+            if (where?.userId) return Promise.resolve({ _sum: { costUsd: opts.userSpend ?? 0 } });
+            return Promise.resolve({ _sum: { costUsd: opts.globalSpend ?? 0 } });
+          }),
         },
       },
     } as any;
@@ -208,6 +215,70 @@ describe("AIUsageService", () => {
         ),
       );
       await expect(service.assertWithinBudget("user-1")).rejects.toThrow(ServiceUnavailableException); // $4.99 spent >= new $1 cap
+    });
+  });
+
+  /**
+   * Platform content-authoring circuit breaker hotfix (2026-09-25) — the
+   * production incident: unitId cmucxcubj00eh2qd5kfwohz11's lazy lesson
+   * generation, running as CONTENT_AUTHORING_ACTOR_ID, was rejected with
+   * the STUDENT-worded "You've reached today's AI usage limit" message
+   * because assertWithinBudget evaluated the shared platform actor
+   * against the per-user (student-sized) cap. This block proves the fix:
+   * the platform actor is now evaluated against its own independent cap,
+   * never the per-user one, with its own generic (non-student-blaming)
+   * message on exhaustion or misconfiguration.
+   */
+  describe("assertWithinBudget — platform content-authoring policy (2026-09-25 hotfix)", () => {
+    const PLATFORM_MESSAGE = "This lesson is temporarily unavailable. Please try again later.";
+    const STUDENT_MESSAGE = "You've reached today's AI usage limit. Please try again tomorrow.";
+
+    it("real student still blocked at the per-user cap (student policy unchanged)", async () => {
+      const { service } = makeService({ globalBudget: 100, perUserBudget: 0.25, globalSpend: 1, userSpend: 0.25 });
+      await expect(service.assertWithinBudget("real-student-1")).rejects.toThrow(STUDENT_MESSAGE);
+    });
+
+    it("platform actor ignores the student per-user cap entirely — spend far over the per-user cap does not block it", async () => {
+      const { service, prisma } = makeService({
+        globalBudget: 100,
+        perUserBudget: 0.25,
+        platformBudget: 5,
+        globalSpend: 0.5,
+        platformSpend: 0.4054, // over the $0.25 per-user cap, under the $5 platform cap — the exact production numbers
+      });
+      await expect(service.assertWithinBudget(CONTENT_AUTHORING_ACTOR_ID)).resolves.toBeUndefined();
+      // The per-user config/spend must never even be consulted for the platform actor.
+      expect(prisma.client.systemConfig.findUnique).not.toHaveBeenCalledWith(expect.objectContaining({ where: { key: "per_user_daily_ai_budget_usd" } }));
+    });
+
+    it("platform actor obeys its own independent platform cap", async () => {
+      const { service } = makeService({ globalBudget: 100, platformBudget: 5, globalSpend: 0.5, platformSpend: 5 });
+      await expect(service.assertWithinBudget(CONTENT_AUTHORING_ACTOR_ID)).rejects.toThrow(PLATFORM_MESSAGE);
+    });
+
+    it("missing platform cap fails closed with the generic message, never the student-worded one", async () => {
+      const { service } = makeService({ globalBudget: 100, globalSpend: 0.5 }); // platformBudget intentionally unset
+      await expect(service.assertWithinBudget(CONTENT_AUTHORING_ACTOR_ID)).rejects.toThrow(PLATFORM_MESSAGE);
+    });
+
+    it.each([
+      ["a string", "5" as any],
+      ["NaN", NaN],
+      ["zero", 0],
+      ["a negative number", -1],
+    ])("invalid platform cap (%s) fails closed with the generic message", async (_label, malformed) => {
+      const { service } = makeService({ globalBudget: 100, globalSpend: 0.5, platformBudget: malformed });
+      await expect(service.assertWithinBudget(CONTENT_AUTHORING_ACTOR_ID)).rejects.toThrow(PLATFORM_MESSAGE);
+    });
+
+    it("platform cap exhaustion never surfaces the student-worded message", async () => {
+      const { service } = makeService({ globalBudget: 100, platformBudget: 5, globalSpend: 0.5, platformSpend: 5 });
+      await expect(service.assertWithinBudget(CONTENT_AUTHORING_ACTOR_ID)).rejects.not.toThrow(STUDENT_MESSAGE);
+    });
+
+    it("the global cap is still enforced above the platform actor exactly as for a real student", async () => {
+      const { service } = makeService({ globalBudget: 5, platformBudget: 100, globalSpend: 5 });
+      await expect(service.assertWithinBudget(CONTENT_AUTHORING_ACTOR_ID)).rejects.toThrow(ServiceUnavailableException);
     });
   });
 

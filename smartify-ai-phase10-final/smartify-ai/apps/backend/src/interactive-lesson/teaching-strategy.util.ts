@@ -8,6 +8,26 @@ import type { StepResult, StrategySwitchRecord, TeachingStrategy } from "./inter
  */
 export const DEFAULT_TEACHING_STRATEGY: TeachingStrategy = "CONCRETE_OBJECTS";
 
+/**
+ * The single source of truth for "does the deterministic Phase 8 teaching-
+ * strategy system (CONCRETE_OBJECTS/NUMBER_LINE switching + guidance)
+ * apply to this subject at all". Keyed off the Subject's own `nameEn` —
+ * the actual subject identity record, never the Topic's title/wording —
+ * since Subject has no dedicated kind/code column. Also reused for the
+ * deterministic-expression-grading guard in interactive-lesson.service.ts
+ * (`allowExpression`), so there is exactly one place deciding "is this
+ * Math" for lesson delivery, not two independently-drifting checks.
+ *
+ * Production hotfix (2026-09-25): a Science lesson (flowering/non-flowering
+ * plants) was taught with "take 2 steps forward on a number line" — the
+ * strategy system was running unconditionally for every subject. Every
+ * caller of getCurrentStrategy/decideStrategySwitch/strategyGuidance must
+ * gate on this first.
+ */
+export function isMathSubject(subjectNameEn: string | null | undefined): boolean {
+  return /math/i.test(subjectNameEn ?? "");
+}
+
 // V1 only defines this one fallback chain, for this one pilot concept
 // (Addition with Zero's conceptual check). Extending to more concepts
 // is explicitly out of scope for V1.

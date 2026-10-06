@@ -6,7 +6,8 @@ import { QuestionDraftGeneratorService } from "../question-bank/question-draft-g
 import { EmailService } from "../email/email.service";
 import { shuffleQuestionPool } from "./shuffle-question-pool";
 import { TrialService } from "../trial/trial.service";
-import { hasSubjectEntitlementInList } from "../common/subject-entitlement.util";
+import { AccessProfile, resolveSubjectAccess } from "../common/subject-access";
+import { questionServabilityByTopic, QUESTION_PROVENANCE_SELECT, TOPIC_GATE_INCLUDE, UNIT_GATE_SELECT } from "../ai/context/topic-content-provenance.util";
 
 type QuizType = "topic_assessment" | "mock_exam" | "lesson_check";
 
@@ -34,14 +35,10 @@ export class QuizzesService {
   private async getProfileOrThrow(userId: string) {
     const profile = await this.prisma.client.studentProfile.findUnique({
       where: { userId },
-      include: { subjects: true },
+      include: { subjects: true, user: { select: { role: true, isTestStudent: true } } },
     });
     if (!profile) throw new NotFoundException("Complete onboarding before taking a quiz.");
     return profile;
-  }
-
-  private hasOwnedAccess(profile: { subjects: Array<{ subjectId: string; expiresAt?: Date | null }> }, subjectId: string): boolean {
-    return hasSubjectEntitlementInList(profile.subjects, subjectId);
   }
 
   /**
@@ -51,8 +48,8 @@ export class QuizzesService {
    * trial lesson in that Subject was used on — "mock_exam" (whole-subject,
    * no topicId) is never trial-bypassable.
    */
-  private async assertSubjectAccessible(profile: { id: string; subjects: Array<{ subjectId: string; expiresAt?: Date | null }> }, subjectId: string, topicId?: string) {
-    if (this.hasOwnedAccess(profile, subjectId)) return;
+  private async assertSubjectAccessible(profile: AccessProfile, subjectId: string, topicId?: string) {
+    if ((await resolveSubjectAccess(this.prisma, profile, subjectId)).active) return;
     if (topicId && (await this.trialService.isTopicTrialAccessible(profile.id, subjectId, topicId))) return;
     throw new ForbiddenException("This subject is not part of your selected subjects.");
   }
@@ -92,7 +89,7 @@ export class QuizzesService {
     await this.assertSubjectAccessible(profile, subjectId, topicId);
 
     const topicWhere = type === "mock_exam" ? { unit: { subjectId } } : { id: topicId, unit: { subjectId } };
-    const topics = await this.prisma.client.topic.findMany({ where: topicWhere });
+    const topics = await this.prisma.client.topic.findMany({ where: topicWhere, include: { ...TOPIC_GATE_INCLUDE, unit: { select: UNIT_GATE_SELECT } } });
     if (topics.length === 0) throw new BadRequestException("No topics found for this quiz.");
 
     // Launch-speed lazy-generation path (2026-09-19): only for a single-
@@ -103,7 +100,7 @@ export class QuizzesService {
     if (type !== "mock_exam" && topicId) await this.questionGenerator.ensurePoolForTopic(topicId, userId);
 
     const requestedCount = type === "mock_exam" ? 20 : type === "lesson_check" ? LESSON_CHECK_QUESTION_COUNT : 8;
-    const eligible = await this.prisma.client.question.findMany({
+    const candidates = await this.prisma.client.question.findMany({
       where: { topicId: { in: topics.map((t) => t.id) }, isPlaceholder: false },
       select: {
         id: true,
@@ -114,8 +111,14 @@ export class QuizzesService {
         promptAr: true,
         optionsJson: true,
         isPlaceholder: true,
+        ...QUESTION_PROVENANCE_SELECT,
       },
     });
+    // 2026-10-03 Wave B runtime safety: same servability rule as Practice —
+    // a BLOCKED Topic contributes no Questions to any quiz type, including a
+    // whole-subject mock_exam, and no Topic mixes LEGACY with CURRENT.
+    const isServable = questionServabilityByTopic(topics as any, candidates);
+    const eligible = candidates.filter(isServable).map(({ groundingSourceFingerprint: _s, groundingAssignmentFingerprint: _a, retiredAt: _r, ...q }) => q);
 
     const questions = shuffleQuestionPool(eligible, rng).slice(0, requestedCount);
 
@@ -144,10 +147,19 @@ export class QuizzesService {
     // as the previous `topic: true` did — this only ADDS unit.subjectId,
     // the one real source of truth for a Question's Subject. One query,
     // not one per question.
-    const questions = await this.prisma.client.question.findMany({
+    const loaded = await this.prisma.client.question.findMany({
       where: { id: { in: input.answers.map((a) => a.questionId) } },
-      include: { topic: { include: { unit: { select: { subjectId: true } } } } },
+      include: { topic: { include: { ...TOPIC_GATE_INCLUDE, unit: { select: { subjectId: true, ...UNIT_GATE_SELECT } } } } },
     });
+    // Never-servable Questions are treated as unresolved ids (see PracticeService.submitPractice).
+    // Topic-level precedence needs each Topic's FULL stored pool, not just
+    // the submitted ids (topic-content-provenance.util.ts).
+    const submittedTopicIds = [...new Set(loaded.map((q) => q.topicId))];
+    const topicPool = submittedTopicIds.length
+      ? await this.prisma.client.question.findMany({ where: { topicId: { in: submittedTopicIds }, isPlaceholder: false }, select: { topicId: true, isPlaceholder: true, ...QUESTION_PROVENANCE_SELECT } })
+      : [];
+    const isServable = questionServabilityByTopic(loaded.map((q) => q.topic) as any, topicPool);
+    const questions = loaded.filter(isServable);
     const questionById = new Map(questions.map((q) => [q.id, q]));
 
     // Scope validation BEFORE any write (QuestionAttempt/QuizResult/parent

@@ -115,4 +115,19 @@ describe("loadBackendEnv — production validation", () => {
     delete env.STRIPE_WEBHOOK_SECRET;
     expect(() => loadBackendEnv(env)).not.toThrow();
   });
+
+  it("boots cleanly in production with no Stripe configuration at all and does not warn about it", () => {
+    const env = { ...VALID_PRODUCTION_ENV };
+    delete env.STRIPE_SECRET_KEY;
+    delete env.STRIPE_WEBHOOK_SECRET;
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(() => loadBackendEnv(env)).not.toThrow();
+      for (const call of warnSpy.mock.calls) {
+        expect(String(call[0])).not.toMatch(/STRIPE_SECRET_KEY/);
+      }
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
 });

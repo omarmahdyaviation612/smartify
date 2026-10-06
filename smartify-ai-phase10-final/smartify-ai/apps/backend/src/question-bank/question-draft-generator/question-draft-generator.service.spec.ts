@@ -1,5 +1,6 @@
-import { QuestionDraftGeneratorService } from "./question-draft-generator.service";
+import { QuestionDraftGeneratorService, QuestionDraftGenerationError } from "./question-draft-generator.service";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
+import { withReadyGate } from "../../ai/context/topic-content-gate.fixtures.testspec";
 
 /**
  * Budget-attribution regression suite (2026-09-20) — mirrors
@@ -20,7 +21,7 @@ describe("QuestionDraftGeneratorService.ensurePoolForTopic — budget attributio
   const VALID_QUESTION = {
     type: "MULTIPLE_CHOICE",
     difficulty: "EASY",
-    promptEn: "What is 2 + 2?",
+    promptEn: "Addition: what is 2 + 2?",
     promptAr: "ما هو ٢ + ٢؟",
     optionsJson: ["3", "4", "5"],
     correctAnswerJson: "4",
@@ -39,14 +40,17 @@ describe("QuestionDraftGeneratorService.ensurePoolForTopic — budget attributio
       client: {
         question: {
           count: jest.fn().mockResolvedValue(existingQuestionCount),
+          // 2026-10-03: the pool counts only SERVABLE Questions — LEGACY ones
+          // still count under TRANSITION enforcement (the fixture Unit's mode).
+          findMany: jest.fn().mockResolvedValue(Array.from({ length: existingQuestionCount }, () => ({ topicId: TOPIC_ID, groundingSourceFingerprint: null, groundingAssignmentFingerprint: null }))),
         },
         topic: {
-          findUnique: jest.fn().mockResolvedValue({
+          findUnique: jest.fn().mockResolvedValue(withReadyGate({
             id: TOPIC_ID,
             nameEn: "Test Topic",
-            unit: { nameEn: "Unit 1", groundingNotesJson: null, groundingVersion: null, subject: { nameEn: "Science", grade: { nameEn: "Year 5", curriculum: { nameEn: "Test Curriculum" } } } },
+            unit: { nameEn: "Unit 1", groundingNotesJson: null, groundingVersion: null, subject: { nameEn: "Science", grade: { nameEn: "Year 5", curriculum: { nameEn: "Test Curriculum" } } }, _count: { topics: 1 } },
             lessons: [{ isPlaceholder: false, objectives: [] }],
-          }),
+          })),
         },
         questionDraft: {
           create: jest.fn().mockResolvedValue({ id: "qd-1" }),
@@ -116,5 +120,158 @@ describe("QuestionDraftGeneratorService.ensurePoolForTopic — budget attributio
     expect(lessonGenerator.ensureTopicHasLesson).not.toHaveBeenCalled();
     expect(providerFactory.getActiveProvider).not.toHaveBeenCalled();
     expect(prisma.client.questionDraft.create).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * generateAutoQuestionBatch — bounded truncation retry (2026-09-27, "the
+ * Forces lesson incident"): maxOutputTokens must be a FIXED budget on every
+ * normal attempt (never scaled by `count`), and may only be bumped, for
+ * exactly one retry, when a response fails specifically because it looks
+ * truncated/invalid-JSON — never for a normal success and never for an
+ * unrelated business-rule/schema validation failure on otherwise-complete
+ * JSON.
+ */
+describe("QuestionDraftGeneratorService.generateAutoQuestionBatch — maxOutputTokens truncation retry", () => {
+  const REQUESTING_USER_ID = "content-authoring";
+  const TOPIC_ID = "topic-1";
+  const FIXED_MAX_OUTPUT_TOKENS = 4000;
+  const TRUNCATION_RETRY_MAX_OUTPUT_TOKENS = 6000;
+
+  const VALID_QUESTION = {
+    type: "MULTIPLE_CHOICE",
+    difficulty: "EASY",
+    promptEn: "Addition: what is 2 + 2?",
+    promptAr: "ما هو ٢ + ٢؟",
+    optionsJson: ["3", "4", "5"],
+    correctAnswerJson: "4",
+    explanationEn: "2 + 2 equals 4.",
+    explanationAr: "٢ + ٢ يساوي ٤.",
+  };
+
+  // A truncated/invalid-JSON response: cut off mid-object, doesn't parse
+  // and doesn't end with a closing brace/bracket — the actual "Forces
+  // lesson" signature (maxOutputTokens=600 cutting an in-progress batch).
+  const TRUNCATED_RESPONSE = '{"questions": [{"type": "MULTIPLE_CHOICE", "promptEn": "What is';
+
+  function makeBatchHarness(generateImpl: (call: number) => { content: string; inputTokens: number; outputTokens: number }) {
+    let callCount = 0;
+    const generateSpy = jest.fn().mockImplementation(async () => {
+      callCount++;
+      return generateImpl(callCount);
+    });
+
+    const prisma = {
+      client: {
+        topic: {
+          findUnique: jest.fn().mockResolvedValue(withReadyGate({
+            id: TOPIC_ID,
+            nameEn: "Test Topic",
+            unit: {
+              nameEn: "Unit 1",
+              groundingNotesJson: null,
+              groundingVersion: null,
+              groundingSourceFingerprint: null,
+              subject: { nameEn: "Science", grade: { nameEn: "Year 5", curriculum: { nameEn: "Test Curriculum" } } },
+              _count: { topics: 1 },
+            },
+            lessons: [{ isPlaceholder: false, objectives: [] }],
+          })),
+        },
+        questionDraft: {
+          create: jest.fn().mockResolvedValue({ id: "qd-1" }),
+        },
+        aIUsage: {
+          create: jest.fn().mockResolvedValue(undefined),
+        },
+      },
+    };
+
+    const providerFactory = {
+      getActiveProvider: jest.fn().mockResolvedValue({ provider: { generate: generateSpy }, providerKey: "openai", model: "gpt-4o-mini" }),
+      getCostRates: jest.fn().mockResolvedValue({ costPerInputToken: 0.0001, costPerOutputToken: 0.0002 }),
+    };
+
+    const contextBuilder = {
+      buildAutoQuestionBatchGenerationPrompt: jest.fn().mockReturnValue("system prompt"),
+    };
+
+    const usageService = {
+      assertWithinBudget: jest.fn().mockResolvedValue(undefined),
+      estimateMaxChatCostUsd: jest.fn().mockResolvedValue(0.01),
+      reserveBudget: jest.fn().mockResolvedValue({ ok: true, reservationId: "res-1" }),
+      reconcileBudget: jest.fn().mockResolvedValue(undefined),
+      releaseBudget: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const publisher = { autoPublish: jest.fn().mockResolvedValue(undefined) };
+    const lessonGenerator = { ensureTopicHasLesson: jest.fn().mockResolvedValue({ teachingStepsJson: [{ id: "s1" }] }) };
+
+    const service = new QuestionDraftGeneratorService(prisma as any, providerFactory as any, contextBuilder as any, usageService as any, publisher as any, lessonGenerator as any);
+
+    return { service, prisma, generateSpy };
+  }
+
+  it("1 — a normal valid response makes exactly one provider call at the fixed budget, no retry", async () => {
+    const { service, generateSpy } = makeBatchHarness(() => ({
+      content: JSON.stringify({ questions: [VALID_QUESTION] }),
+      inputTokens: 5,
+      outputTokens: 5,
+    }));
+
+    const result = await service.generateAutoQuestionBatch(TOPIC_ID, 3, REQUESTING_USER_ID);
+
+    expect(generateSpy).toHaveBeenCalledTimes(1);
+    expect(generateSpy.mock.calls[0][0].maxOutputTokens).toBe(FIXED_MAX_OUTPUT_TOKENS);
+    expect(result.attempts).toBe(1);
+    expect(result.callsMade).toBe(1);
+  });
+
+  it("2 — a truncated/invalid-JSON response triggers exactly one retry with a higher maxOutputTokens, which then succeeds", async () => {
+    const { service, generateSpy } = makeBatchHarness((call) =>
+      call === 1
+        ? { content: TRUNCATED_RESPONSE, inputTokens: 5, outputTokens: 600 }
+        : { content: JSON.stringify({ questions: [VALID_QUESTION] }), inputTokens: 5, outputTokens: 5 },
+    );
+
+    const result = await service.generateAutoQuestionBatch(TOPIC_ID, 3, REQUESTING_USER_ID);
+
+    expect(generateSpy).toHaveBeenCalledTimes(2);
+    expect(generateSpy.mock.calls[0][0].maxOutputTokens).toBe(FIXED_MAX_OUTPUT_TOKENS);
+    expect(generateSpy.mock.calls[1][0].maxOutputTokens).toBe(TRUNCATION_RETRY_MAX_OUTPUT_TOKENS);
+    expect(result.attempts).toBe(2);
+    expect(result.callsMade).toBe(2);
+  });
+
+  it("3 — if the higher-budget retry ALSO comes back truncated/invalid, the method stops and throws — no third attempt", async () => {
+    const { service, generateSpy } = makeBatchHarness(() => ({
+      content: TRUNCATED_RESPONSE,
+      inputTokens: 5,
+      outputTokens: 600,
+    }));
+
+    await expect(service.generateAutoQuestionBatch(TOPIC_ID, 3, REQUESTING_USER_ID)).rejects.toBeInstanceOf(QuestionDraftGenerationError);
+
+    expect(generateSpy).toHaveBeenCalledTimes(2);
+    expect(generateSpy.mock.calls[0][0].maxOutputTokens).toBe(FIXED_MAX_OUTPUT_TOKENS);
+    expect(generateSpy.mock.calls[1][0].maxOutputTokens).toBe(TRUNCATION_RETRY_MAX_OUTPUT_TOKENS);
+  });
+
+  it("4 — an unrelated validation failure on complete, valid JSON (missing questions array) does NOT bump maxOutputTokens on retry", async () => {
+    const { service, generateSpy } = makeBatchHarness((call) =>
+      call === 1
+        ? { content: JSON.stringify({ notQuestions: [] }), inputTokens: 5, outputTokens: 5 }
+        : { content: JSON.stringify({ questions: [VALID_QUESTION] }), inputTokens: 5, outputTokens: 5 },
+    );
+
+    const result = await service.generateAutoQuestionBatch(TOPIC_ID, 3, REQUESTING_USER_ID);
+
+    expect(generateSpy).toHaveBeenCalledTimes(2);
+    expect(generateSpy.mock.calls[0][0].maxOutputTokens).toBe(FIXED_MAX_OUTPUT_TOKENS);
+    // Still the fixed default, not the truncation-retry budget — this
+    // failure was a valid, complete JSON object that just failed a
+    // business-rule/schema check, not a truncation signature.
+    expect(generateSpy.mock.calls[1][0].maxOutputTokens).toBe(FIXED_MAX_OUTPUT_TOKENS);
+    expect(result.attempts).toBe(2);
   });
 });

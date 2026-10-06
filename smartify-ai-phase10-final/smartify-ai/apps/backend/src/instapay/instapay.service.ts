@@ -97,7 +97,7 @@ export class InstapayService {
       if (!subscription) throw new ForbiddenException("This payment reference does not belong to your account.");
       kind = "SUBSCRIPTION";
       subscriptionId = subscription.id;
-      expectedAmountEGP = Number(subscription.monthlyTotalEGP);
+      expectedAmountEGP = Number((subscription.pendingSubjectChange as any)?.monthlyTotalEGP ?? subscription.monthlyTotalEGP);
     } else if (referenceId.startsWith("SMAI-P-")) {
       const purchase = await this.prisma.client.tutorQuestionPackPurchase.findFirst({
         where: { studentId: profile.id, paymentProvider: "instapay", externalSessionId: referenceId },

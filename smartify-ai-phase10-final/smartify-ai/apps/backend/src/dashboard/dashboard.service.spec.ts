@@ -59,6 +59,7 @@ describe("DashboardService.getSummary — Phase 10C content scoping", () => {
     const prisma = {
       client: {
         studentProfile: { findUnique: jest.fn().mockResolvedValue(profile) },
+        subject: { findMany: jest.fn(async ({ where }: any) => Object.entries(SUBJECTS).filter(([, s]) => s.gradeId === where.gradeId).map(([id]) => ({ id, nameEn: id, nameAr: id }))) },
         assessment: { findFirst: jest.fn().mockResolvedValue(null) },
         questionAttempt: { findMany: jest.fn().mockResolvedValue([]) },
         topic: {

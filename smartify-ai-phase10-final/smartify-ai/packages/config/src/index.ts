@@ -192,9 +192,12 @@ export function loadBackendEnv(source: NodeJS.ProcessEnv = process.env): Backend
       throw new Error("Production boot aborted: unsafe configuration detected — see errors above.");
     }
 
+    // STRIPE_SECRET_KEY is deliberately NOT included here: Stripe is not
+    // part of the launch plan (InstaPay is the live manual payment path),
+    // so its absence is an expected steady state, not something worth a
+    // boot-time warning every time the app starts.
     const missingOptional: string[] = [];
     if (!source.OPENAI_API_KEY) missingOptional.push("OPENAI_API_KEY (AI Tutor will be unavailable)");
-    if (!source.STRIPE_SECRET_KEY) missingOptional.push("STRIPE_SECRET_KEY (no payment provider can be activated)");
     if (missingOptional.length > 0) {
       console.warn(`⚠️  Production mode started with missing configuration: ${missingOptional.join("; ")}`);
     }

@@ -15,6 +15,7 @@ import { TutorVisual } from "@/components/TutorVisual";
 import type { VisualInstruction } from "@smartify/shared-types";
 
 interface Subject {
+  entitlement?: "ACTIVE" | "LOCKED";
   id: string;
   nameEn: string;
   nameAr: string;
@@ -210,6 +211,8 @@ export default function TutorPage() {
   useEffect(() => {
     apiFetch<{ subjects: Subject[] }>("/dashboard/summary")
       .then((data) => {
+        if (data.subjects.some(s => s.id === subjectId && s.entitlement === "LOCKED")) { router.replace(`/${locale}/billing?subjectId=${encodeURIComponent(subjectId)}`); return; }
+        data.subjects = data.subjects.filter(s => s.entitlement !== "LOCKED");
         setSubjects(data.subjects);
         if (!subjectId && data.subjects[0]) setSubjectId(data.subjects[0].id);
       })
