@@ -347,7 +347,12 @@ Create `apps/backend/src/scripts/shared-subjects-inventory.ts`:
 // the decision surface, not an implementation detail.
 import { PrismaClient } from "@smartify/database";
 
-export const SHARED_SUBJECT_NAMES = ["Arabic", "Social Studies"] as const;
+// Names measured against the real database (2026-10-06): the populated
+// Egyptian subjects are named "Arabic Language" and "Social Studies", while
+// the seeded non-Egyptian placeholders are named "Arabic". Both variants must
+// be reported, or the inventory silently misses every real Egyptian row and
+// reports an empty curriculum that in fact holds all the content.
+export const SHARED_SUBJECT_NAMES = ["Arabic Language", "Arabic", "Social Studies"] as const;
 
 /** `Subscription.selectedSubjectIds` is a Json column and `LessonTrial.subjectIds` is a JSON string — both are read defensively. */
 export function parseIdList(raw: unknown): string[] {
