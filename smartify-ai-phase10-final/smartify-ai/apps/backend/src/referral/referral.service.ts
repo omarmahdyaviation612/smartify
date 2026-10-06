@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
+import { findOfferedSubject, findOfferedSubjects } from "../common/grade-subject.util";
 
 function generateCode(): string {
   return randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase();
@@ -118,7 +119,7 @@ export class ReferralService {
   /** Subjects in the referrer's own grade a pending reward could usefully apply to — excludes anything already permanently owned. */
   async getEligibleRewardSubjects(userId: string) {
     const profile = await this.getProfileOrThrow(userId);
-    const subjects = await this.prisma.client.subject.findMany({ where: { gradeId: profile.gradeId, isActive: true }, orderBy: { nameEn: "asc" } });
+    const subjects = await findOfferedSubjects(this.prisma.client, profile.gradeId);
     const owned = await this.prisma.client.studentSubject.findMany({ where: { studentId: profile.id } });
     const permanentlyOwned = new Set(owned.filter((o: { expiresAt: Date | null }) => o.expiresAt == null).map((o: { subjectId: string }) => o.subjectId));
     return subjects.filter((s) => !permanentlyOwned.has(s.id)).map((s) => ({ id: s.id, nameEn: s.nameEn, nameAr: s.nameAr }));
@@ -137,7 +138,7 @@ export class ReferralService {
   async applyReward(userId: string, referralId: string, subjectId: string) {
     const profile = await this.getProfileOrThrow(userId);
 
-    const subject = await this.prisma.client.subject.findFirst({ where: { id: subjectId, gradeId: profile.gradeId, isActive: true } });
+    const subject = await findOfferedSubject(this.prisma.client, profile.gradeId, subjectId);
     if (!subject) throw new BadRequestException("This subject is not available for your grade.");
 
     const existingGrant = await this.prisma.client.studentSubject.findUnique({

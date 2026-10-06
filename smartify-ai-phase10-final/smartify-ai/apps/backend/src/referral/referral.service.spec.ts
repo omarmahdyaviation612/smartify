@@ -34,9 +34,22 @@ describe("ReferralService", () => {
     function client(get: () => typeof state) {
       return {
         studentProfile: { findUnique: async ({ where }: any) => profiles[where.userId] ?? Object.values(profiles).find((p) => p.id === where.id) ?? null },
+        gradeSubject: {
+          findMany: jest.fn().mockImplementation(async ({ where }: any) =>
+            subjects
+              .filter((s) => (where.subjectId?.in ? where.subjectId.in.includes(s.id) : true) && s.isActive === where.isActive)
+              .map((s) => ({ subject: s })),
+          ),
+          findFirst: jest.fn().mockImplementation(async ({ where }: any) =>
+            subjects
+              .filter((s) => where.subjectId.in.includes(s.id) && s.isActive === where.isActive)
+              .map((s) => ({ subject: s }))[0] ?? null,
+          ),
+        },
         subject: {
-          findMany: async ({ where }: any) => subjects.filter((s) => (where.id?.in ? where.id.in.includes(s.id) : true) && s.gradeId === where.gradeId && s.isActive === where.isActive),
-          findFirst: async ({ where }: any) => subjects.find((s) => s.id === where.id && s.gradeId === where.gradeId && s.isActive === where.isActive) ?? null,
+          // getState resolves display names for ids already granted — by id
+          // alone, deliberately not offering-filtered.
+          findMany: async ({ where }: any) => subjects.filter((s) => (where.id?.in ? where.id.in.includes(s.id) : true)),
         },
         referralCode: {
           findUnique: async ({ where }: any) => (where.studentId ? get().referralCodesByStudentId.get(where.studentId) : get().referralCodesByCode.get(where.code)) ?? null,
@@ -113,7 +126,7 @@ describe("ReferralService", () => {
       },
     };
 
-    return { service: new ReferralService({ client: db } as any), state: () => state };
+    return { service: new ReferralService({ client: db } as any), state: () => state, subjects, client: db };
   }
 
   describe("attach", () => {
@@ -188,16 +201,41 @@ describe("ReferralService", () => {
       return me.pendingRewards[0].referralId as string;
     }
 
+    it("offers a shared subject to a grade that does not own its content home", async () => {
+      // The referrer's grade is grade-1; shared Arabic's content home is
+      // grade-eg-5. Under the old rule it never appeared here at all.
+      const h = makeHarness();
+      const sharedArabic = { id: "subject-arabic-eg5", gradeId: "grade-eg-5", isActive: true, nameEn: "Arabic", nameAr: "العربية" };
+      h.subjects.push(sharedArabic);
+
+      const eligible = await h.service.getEligibleRewardSubjects("user-referrer");
+
+      expect(eligible).toContainEqual({ id: sharedArabic.id, nameEn: "Arabic", nameAr: "العربية" });
+      // Proves the rule is now the OFFERING, not subject.gradeId: the service
+      // must consult GradeSubject for the student's own grade. Without this the
+      // assertion above could pass on a mock that ignores gradeId entirely.
+      expect(h.client.gradeSubject.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ gradeId: "grade-1" }) }),
+      );
+    });
+
     it("grants exactly one Subject +30 days when the referrer has no prior grant", async () => {
       const h = makeHarness();
       const referralId = await seedEarnedReferral(h);
 
       const before = Date.now();
       const result = await h.service.applyReward("user-referrer", referralId, "subject-math");
-      const expectedMs = before + 30 * 24 * 60 * 60 * 1000;
+
+      // "+30 days" is CALENDAR arithmetic (applyReward's setDate(+30)), not
+      // +30*24h of elapsed time. Across a DST boundary the two differ by an
+      // hour — Africa/Cairo drops 03:00 -> 02:00 in late October, which made a
+      // pure-millisecond expectation fail for about a month every year. Compare
+      // against the same calendar arithmetic so the assertion is DST-safe.
+      const expected = new Date(before);
+      expected.setDate(expected.getDate() + 30);
 
       expect(result.subjectId).toBe("subject-math");
-      expect(Math.abs(result.expiresAt.getTime() - expectedMs)).toBeLessThan(5000);
+      expect(Math.abs(result.expiresAt.getTime() - expected.getTime())).toBeLessThan(5000);
     });
 
     it("stacks onto an existing non-expired grant (existing expiry + 30 days), never resets to now", async () => {
