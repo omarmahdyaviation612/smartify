@@ -4,10 +4,10 @@ import { LEVEL_OFFSET, planSharedSubjects, type Snapshot } from "./shared-subjec
 function snapshot(overrides: Partial<Snapshot> = {}): Snapshot {
   return {
     grades: [
-      { id: "g-eg-2", level: 2, curriculumCode: "EG_NATIONAL" },
-      { id: "g-eg-4", level: 4, curriculumCode: "EG_NATIONAL" },
-      { id: "g-uk-2", level: 2, curriculumCode: "BRITISH_INTL" },
-      { id: "g-uk-4", level: 4, curriculumCode: "BRITISH_INTL" },
+      { id: "g-eg-2", level: 2, curriculumCode: "EG_NATIONAL", isActive: true },
+      { id: "g-eg-4", level: 4, curriculumCode: "EG_NATIONAL", isActive: true },
+      { id: "g-uk-2", level: 2, curriculumCode: "BRITISH_INTL", isActive: true },
+      { id: "g-uk-4", level: 4, curriculumCode: "BRITISH_INTL", isActive: true },
     ],
     subjects: [
       { id: "s-eg-ar-2", nameEn: "Arabic Language", gradeId: "g-eg-2", isActive: true, unitCount: 4, topicCount: 19, entitlementCount: 0 },
@@ -105,14 +105,59 @@ test("reports a target curriculum that has no grades rather than failing", () =>
 
 test("notes a level with no reference subject and leaves that grade's duplicate alone", () => {
   const plan = planSharedSubjects(snapshot());
-  // British level 2 has no Egyptian Social Studies, and British level 4 has no Egyptian Arabic.
-  // The trailing NO_GRADES notes are the same "report it, don't fail" rule the
-  // test above asserts: this fixture has no AMERICAN_INTL or LOCAL grades at
-  // all, so the planner reports them. Omitting them here would have made the
-  // two tests contradict each other.
+  // British level 2 has no Egyptian Social Studies, and British level 4 has no
+  // Egyptian Arabic — both grades are active in this fixture, so both are
+  // noted. (The separate test below covers an INACTIVE grade, which is skipped
+  // instead of noted.)
   expect(plan.notes).toEqual([
     { code: "NO_REFERENCE_SUBJECT", curriculumCode: "BRITISH_INTL", level: 2 },
     { code: "NO_REFERENCE_SUBJECT", curriculumCode: "BRITISH_INTL", level: 4 },
+    { code: "NO_GRADES", curriculumCode: "AMERICAN_INTL" },
+    { code: "NO_GRADES", curriculumCode: "LOCAL" },
+  ]);
+});
+
+test("an INACTIVE grade is never a link target, but its duplicates are still withdrawn (2026-10-06 fix)", () => {
+  // Measured on the real database: British levels 1-6 each carry BOTH a
+  // `[PLACEHOLDER] Grade N` row (isActive false) AND a real `Year N` row, so
+  // linking every grade emitted two links per level for one pair, and made the
+  // apply report `offeringsCreated: 17` while upserting only 9 distinct rows.
+  // An offering on a row no student can see is dead anyway.
+  //
+  // Withdrawals are deliberately NOT gated on isActive: the empty duplicates
+  // the seed created actually live under those inactive placeholder rows, so
+  // skipping them entirely would skip the entire cleanup.
+  const base = snapshot();
+  const plan = planSharedSubjects({
+    ...base,
+    grades: [
+      ...base.grades,
+      { id: "g-eg-5", level: 5, curriculumCode: "EG_NATIONAL", isActive: true },
+      // Level 5 on purpose: this snapshot has no ACTIVE British grade there, so
+      // the only NO_REFERENCE_SUBJECT note at that level is unambiguous.
+      { id: "g-uk-placeholder-5", level: 5, curriculumCode: "BRITISH_INTL", isActive: false },
+    ],
+    subjects: [
+      ...base.subjects,
+      { id: "s-eg-ar-5", nameEn: "Arabic Language", gradeId: "g-eg-5", isActive: true, unitCount: 3, topicCount: 12, entitlementCount: 0 },
+      // The empty placeholder duplicates the seed created actually live under
+      // such an inactive row, which is the whole point: they must still be
+      // withdrawn even though the row is not a link target.
+      { id: "s-uk-placeholder-ar-5", nameEn: "Arabic", gradeId: "g-uk-placeholder-5", isActive: true, unitCount: 0, topicCount: 0, entitlementCount: 0 },
+    ],
+  });
+
+  // No link for the inactive row...
+  expect(plan.links.filter((l) => l.gradeId === "g-uk-placeholder-5")).toEqual([]);
+  // ...but its empty duplicate is still scheduled for withdrawal.
+  expect(plan.withdrawals.map((w) => w.gradeId)).toContain("g-uk-placeholder-5");
+  // And the active row still gets exactly one link, not two.
+  expect(plan.links.filter((l) => l.gradeId === "g-uk-2")).toHaveLength(1);
+  expect(plan.notes).toEqual([
+    { code: "NO_REFERENCE_SUBJECT", curriculumCode: "BRITISH_INTL", level: 2 },
+    { code: "NO_REFERENCE_SUBJECT", curriculumCode: "BRITISH_INTL", level: 4 },
+    // level 5: the added row legitimately notes the missing Social Studies.
+    { code: "NO_REFERENCE_SUBJECT", curriculumCode: "BRITISH_INTL", level: 5 },
     { code: "NO_GRADES", curriculumCode: "AMERICAN_INTL" },
     { code: "NO_GRADES", curriculumCode: "LOCAL" },
   ]);

@@ -31,7 +31,7 @@ export const TARGET_CURRICULUM_CODES = ["BRITISH_INTL", "AMERICAN_INTL", "LOCAL"
 export const LEVEL_OFFSET = 0;
 
 export type Snapshot = {
-  grades: Array<{ id: string; level: number; curriculumCode: string }>;
+  grades: Array<{ id: string; level: number; curriculumCode: string; isActive: boolean }>;
   subjects: Array<{
     id: string;
     nameEn: string;
@@ -154,7 +154,18 @@ export function planSharedSubjects(snapshot: Snapshot): SharedSubjectsPlan {
         }
 
         if (!offered.has(`${grade.id}\u0000${referenceSubjectId}`)) {
-          plan.links.push({ gradeId: grade.id, subjectId: referenceSubjectId, curriculumCode, level: grade.level, nameEn: shared.canonical });
+          // Only ACTIVE grades are link targets (2026-10-06 fix). Measured on
+          // the real database: British levels 1-6 each carry BOTH a
+          // `[PLACEHOLDER] Grade N` row (isActive false) and a real `Year N`
+          // row, so linking every grade emitted two links per level for one
+          // pair — and made the apply report `offeringsCreated: 17` while
+          // upserting only 9 distinct rows. An offering on a row no student can
+          // see is dead anyway. Withdrawals are NOT gated on this: the empty
+          // duplicates the seed created actually live under those inactive
+          // placeholder rows, so skipping them entirely would skip the cleanup.
+          if (grade.isActive) {
+            plan.links.push({ gradeId: grade.id, subjectId: referenceSubjectId, curriculumCode, level: grade.level, nameEn: shared.canonical });
+          }
         }
         if (duplicate) {
           plan.withdrawals.push({
