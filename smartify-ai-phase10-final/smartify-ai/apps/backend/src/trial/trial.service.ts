@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { findOfferedSubjects } from "../common/grade-subject.util";
 
 function parseSubjectIds(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -45,9 +46,7 @@ export class TrialService {
       throw new BadRequestException("Choose exactly two different subjects.");
     }
 
-    const subjects = await this.prisma.client.subject.findMany({
-      where: { id: { in: unique }, gradeId: profile.gradeId, isActive: true },
-    });
+    const subjects = await findOfferedSubjects(this.prisma.client, profile.gradeId, unique);
     if (subjects.length !== 2) {
       throw new BadRequestException("One or more selected subjects are not available for your grade.");
     }

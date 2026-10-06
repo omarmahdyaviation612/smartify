@@ -32,10 +32,18 @@ describe("TrialService", () => {
     const prisma = {
       client: {
         studentProfile: { findUnique: jest.fn().mockResolvedValue(profile) },
+        gradeSubject: {
+          findMany: jest.fn().mockImplementation(async ({ where }: any) => {
+            const ids: string[] = where.subjectId.in;
+            return subjects
+              .filter((s) => ids.includes(s.id) && s.isActive === where.isActive)
+              .map((s) => ({ subject: s }));
+          }),
+        },
         subject: {
           findMany: jest.fn().mockImplementation(async ({ where }: any) => {
             const ids: string[] = where.id.in;
-            return subjects.filter((s) => ids.includes(s.id) && s.gradeId === where.gradeId && s.isActive === where.isActive);
+            return subjects.filter((s) => ids.includes(s.id));
           }),
         },
         lessonTrial: {
@@ -92,7 +100,22 @@ describe("TrialService", () => {
     });
 
     it("rejects a subject outside the student's own grade — never trusts the client's subjectId alone", async () => {
-      const h = makeHarness();
+      // The rule is now "does THIS grade offer it", not "is the Subject's
+      // content home this grade". So the fixture removes science from what the
+      // grade offers while leaving it in the subject table: the pair is
+      // rejected because one of them is not offered, not because of gradeId.
+      const h = makeHarness({
+        subjects: [
+          { id: "subject-math", gradeId: "grade-1", isActive: true },
+          { id: "subject-other-grade", gradeId: "grade-2", isActive: true },
+        ],
+      });
+      h.prisma.client.gradeSubject.findMany = jest.fn().mockImplementation(async ({ where }: any) =>
+        [{ id: "subject-math", gradeId: "grade-1", isActive: true }]
+          .filter((s) => s.isActive === where.isActive && (where.subjectId ? where.subjectId.in.includes(s.id) : true))
+          .map((s) => ({ subject: s })),
+      );
+
       await expect(h.service.selectSubjects("user-1", ["subject-math", "subject-other-grade"])).rejects.toThrow(BadRequestException);
     });
 
@@ -116,6 +139,24 @@ describe("TrialService", () => {
       const h = makeHarness();
       h.prisma.client.studentProfile.findUnique.mockResolvedValueOnce(null);
       await expect(h.service.selectSubjects("user-1", ["subject-math", "subject-science"])).rejects.toThrow(NotFoundException);
+    });
+
+    it("accepts two subjects the grade offers, including one whose content home is another grade", async () => {
+      // The subject's own gradeId is grade-2 (its content home); the student's
+      // grade is grade-1. The old grade-scoped query rejected this outright.
+      const h = makeHarness({
+        subjects: [
+          { id: "subject-math", gradeId: "grade-1", isActive: true },
+          { id: "subject-arabic-eg5", gradeId: "grade-2", isActive: true },
+        ],
+      });
+
+      const result = await h.service.selectSubjects("user-1", ["subject-math", "subject-arabic-eg5"]);
+
+      expect(result.selected).toBe(true);
+      expect(h.prisma.client.gradeSubject.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ gradeId: "grade-1" }) }),
+      );
     });
   });
 
