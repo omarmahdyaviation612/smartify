@@ -29,7 +29,7 @@ describe("CurriculaService.getPublicCatalog", () => {
     // test documents that contract rather than re-implementing Prisma's
     // filtering, which a mocked client can't meaningfully execute.
     const { service } = makeService(() => [
-      { id: "eg", code: "EG_NATIONAL", nameEn: "Egyptian National", nameAr: "المصري", country: "EG", grades: [{ id: "g1", nameEn: "Grade 1", nameAr: "الأول", level: 1, subjects: [] }] },
+      { id: "eg", code: "EG_NATIONAL", nameEn: "Egyptian National", nameAr: "المصري", country: "EG", grades: [{ id: "g1", nameEn: "Grade 1", nameAr: "الأول", level: 1, offeredSubjects: [] }] },
     ]);
     const result = await service.getPublicCatalog();
     expect(result.map((c: any) => c.code)).toEqual(["EG_NATIONAL"]);
@@ -38,7 +38,7 @@ describe("CurriculaService.getPublicCatalog", () => {
 
   it("CASE 9 — Egyptian National Grade 1 remains available through the catalog", async () => {
     const { service } = makeService(() => [
-      { id: "eg", code: "EG_NATIONAL", nameEn: "Egyptian National", nameAr: "المصري", country: "EG", grades: [{ id: "g1", nameEn: "Grade 1", nameAr: "الأول", level: 1, subjects: [{ id: "s1", nameEn: "Mathematics", nameAr: "الرياضيات", icon: "calculator" }] }] },
+      { id: "eg", code: "EG_NATIONAL", nameEn: "Egyptian National", nameAr: "المصري", country: "EG", grades: [{ id: "g1", nameEn: "Grade 1", nameAr: "الأول", level: 1, offeredSubjects: [{ isActive: true, subject: { id: "s1", nameEn: "Mathematics", nameAr: "الرياضيات", icon: "calculator" } }] }] },
     ]);
     const result = await service.getPublicCatalog();
     expect(result).toHaveLength(1);
@@ -52,7 +52,7 @@ describe("CurriculaService.getPublicCatalog", () => {
     await service.getPublicCatalog();
     const call = prisma.client.curriculum.findMany.mock.calls[0][0];
     expect(call.select.grades.where).toEqual({ isActive: true });
-    expect(call.select.grades.select.subjects.where).toEqual({ isActive: true });
+    expect(call.select.grades.select.offeredSubjects.where).toEqual({ isActive: true, subject: { isActive: true } });
   });
 });
 
@@ -87,7 +87,7 @@ describe("CurriculaService.getStructureSample", () => {
     const call = prisma.client.curriculum.findFirst.mock.calls[0][0];
     expect(call.where).toEqual({ code: "AMERICAN_INTL", isActive: true });
     expect(call.include.grades.where).toEqual({ isActive: true });
-    expect(call.include.grades.include.subjects.where).toEqual({ isActive: true });
+    expect(call.include.grades.include.offeredSubjects.where).toEqual({ isActive: true, subject: { isActive: true } });
   });
 
   it("returns an empty (null-safe) structure when the curriculum is active but has no active grades left (e.g. only a deactivated placeholder grade remains)", async () => {
@@ -118,20 +118,22 @@ describe("CurriculaService.getStructureSample", () => {
         {
           nameEn: "Grade 1",
           nameAr: "الصف الأول",
-          subjects: [
+          offeredSubjects: [
             {
-              nameEn: "Mathematics",
-              nameAr: "الرياضيات",
-              units: [
-                {
-                  nameEn: "Addition",
-                  nameAr: "الجمع",
-                  topics: [
-                    { nameEn: "Addition (Part 1)", nameAr: "الجمع (1)", lessons: [] },
-                    { nameEn: "Addition with Zero", nameAr: "الجمع مع الصفر", lessons: [] },
-                  ],
-                },
-              ],
+              subject: {
+                nameEn: "Mathematics",
+                nameAr: "الرياضيات",
+                units: [
+                  {
+                    nameEn: "Addition",
+                    nameAr: "الجمع",
+                    topics: [
+                      { nameEn: "Addition (Part 1)", nameAr: "الجمع (1)", lessons: [] },
+                      { nameEn: "Addition with Zero", nameAr: "الجمع مع الصفر", lessons: [] },
+                    ],
+                  },
+                ],
+              },
             },
           ],
         },
@@ -144,5 +146,63 @@ describe("CurriculaService.getStructureSample", () => {
     expect(result.subject).toEqual({ nameEn: "Mathematics", nameAr: "الرياضيات" });
     expect(result.unit).toEqual({ nameEn: "Addition", nameAr: "الجمع" });
     expect(result.topics.map((t) => t.nameEn)).toEqual(["Addition (Part 1)", "Addition with Zero"]);
+  });
+});
+
+describe("CurriculaService — grade offerings (shared subjects)", () => {
+  it("a shared subject appears under the grade that offers it, with the existing response shape", async () => {
+    const sharedArabic = { id: "subject-arabic-eg5", nameEn: "Arabic", nameAr: "اللغة العربية", icon: "language" };
+    const prisma = {
+      client: {
+        curriculum: {
+          findMany: jest.fn(async () => [
+            {
+              id: "uk", code: "BRITISH_INTL", nameEn: "British", nameAr: "بريطاني", country: "GB",
+              grades: [{
+                id: "g-uk-6", nameEn: "Year 6", nameAr: "السنة ٦", level: 6,
+                offeredSubjects: [
+                  { isActive: true, subject: sharedArabic },
+                  { isActive: true, subject: { id: "s-math", nameEn: "Mathematics", nameAr: "الرياضيات", icon: "calculator" } },
+                ],
+              }],
+            },
+          ]),
+        },
+      },
+    };
+    const service = new CurriculaService(prisma as any);
+
+    const result = await service.getPublicCatalog();
+    const grade = result[0].grades[0];
+
+    expect(grade.subjects.map((s: any) => s.id)).toEqual([sharedArabic.id, "s-math"]);
+    expect(grade).not.toHaveProperty("offeredSubjects");
+  });
+
+  it("the structure sample resolves its subject through the offering", async () => {
+    const prisma = {
+      client: {
+        curriculum: {
+          findFirst: jest.fn(async () => ({
+            nameEn: "British", nameAr: "بريطاني",
+            grades: [{
+              nameEn: "Year 6", nameAr: "السنة ٦",
+              offeredSubjects: [{
+                subject: {
+                  nameEn: "Arabic", nameAr: "اللغة العربية",
+                  units: [{ nameEn: "Unit 1", nameAr: "الوحدة ١", topics: [] }],
+                },
+              }],
+            }],
+          })),
+        },
+      },
+    };
+    const service = new CurriculaService(prisma as any);
+
+    const sample = await service.getStructureSample("BRITISH_INTL");
+
+    expect(sample.subject).toEqual({ nameEn: "Arabic", nameAr: "اللغة العربية" });
+    expect(sample.unit).toEqual({ nameEn: "Unit 1", nameAr: "الوحدة ١" });
   });
 });

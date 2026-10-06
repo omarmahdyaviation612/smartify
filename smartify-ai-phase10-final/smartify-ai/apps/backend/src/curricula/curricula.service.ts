@@ -19,7 +19,7 @@ export class CurriculaService {
    * frontend-only filter.
    */
   async getPublicCatalog() {
-    return this.prisma.client.curriculum.findMany({
+    const curricula = await this.prisma.client.curriculum.findMany({
       where: { isActive: true, grades: { some: { isActive: true } } },
       orderBy: { code: "asc" },
       select: {
@@ -36,14 +36,27 @@ export class CurriculaService {
             nameEn: true,
             nameAr: true,
             level: true,
-            subjects: {
-              where: { isActive: true },
-              select: { id: true, nameEn: true, nameAr: true, icon: true },
+            // Availability is an OFFERING: a grade may offer a Subject whose
+            // content home is another curriculum's grade (shared Arabic /
+            // Social Studies). Mapped back to `subjects` below so the public
+            // response shape is unchanged.
+            offeredSubjects: {
+              where: { isActive: true, subject: { isActive: true } },
+              orderBy: { subject: { nameEn: "asc" } },
+              select: { subject: { select: { id: true, nameEn: true, nameAr: true, icon: true } } },
             },
           },
         },
       },
     });
+
+    return curricula.map((curriculum) => ({
+      ...curriculum,
+      grades: curriculum.grades.map((grade) => {
+        const { offeredSubjects, ...rest } = grade;
+        return { ...rest, subjects: offeredSubjects.map((offering) => offering.subject) };
+      }),
+    }));
   }
 
   /**
@@ -65,17 +78,19 @@ export class CurriculaService {
           take: 1,
           orderBy: { level: "asc" },
           include: {
-            subjects: {
-              where: { isActive: true },
+            offeredSubjects: {
+              where: { isActive: true, subject: { isActive: true } },
+              orderBy: { subject: { nameEn: "asc" } },
               take: 1,
-              include: {
-                units: {
-                  take: 1,
-                  orderBy: { order: "asc" },
-                  include: {
-                    topics: {
+              select: {
+                subject: {
+                  select: {
+                    nameEn: true,
+                    nameAr: true,
+                    units: {
+                      take: 1,
                       orderBy: { order: "asc" },
-                      include: { lessons: { orderBy: { order: "asc" } } },
+                      include: { topics: { orderBy: { order: "asc" }, include: { lessons: { orderBy: { order: "asc" } } } } },
                     },
                   },
                 },
@@ -89,7 +104,7 @@ export class CurriculaService {
     if (!curriculum) throw new NotFoundException("Unknown curriculum code.");
 
     const grade = curriculum.grades[0];
-    const subject = grade?.subjects[0];
+    const subject = grade?.offeredSubjects?.[0]?.subject;
     const unit = subject?.units[0];
 
     return {
