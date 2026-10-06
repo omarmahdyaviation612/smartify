@@ -27,22 +27,52 @@ export class ParentService {
   }
 
   async acceptCode(userId: string, rawCode: string) {
-    const parent = await this.db.parentProfile.findUnique({ where: { userId } });
-    if (!parent) throw new NotFoundException("Create your parent profile before linking a student.");
     const code = rawCode?.trim().toUpperCase();
     if (!code) throw new BadRequestException("A link code is required.");
-    const invitation = await this.db.parentLinkInvitation.findUnique({ where: { code } });
-    if (!invitation || invitation.usedAt || invitation.expiresAt < new Date()) {
-      throw new BadRequestException("This link code is invalid or expired.");
-    }
-    if (invitation.createdByUserId === userId) throw new BadRequestException("You cannot link your own account.");
-    const relation = await this.db.parentStudentRelation.upsert({
-      where: { parentId_studentId: { parentId: parent.id, studentId: invitation.studentId } },
-      update: {},
-      create: { parentId: parent.id, studentId: invitation.studentId },
+    return this.db.$transaction(async (tx: any) => {
+      const now = new Date();
+      const invitation = await tx.parentLinkInvitation.findUnique({ where: { code } });
+      if (!invitation || invitation.usedAt || invitation.expiresAt <= now) {
+        throw new BadRequestException("This link code is invalid or expired.");
+      }
+      if (invitation.createdByUserId === userId) throw new BadRequestException("You cannot link your own account.");
+
+      const user = await tx.user.findUnique({ where: { id: userId }, select: { id: true, role: true, email: true } });
+      if (!user || !["STUDENT", "PARENT"].includes(user.role)) {
+        throw new BadRequestException("This invitation can only be used by a parent account.");
+      }
+
+      // Do not convert an account that already owns a student profile. This
+      // lets newly invited users (whose default role is STUDENT) become
+      // parents without taking over an active student account.
+      if (user.role === "STUDENT") {
+        const studentProfile = await tx.studentProfile.findUnique({ where: { userId }, select: { id: true } });
+        if (studentProfile) throw new BadRequestException("Use a separate parent account to accept this invitation.");
+      }
+
+      // Claim the invitation inside this transaction before creating the
+      // relationship, preventing two accounts from consuming one code.
+      const claimed = await tx.parentLinkInvitation.updateMany({
+        where: { id: invitation.id, usedAt: null, expiresAt: { gt: now } },
+        data: { usedAt: now },
+      });
+      if (claimed.count !== 1) throw new BadRequestException("This link code is invalid or expired.");
+
+      const parent = await tx.parentProfile.upsert({
+        where: { userId },
+        update: {},
+        create: { userId, fullName: user.email.split("@")[0] || "Parent" },
+      });
+      if (user.role === "STUDENT") {
+        await tx.user.update({ where: { id: userId }, data: { role: "PARENT" } });
+      }
+      const relation = await tx.parentStudentRelation.upsert({
+        where: { parentId_studentId: { parentId: parent.id, studentId: invitation.studentId } },
+        update: {},
+        create: { parentId: parent.id, studentId: invitation.studentId },
+      });
+      return { id: relation.id, studentId: relation.studentId, canViewConversations: relation.canViewConversations };
     });
-    await this.db.parentLinkInvitation.update({ where: { id: invitation.id }, data: { usedAt: new Date() } });
-    return { id: relation.id, studentId: relation.studentId, canViewConversations: relation.canViewConversations };
   }
 
   async listStudents(userId: string) {
@@ -78,18 +108,47 @@ export class ParentService {
           take: 5,
           select: { isCorrect: true, attemptedAt: true },
         });
+        const [completedLessonsCount, completedLessons, examResults] = await Promise.all([
+          this.db.lessonSession.count({ where: { studentId: link.studentId, status: "COMPLETED" } }),
+          this.db.lessonSession.findMany({
+            where: { studentId: link.studentId, status: "COMPLETED" },
+            orderBy: { completedAt: "desc" },
+            take: 10,
+            select: {
+              id: true,
+              completedAt: true,
+              topic: {
+                select: {
+                  nameEn: true,
+                  nameAr: true,
+                  unit: { select: { subject: { select: { nameEn: true, nameAr: true } } } },
+                },
+              },
+            },
+          }),
+          this.db.quizResult.findMany({
+            where: { studentId: link.studentId, quizType: { in: ["quiz", "topic_assessment", "mock_exam"] } },
+            orderBy: { createdAt: "desc" },
+            take: 10,
+            select: {
+              id: true,
+              quizType: true,
+              score: true,
+              correctCount: true,
+              totalQuestions: true,
+              createdAt: true,
+              topic: { select: { nameEn: true, nameAr: true } },
+            },
+          }),
+        ]);
         const result: any = {
           id: link.student.id, fullName: link.student.fullName,
           attempts: link.student._count.questionAttempts, quizzes: link.student._count.quizResults,
           recentActivity: recent,
-          canViewConversations: link.canViewConversations,
+          completedLessonsCount,
+          completedLessons,
+          examResults,
         };
-        if (link.canViewConversations) {
-          result.conversations = await this.db.aIConversation.findMany({
-            where: { studentId: link.studentId }, orderBy: { updatedAt: "desc" }, take: 5,
-            select: { id: true, title: true, updatedAt: true },
-          });
-        }
         return result;
       })),
     };

@@ -9,15 +9,17 @@ export function StudentDashboardShortcut({ locale }: { locale: Locale }) {
   const { isLoaded, isSignedIn } = useAuth();
   const { user, loading } = useCurrentUser();
 
-  if (!isLoaded || !isSignedIn || loading || user?.role !== "STUDENT") return null;
+  if (!isLoaded || !isSignedIn || loading || !["STUDENT", "PARENT"].includes(user?.role ?? "")) return null;
+
+  const isParent = user?.role === "PARENT";
 
   return (
     <Link
-      href={`/${locale}/dashboard`}
-      aria-label={locale === "ar" ? "الذهاب إلى لوحة التحكم" : "Go to dashboard"}
+      href={`/${locale}/${isParent ? "parent" : "dashboard"}`}
+      aria-label={isParent ? (locale === "ar" ? "الذهاب إلى لوحة ولي الأمر" : "Go to parent dashboard") : (locale === "ar" ? "الذهاب إلى لوحة التحكم" : "Go to dashboard")}
       className="fixed bottom-4 end-4 z-50 inline-flex min-h-12 items-center justify-center rounded-full bg-sf-purple-600 px-5 text-sm font-semibold text-white shadow-lg transition-colors hover:bg-sf-purple-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sf-purple-600"
     >
-      {locale === "ar" ? "لوحة التحكم" : "Dashboard"}
+      {isParent ? (locale === "ar" ? "لوحة ولي الأمر" : "Parent dashboard") : (locale === "ar" ? "لوحة التحكم" : "Dashboard")}
     </Link>
   );
 }

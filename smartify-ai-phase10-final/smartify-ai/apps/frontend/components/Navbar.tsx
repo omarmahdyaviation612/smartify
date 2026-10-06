@@ -45,6 +45,11 @@ export function Navbar({ locale, copy }: { locale: Locale; copy: MarketingCopy }
           </SignedOut>
 
           <SignedIn>
+            {user?.role === "PARENT" && (
+              <Link href={`${base}/parent`} className="hidden text-sm font-medium text-sf-purple-600 sm:block">
+                {locale === "ar" ? "لوحة ولي الأمر" : "Parent dashboard"}
+              </Link>
+            )}
             {isAdmin && (
               <Link href={`${base}/admin`} className="hidden text-sm font-medium text-sf-purple-600 sm:block">
                 Admin

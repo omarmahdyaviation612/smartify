@@ -7,6 +7,7 @@ import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getMarketingCopy } from "@/content/marketing";
 import { Navbar } from "@/components/Navbar";
 import { useApiClient } from "@/lib/api-client";
+import { useCurrentUser } from "@/lib/use-current-user";
 import type { Locale } from "@/content/marketing";
 
 interface Subject {
@@ -22,6 +23,7 @@ export default function FreeTrialPage() {
   const copy = getMarketingCopy(locale);
   const { apiFetch } = useApiClient();
   const { isLoaded, isSignedIn } = useAuth();
+  const { user, loading: userLoading } = useCurrentUser();
 
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
@@ -32,6 +34,11 @@ export default function FreeTrialPage() {
     if (!isLoaded) return;
     if (!isSignedIn) {
       router.replace(`/${locale}/sign-up`);
+      return;
+    }
+    if (userLoading) return;
+    if (user?.role === "PARENT") {
+      router.replace(`/${locale}/parent`);
       return;
     }
 
@@ -46,7 +53,7 @@ export default function FreeTrialPage() {
         setLoading(false);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoaded, isSignedIn, locale]);
+  }, [isLoaded, isSignedIn, locale, userLoading, user?.role]);
 
   const handleStartTrial = () => {
     if (!selectedSubject) {
@@ -56,7 +63,7 @@ export default function FreeTrialPage() {
     router.push(`/${locale}/tutor?subjectId=${selectedSubject}`);
   };
 
-  if (!isLoaded) {
+  if (!isLoaded || (isSignedIn && userLoading) || (user?.role === "PARENT")) {
     return (
       <>
         <Navbar locale={locale} copy={copy} />
