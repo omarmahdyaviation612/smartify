@@ -5,6 +5,7 @@ import { PaymentProviderFactory } from "../payments/payment-provider.factory";
 import { loadBackendEnv } from "@smartify/config";
 import { TutorQuestionPacksService } from "../tutor-question-packs/tutor-question-packs.service";
 import { ReferralService } from "../referral/referral.service";
+import { findOfferedSubjects } from "../common/grade-subject.util";
 
 /**
  * Subject-based pricing (2026-09-20) — Subscription.selectedSubjectIds is a
@@ -65,10 +66,11 @@ export class BillingService {
    */
   async getAvailableSubjects(userId: string) {
     const profile = await this.getProfileOrThrow(userId);
-    const subjects = await this.prisma.client.subject.findMany({
-      where: { gradeId: profile.gradeId, isActive: true },
-      orderBy: { nameEn: "asc" },
-    });
+    // Every Subject this grade OFFERS — including shared Arabic / Social
+    // Studies whose content home is the Egyptian grade. priceEGP is always
+    // read from the content-home Subject row, so the price is unified across
+    // every system that offers it.
+    const subjects = await findOfferedSubjects(this.prisma.client, profile.gradeId);
     return subjects.map((subject) => ({
       id: subject.id,
       nameEn: subject.nameEn,
@@ -140,7 +142,7 @@ export class BillingService {
       throw new BadRequestException("Select at least one subject.");
     }
 
-    const subjects = await this.prisma.client.subject.findMany({ where: { id: { in: selectedSubjectIds }, gradeId: profile.gradeId, isActive: true } });
+    const subjects = await findOfferedSubjects(this.prisma.client, profile.gradeId, selectedSubjectIds);
     if (subjects.length !== selectedSubjectIds.length) {
       throw new BadRequestException("One or more selected subjects are invalid.");
     }

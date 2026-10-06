@@ -41,6 +41,16 @@ describe("BillingService", () => {
     const prisma = {
       client: {
         studentProfile: { findUnique: jest.fn().mockResolvedValue(studentProfile) },
+        // `subjects` here is what this grade OFFERS (the GradeSubject rows the
+        // real query joins through). Availability is an offering question now,
+        // not a property of the Subject row.
+        gradeSubject: {
+          findMany: jest.fn().mockImplementation(async ({ where }: any) =>
+            (overrides.subjects ?? [])
+              .filter((s: any) => (where.subjectId ? where.subjectId.in.includes(s.id) : true))
+              .map((s: any) => ({ subject: s })),
+          ),
+        },
         subject: { findMany: jest.fn().mockResolvedValue(overrides.subjects ?? []) },
         studentSubject: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
         subscription: {
@@ -77,7 +87,7 @@ describe("BillingService", () => {
   });
 
   it("rejects checkout for a subject outside the student's own grade", async () => {
-    // subject.findMany is grade-scoped in the query itself — returning fewer subjects than requested means one didn't match.
+    // gradeSubject is what scopes availability now — returning fewer subjects than requested means the grade doesn't offer one of them.
     const prisma = makePrismaMock({ subjects: [{ id: "math", nameEn: "Math", priceEGP: 100 }] });
     const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
 
@@ -115,6 +125,21 @@ describe("BillingService", () => {
     await service.startCheckout("user-1", { subjectIds: ["math"] });
 
     expect(subscriptionUpsert.mock.calls[0][0].create.monthlyTotalEGP).toBe(150);
+  });
+
+  it("lists a shared subject offered by the student's grade, priced from its content home", async () => {
+    // The subject's own gradeId is the Egyptian grade (its content home); the
+    // student's grade is grade-A. Under the old rule this subject was invisible.
+    const sharedArabic = { id: "subject-arabic-eg5", gradeId: "grade-eg-5", isActive: true, nameEn: "Arabic", nameAr: "اللغة العربية", priceEGP: 150 };
+    const prisma = makePrismaMock({ subjects: [sharedArabic] });
+    const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
+
+    await expect(service.getAvailableSubjects("user-1")).resolves.toEqual([
+      { id: sharedArabic.id, nameEn: "Arabic", nameAr: "اللغة العربية", priceEGP: 150 },
+    ]);
+    expect(prisma.client.gradeSubject.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ gradeId: "grade-A" }) }),
+    );
   });
 
   describe("cancelSubscription", () => {
@@ -274,7 +299,11 @@ describe("BillingService", () => {
       const prisma = makePrismaMock({
         subscriptionUpsert: jest.fn().mockImplementation(async () => ({ id: "sub-1" })),
       });
-      prisma.client.subject.findMany = jest.fn().mockImplementation(async () => currentSubjects);
+      prisma.client.gradeSubject.findMany = jest.fn().mockImplementation(async ({ where }: any) =>
+        currentSubjects
+          .filter((s: any) => (where.subjectId ? where.subjectId.in.includes(s.id) : true))
+          .map((s: any) => ({ subject: s })),
+      );
       prisma.client.subscription.update = jest.fn().mockImplementation(async ({ data }: any) => {
         if (data.externalSubscriptionId) externalSubscriptionId = data.externalSubscriptionId;
       });
