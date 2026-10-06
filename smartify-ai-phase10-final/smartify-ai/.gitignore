@@ -24,3 +24,6 @@ prisma/*.db
 *.pgdump
 
 google-oauth-production.txt
+
+# Railway Postgres connection vars — never commit
+apps/backend/railway-postgres-vars.json
