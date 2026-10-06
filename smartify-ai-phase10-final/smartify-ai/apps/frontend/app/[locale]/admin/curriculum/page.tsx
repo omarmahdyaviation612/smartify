@@ -582,9 +582,16 @@ function AddSubjectWizard({ onCreated, onCancel }: { onCreated: () => void; onCa
           <ul className="space-y-1 text-sm text-neutral-700">
             <li>✓ Subject structure created ({result.unitsCreated} units, {result.topicsCreated} topics)</li>
             <li>✓ Textbook stored</li>
-            <li className="text-neutral-400">○ Grounding will happen when needed</li>
+            <li className="text-neutral-400">○ Ground the Subject before publishing to prepare every Unit now</li>
             <li className="text-neutral-400">○ Lessons will be generated when students open Topics</li>
           </ul>
+          {subjectId && (
+            <SubjectGroundingControl
+              subjectId={subjectId}
+              unitCount={result.unitsCreated}
+              onDone={async () => { onCreated(); }}
+            />
+          )}
           {published ? (
             <p className="text-sm font-medium text-green-700">✓ Subject published — visible to students.</p>
           ) : (
@@ -839,7 +846,7 @@ function StatusSection() {
     <div className="mt-6">
       <h2 className="font-semibold text-navy-900">Curriculum content status</h2>
       <p className="mt-1 text-sm text-neutral-500">
-        Read-only view of textbook mapping, Unit grounding, and Topic generation state — nothing here triggers grounding or generation.
+        Review textbook mapping, Unit grounding, and Topic generation. Grounding starts only when you explicitly run it for a Subject.
       </p>
 
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -887,6 +894,8 @@ function StatusSection() {
                           <span>Price: {s.priceEGP != null ? `${s.priceEGP} EGP/mo` : "Not yet priced"}</span>
                         </div>
                         <SubjectPriceEditor subjectId={s.id} priceEGP={s.priceEGP} onSaved={() => refetch()} />
+
+                        <SubjectGroundingControl subjectId={s.id} units={s.units} onDone={refetch} />
 
                         {/* English Extra Book / Story support V1 — clearly secondary to "Add New Subject" above: a small text link, not a button, and only ever appended (never replaces the main textbook or this Subject's existing Units). */}
                         {extraBookSubjectId === s.id ? (
@@ -952,6 +961,80 @@ function StatusSection() {
           </details>
         ))}
       </div>
+    </div>
+  );
+}
+
+type GroundingActionResult = {
+  subjectId: string;
+  status: "READY" | "UNIT_READY" | "PREPARING" | "RETRYABLE_FAILURE" | "CONFIGURATION_ERROR" | "PROVIDER_OUTAGE" | "NO_UNITS";
+  unitId?: string;
+  unitNameEn?: string;
+  retryAfterMs?: number;
+  reason?: string;
+  groundedUnits: number;
+  totalUnits: number;
+};
+
+function SubjectGroundingControl({ subjectId, units, unitCount, onDone }: { subjectId: string; units?: UnitStatus[]; unitCount?: number; onDone: () => Promise<void> }) {
+  const { apiFetch } = useApiClient();
+  const [busy, setBusy] = useState(false);
+  const [started, setStarted] = useState(false);
+  const [complete, setComplete] = useState(!!units && units.length > 0 && units.every((unit) => unit.grounded));
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  async function run() {
+    if (busy || totalUnits === 0 || complete || ungrounded === 0) return;
+    if (!started && !window.confirm(`Start grounding this Subject? This uses the platform content-authoring AI budget. Each click processes one bounded page chunk, and progress can be resumed.`)) return;
+    setBusy(true);
+    setStarted(true);
+    setError("");
+    setMessage("Processing one grounding chunk…");
+    try {
+      const result = await apiFetch<GroundingActionResult>(`/admin/curriculum/subjects/${subjectId}/prepare-grounding`, { method: "POST" });
+      setMessage(`${result.unitNameEn ? `${result.unitNameEn}: ` : ""}${result.groundedUnits}/${result.totalUnits} units complete.`);
+
+      if (result.status === "READY") {
+        setComplete(true);
+        setMessage(`Grounding complete: ${result.groundedUnits}/${result.totalUnits} units.`);
+      } else if (result.status === "NO_UNITS") {
+        setMessage("Add Units before grounding this Subject.");
+      } else if (result.status === "CONFIGURATION_ERROR" || result.status === "PROVIDER_OUTAGE") {
+        setError(result.status === "PROVIDER_OUTAGE"
+          ? "The AI provider is out of capacity. Progress is saved; try again later."
+          : "Grounding is blocked by a source or page-range issue. Fix the Unit setup, then resume.");
+        setMessage("");
+      } else if (result.status === "RETRYABLE_FAILURE") {
+        const seconds = Math.ceil((result.retryAfterMs ?? 5000) / 1000);
+        setMessage(`Temporary grounding issue. Wait about ${seconds} second(s), then click Continue grounding to retry.`);
+      } else if (result.status === "UNIT_READY") {
+        setMessage(`${result.unitNameEn ?? "Unit"} is grounded. Click Continue grounding for the next Unit.`);
+        await onDone();
+      } else if (result.status === "PREPARING") {
+        setMessage(`${result.unitNameEn ?? "Grounding"} is still in progress. Click Continue grounding shortly to resume.`);
+      } else {
+        setMessage("Click Continue grounding to process the next chunk.");
+      }
+      if (result.status !== "UNIT_READY") await onDone();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Grounding failed. Saved progress can be resumed.");
+      setMessage("");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const totalUnits = units?.length ?? unitCount ?? 0;
+  const ungrounded = units ? units.filter((unit) => !unit.grounded).length : (complete ? 0 : totalUnits);
+  return (
+    <div className="mt-2 pl-2">
+      <button onClick={run} disabled={busy || totalUnits === 0 || complete || ungrounded === 0} className="rounded-sf border border-sf-blue-500 px-3 py-1.5 text-xs font-medium text-sf-blue-700 disabled:opacity-50">
+        {busy ? "Grounding chunk…" : complete || (ungrounded === 0 && totalUnits > 0) ? "All units grounded" : started ? "Continue grounding" : "Ground this subject"}
+      </button>
+      <p className="mt-1 text-xs text-neutral-400">Uses the mapped textbook and each Unit’s page range. Each click processes one bounded chunk; progress is saved and can be resumed. This does not publish the Subject or generate lessons and questions.</p>
+      {message && <p className="mt-1 text-xs text-neutral-600" role="status">{message}</p>}
+      {error && <p className="mt-1 text-xs text-error-500" role="alert">{error}</p>}
     </div>
   );
 }

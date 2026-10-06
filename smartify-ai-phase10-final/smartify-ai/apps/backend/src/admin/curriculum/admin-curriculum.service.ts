@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AIProviderFactory } from "../../ai/ai-provider.factory";
 import { BadRequestException } from "@nestjs/common";
@@ -10,6 +10,7 @@ import { TocExtractionService, type TocExtractionOutcome } from "./subject-inges
 import { validateTocExtraction } from "./subject-ingestion/toc-extraction-validator";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
 import type { ConfirmExtraBookStructureInput, ConfirmSubjectStructureInput } from "@smartify/validation";
+import { UnitGroundingService } from "../../interactive-lesson/unit-grounding/unit-grounding.service";
 
 @Injectable()
 export class AdminCurriculumService {
@@ -19,7 +20,48 @@ export class AdminCurriculumService {
     private readonly sourceUpload: CurriculumSourceUploadService,
     private readonly tocExtraction: TocExtractionService,
     private readonly storageFactory: CurriculumSourceStorageFactory,
+    @Optional()
+    private readonly unitGrounding?: UnitGroundingService,
   ) {}
+
+  /**
+   * Admin-triggered, resumable subject grounding. One call processes at most
+   * one bounded page chunk; callers may poll by calling again. Progress is
+   * persisted by UnitGroundingProgressService, so closing the page is safe.
+   * This endpoint never publishes a Subject or invokes Topic assignment / AI
+   * mapping; those remain separately governed workflows.
+   */
+  async prepareNextSubjectGroundingChunk(subjectId: string) {
+    const subject = await this.prisma.client.subject.findUnique({
+      where: { id: subjectId },
+      select: {
+        id: true,
+        units: { select: { id: true, nameEn: true, order: true, groundingNotesJson: true }, orderBy: { order: "asc" } },
+      },
+    });
+    if (!subject) throw new NotFoundException(`Subject ${subjectId} not found.`);
+
+    const groundedUnits = subject.units.filter((unit) => unit.groundingNotesJson != null).length;
+    const totalUnits = subject.units.length;
+    const common = { subjectId, groundedUnits, totalUnits };
+    if (totalUnits === 0) return { ...common, status: "NO_UNITS" as const };
+    const nextUnit = subject.units.find((unit) => unit.groundingNotesJson == null);
+    if (!nextUnit) return { ...common, status: "READY" as const };
+
+    if (!this.unitGrounding) throw new Error("UnitGroundingService is not configured.");
+    const result = await this.unitGrounding.prepareNextGroundingChunk(nextUnit.id, CONTENT_AUTHORING_ACTOR_ID);
+    const groundedAfterChunk = groundedUnits + (result.status === "READY" ? 1 : 0);
+    const subjectStatus = result.status === "READY" && groundedAfterChunk < totalUnits ? "UNIT_READY" : result.status;
+    return {
+      ...common,
+      ...(result.status === "READY" ? { groundedUnits: groundedAfterChunk } : {}),
+      status: subjectStatus,
+      unitId: nextUnit.id,
+      unitNameEn: nextUnit.nameEn,
+      ...(result.status === "PREPARING" || result.status === "RETRYABLE_FAILURE" ? { retryAfterMs: result.retryAfterMs } : {}),
+      ...(result.status === "CONFIGURATION_ERROR" || result.status === "PROVIDER_OUTAGE" || result.status === "RETRYABLE_FAILURE" ? { reason: result.reason } : {}),
+    };
+  }
 
   /**
    * Admin textbook upload, Step 1 (2026-09-20) — first-time upload only.

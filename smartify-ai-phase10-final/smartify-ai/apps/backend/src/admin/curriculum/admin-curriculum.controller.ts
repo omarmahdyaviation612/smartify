@@ -153,6 +153,12 @@ export class AdminCurriculumController {
     return this.service.confirmSubjectStructure(subjectId, parseBody(confirmSubjectStructureSchema, body));
   }
 
+  /** Starts or resumes a single bounded grounding chunk for this Subject. */
+  @Post("subjects/:id/prepare-grounding")
+  prepareSubjectGrounding(@Param("id") subjectId: string) {
+    return this.service.prepareNextSubjectGroundingChunk(subjectId);
+  }
+
   /**
    * English Extra Book / Story support V1 (2026-09-20) — "Add Extra Book",
    * upload step, for an EXISTING Subject. Never touches Subject.sourceFile
