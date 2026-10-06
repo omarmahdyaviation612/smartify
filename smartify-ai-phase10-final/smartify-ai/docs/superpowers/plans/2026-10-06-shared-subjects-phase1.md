@@ -10,6 +10,132 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-06-shared-subjects-design.md`
 
+## Environment corrections and Task 0 (added 2026-10-06, after inspecting the environment)
+
+This block **supersedes** Preconditions items 2 and 3 and Task 2 steps 4 and 6, which were written before anything was run. Everything below was verified by running the commands.
+
+### What the environment actually is
+
+- PostgreSQL runs as a **native Windows service** (`postgresql-x64-18`, Automatic, listening on `localhost:5432`, database `smartify`) — not Docker. `pnpm infra:up` is **not** needed and must not be run: the Docker daemon is not running.
+- `DATABASE_URL` exists **only** in `apps/backend/.env`. There is no root `.env` and no `packages/database/.env`, so Prisma needs it exported explicitly. Never print its value:
+
+```powershell
+$env:DATABASE_URL = ((Get-Content apps/backend/.env | Where-Object { $_ -match '^\s*DATABASE_URL\s*=' } | Select-Object -First 1) -replace '^\s*DATABASE_URL\s*=\s*','').Trim('"')
+```
+
+- `prisma` 5.22.0 and its schema engine are installed and working. Nothing is broken.
+- **Prisma cannot run under a sandbox that denies writes inside `node_modules`.** The symptom is a misleading `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL Command "prisma" not found` followed by a copyfile `EPERM`. Run the execution session with the project directory as its workspace root.
+
+### The local migration history has diverged from the repository
+
+Measured with `prisma migrate status`:
+
+```
+last common migration:                        20260920185548_free_trial_and_referral_v1
+present locally, not applied:                 20260925141543_add_student_school_info
+applied to the database, absent locally:      20260925190000_add_unit_grounding_progress
+                                              20260926000000_add_student_school_info
+```
+
+The cause is the several full copies of this project on disk (`_subject-discovery/`, `_tmp-resumable-grounding/`, `_tmp-release-resumable-grounding/`), each of which generated a differently-timestamped migration for the same change.
+
+**Consequence:** `prisma migrate dev` cannot be used here. It needs a consistent history plus a shadow database, and against this database it demands a reset. Migrations below must therefore be written by hand and applied with `prisma migrate deploy`.
+
+### Task 0: Reconcile the local migration history (no data loss)
+
+Do this before Task 1. Nothing here writes to application data.
+
+- [ ] **Step 1: Capture the true delta between the live database and the committed schema** (read-only):
+
+```powershell
+$env:DATABASE_URL = ((Get-Content apps/backend/.env | Where-Object { $_ -match '^\s*DATABASE_URL\s*=' } | Select-Object -First 1) -replace '^\s*DATABASE_URL\s*=\s*','').Trim('"')
+pnpm --filter @smartify/database exec prisma migrate diff --from-url "$env:DATABASE_URL" --to-schema-datamodel packages/database/prisma/schema.prisma --script
+```
+
+Expected: the objects the database is missing relative to the schema — the Student-school-info table and columns, and anything else. **Bring this output back for review before continuing**; the next step depends on exactly what it contains.
+
+- [ ] **Step 2: Create the two missing local migration folders** so the history describes what the database already has. Their names must match the `_prisma_migrations` rows exactly:
+
+```
+packages/database/prisma/migrations/20260925190000_add_unit_grounding_progress/migration.sql
+packages/database/prisma/migrations/20260926000000_add_student_school_info/migration.sql
+```
+
+Fill each with the SQL that actually produced those changes — taken from the Step 1 diff and from the repository's own `20260925141543_add_student_school_info/migration.sql` (the same change under a different timestamp). Do not invent SQL you cannot verify.
+
+- [ ] **Step 3: Tell Prisma those two are already applied** — they are, the database has the objects:
+
+```powershell
+pnpm --filter @smartify/database exec prisma migrate resolve --applied 20260925190000_add_unit_grounding_progress
+pnpm --filter @smartify/database exec prisma migrate resolve --applied 20260926000000_add_student_school_info
+```
+
+- [ ] **Step 4: Resolve the local-only School migration.** `20260925141543_add_student_school_info` describes the same change as the now-aligned `20260926000000_add_student_school_info`. Use Step 1's diff to decide:
+
+  - **The database already has those objects** (the diff never mentions the School table or its columns): mark the local duplicate applied so it is not re-run:
+    `pnpm --filter @smartify/database exec prisma migrate resolve --applied 20260925141543_add_student_school_info`
+  - **The database is missing them**: leave it pending and let Task 2's `migrate deploy` apply it.
+
+- [ ] **Step 5: Verify the history is consistent:**
+
+```powershell
+pnpm --filter @smartify/database exec prisma migrate status
+```
+
+Expected: `Database schema is up to date!`, with no "not found locally" list. If it still diverges, stop and ask — do not reset the database.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/database/prisma/migrations
+git commit -m "chore(db): reconcile local migration history with the database"
+```
+
+### Task 2 corrections
+
+Task 2 steps 1-3 (the schema edits) and steps 5, 7, 8 are unchanged. Steps 4 and 6 are replaced by the following.
+
+- **Step 4 (replaced): write the migration folder by hand.** Create `packages/database/prisma/migrations/<UTC timestamp>_add_grade_subject_offering/migration.sql`, using the current UTC time in `YYYYMMDDHHMMSS` form and making it later than every existing folder, containing:
+
+```sql
+-- CreateTable
+CREATE TABLE "GradeSubject" (
+    "id" TEXT NOT NULL,
+    "gradeId" TEXT NOT NULL,
+    "subjectId" TEXT NOT NULL,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "GradeSubject_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE INDEX "GradeSubject_gradeId_isActive_idx" ON "GradeSubject"("gradeId", "isActive");
+
+-- CreateIndex
+CREATE INDEX "GradeSubject_subjectId_idx" ON "GradeSubject"("subjectId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "GradeSubject_gradeId_subjectId_key" ON "GradeSubject"("gradeId", "subjectId");
+
+-- AddForeignKey
+ALTER TABLE "GradeSubject" ADD CONSTRAINT "GradeSubject_gradeId_fkey" FOREIGN KEY ("gradeId") REFERENCES "Grade"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "GradeSubject" ADD CONSTRAINT "GradeSubject_subjectId_fkey" FOREIGN KEY ("subjectId") REFERENCES "Subject"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+```
+
+followed by the backfill and the `DO $$ ... $$` guard from step 5.
+
+- **Step 6 (replaced): apply it without a shadow database and without a reset:**
+
+```powershell
+pnpm --filter @smartify/database exec prisma migrate deploy
+pnpm --filter @smartify/database exec prisma generate
+```
+
+`migrate deploy` applies pending local migrations and never resets. Confirm with `prisma migrate status`, then run Task 3's PostgreSQL test — that test is the real proof the backfill is complete.
+
 ## Scope of this plan
 
 This plan implements **Phase 0 and Phase 1** of the spec only.
