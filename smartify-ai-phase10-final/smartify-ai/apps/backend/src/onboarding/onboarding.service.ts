@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { findOfferedSubjects } from "../common/grade-subject.util";
 import { QuestionDraftGeneratorService } from "../question-bank/question-draft-generator/question-draft-generator.service";
 import type { StudentOnboardingInput } from "@smartify/validation";
 
@@ -28,9 +29,10 @@ export class OnboardingService {
       throw new BadRequestException("Grade does not belong to the selected curriculum.");
     }
 
-    const subjects = await this.prisma.client.subject.findMany({
-      where: { id: { in: input.subjectIds }, gradeId: grade.id },
-    });
+    // Availability is an OFFERING question: `grade` may offer a Subject whose
+    // content home is another curriculum's grade (shared Arabic / Social
+    // Studies). Validation and the response shape are otherwise unchanged.
+    const subjects = await findOfferedSubjects(this.prisma.client, grade.id, input.subjectIds);
     if (subjects.length !== input.subjectIds.length) {
       throw new BadRequestException("One or more subjects are invalid for the selected grade.");
     }

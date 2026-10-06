@@ -22,7 +22,17 @@ describe("OnboardingService", () => {
       client: {
         curriculum: { findUnique: jest.fn().mockResolvedValue(curriculum) },
         grade: { findUnique: jest.fn().mockResolvedValue(overrides.grade ?? gradeInCurriculumA) },
-        subject: { findMany: jest.fn().mockResolvedValue(overrides.subjects ?? [subjectInGrade1]) },
+        // Availability is now an OFFERING question (GradeSubject), not a
+        // property of the Subject row: a shared subject's own gradeId is its
+        // content home, which may be a different curriculum's grade entirely.
+        gradeSubject: {
+          findMany: jest.fn().mockImplementation(async ({ where }: any) =>
+            (overrides.subjects ?? [subjectInGrade1])
+              .filter((s: any) => (where.subjectId ? where.subjectId.in.includes(s.id) : true))
+              .map((s: any) => ({ subject: s })),
+          ),
+        },
+        subject: { findMany: jest.fn().mockResolvedValue([]) },
         school: { findUnique: jest.fn().mockResolvedValue(overrides.school ?? null) },
         studentProfile: {
           upsert: jest.fn().mockResolvedValue({ id: "student-1" }),
@@ -75,6 +85,25 @@ describe("OnboardingService", () => {
 
       await expect(service.saveProfile("user-1", baseInput)).resolves.toBeDefined();
       expect(prisma.client.studentSubject.createMany).toHaveBeenCalled();
+    });
+
+    it("accepts a shared subject whose content home is a different curriculum's grade", async () => {
+      // British Grade 1 offers Egyptian Grade 1 Arabic. The Subject's own
+      // gradeId is the EG grade — its content home — and is NOT the student's
+      // grade. The old subject.findMany({ gradeId: studentGrade }) form rejected
+      // exactly this case.
+      const sharedArabic = { id: "subject-arabic-eg1", gradeId: "grade-eg-1", isActive: true };
+      const prisma = makePrismaMock({ subjects: [sharedArabic] });
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
+
+      await service.saveProfile("user-1", { ...baseInput, subjectIds: [sharedArabic.id] });
+
+      expect(prisma.client.gradeSubject.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ gradeId: "grade-1", subjectId: { in: [sharedArabic.id] } }) }),
+      );
+      expect(prisma.client.studentSubject.createMany).toHaveBeenCalledWith({
+        data: [{ studentId: "student-1", subjectId: sharedArabic.id }],
+      });
     });
   });
 
