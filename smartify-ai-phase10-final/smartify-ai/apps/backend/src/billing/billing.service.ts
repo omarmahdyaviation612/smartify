@@ -7,6 +7,7 @@ import { TutorQuestionPacksService } from "../tutor-question-packs/tutor-questio
 import { ReferralService } from "../referral/referral.service";
 import { isTestStudent, subjectDiscoveryWhere } from "../common/subject-access";
 import { hasSubjectEntitlementInList } from "../common/subject-entitlement.util";
+import { canonicalContentSubjectId } from "../common/shared-content-subject.util";
 import { Prisma } from "@smartify/database";
 
 /**
@@ -75,9 +76,10 @@ export class BillingService {
     const profile = await this.getProfileOrThrow(userId);
     const subjects = await this.prisma.client.subject.findMany({
       where: subjectDiscoveryWhere(profile),
+      include: { grade: { select: { level: true } }, sharedContentSubject: { select: { id: true, nameEn: true, nameAr: true, isActive: true, sharedContentSubjectId: true, grade: { select: { level: true, isActive: true, curriculum: { select: { code: true, isActive: true } } } } } } },
       orderBy: { nameEn: "asc" },
     });
-    return subjects.map((subject) => ({
+    return subjects.filter((subject) => canonicalContentSubjectId(subject) != null).map((subject) => ({
       id: subject.id,
       nameEn: subject.nameEn,
       nameAr: subject.nameAr,
@@ -153,7 +155,10 @@ export class BillingService {
       throw new BadRequestException("Select at least one subject.");
     }
 
-    const subjects = await this.prisma.client.subject.findMany({ where: { id: { in: selectedSubjectIds }, ...subjectDiscoveryWhere(profile) } });
+    const subjects = (await this.prisma.client.subject.findMany({
+      where: { id: { in: selectedSubjectIds }, ...subjectDiscoveryWhere(profile) },
+      include: { grade: { select: { level: true } }, sharedContentSubject: { select: { id: true, nameEn: true, nameAr: true, isActive: true, sharedContentSubjectId: true, grade: { select: { level: true, isActive: true, curriculum: { select: { code: true, isActive: true } } } } } } },
+    })).filter((subject) => canonicalContentSubjectId(subject) != null);
     if (subjects.length !== selectedSubjectIds.length) {
       throw new BadRequestException("One or more selected subjects are invalid.");
     }

@@ -228,6 +228,13 @@ model Subject {
   // existing title-only behavior. See Unit.groundingNotesJson.
   sourceFile String?
 
+  // Shared curriculum content V1: British/American catalog Subjects may
+  // point at the canonical MOE Subject that owns the textbook, Units,
+  // Topics, and grounding. This is intentionally a link, never a copy.
+  sharedContentSubjectId String?
+  sharedContentSubject   Subject?  @relation("SharedSubjectContent", fields: [sharedContentSubjectId], references: [id], onDelete: Restrict)
+  sharedToSubjects        Subject[] @relation("SharedSubjectContent")
+
   // Subject-based pricing (2026-09-20): replaces the old PricingPlan
   // "curriculum bundle, N subjects included, extras cost more" model —
   // every Subject now has its OWN independent monthly price, admin-set,
@@ -250,6 +257,7 @@ model Subject {
   referralRewards         Referral[]
 
   @@index([gradeId])
+  @@index([sharedContentSubjectId])
 }
 
 model StudentSubject {

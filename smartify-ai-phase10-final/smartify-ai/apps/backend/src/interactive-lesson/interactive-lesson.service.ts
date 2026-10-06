@@ -215,6 +215,7 @@ export class InteractiveLessonService {
   private async getOwnSession(profile: { id: string }, topicId: string) {
     return this.prisma.client.lessonSession.findUnique({
       where: { studentId_topicId: { studentId: profile.id, topicId } },
+      include: { conversation: { select: { subjectId: true } } },
     });
   }
 
@@ -224,7 +225,7 @@ export class InteractiveLessonService {
 
   private toPublicState(
     topic: { id: string; unit: { subjectId: string } },
-    session: { id: string; status: string; currentStepIndex: number; conversationId: string },
+    session: { id: string; status: string; currentStepIndex: number; conversationId: string; conversation?: { subjectId: string | null } },
     steps: TeachingStep[],
     content: string | null,
     completed: boolean,
@@ -240,7 +241,7 @@ export class InteractiveLessonService {
       // POST /quizzes/questions?type=lesson_check without a second
       // round-trip to look up which subject this topic belongs to.
       topicId: topic.id,
-      subjectId: topic.unit.subjectId,
+      subjectId: session.conversation?.subjectId ?? topic.unit.subjectId,
       status: session.status,
       currentStepIndex: session.currentStepIndex,
       totalSteps: steps.length,
@@ -275,11 +276,13 @@ export class InteractiveLessonService {
    * free-form Tutor chat. Resuming an existing session never charges again.
    */
   private async reserveEntitlement(profile: AccessProfile, subjectId: string, topicId: string) {
-    const hasSubjectEntitlement = (await resolveSubjectAccess(this.prisma, profile, subjectId)).active;
+    const access = await resolveSubjectAccess(this.prisma, profile, subjectId);
+    const entitlementSubjectId = access.subject.id;
+    const hasSubjectEntitlement = access.active;
     const reservation = hasSubjectEntitlement
-      ? await this.questionPacks.consumeForTutor(profile.id, subjectId)
-      : await this.trialService.reserveLessonTrial(profile.id, subjectId, topicId);
-    return { hasSubjectEntitlement, reservation };
+      ? await this.questionPacks.consumeForTutor(profile.id, entitlementSubjectId)
+      : await this.trialService.reserveLessonTrial(profile.id, entitlementSubjectId, topicId);
+    return { hasSubjectEntitlement, reservation, entitlementSubjectId };
   }
 
   private async releaseEntitlement(profile: { id: string }, subjectId: string, reservation: { source: "daily" | "extra" | "lesson-trial"; usageDate?: Date; consumptionId?: string }) {
@@ -404,16 +407,17 @@ export class InteractiveLessonService {
     let session = await this.getOwnSession(profile, topicId);
 
     if (!session) {
-      const { reservation } = await this.reserveEntitlement(profile, topic.unit.subjectId, topicId);
+      const { reservation, entitlementSubjectId } = await this.reserveEntitlement(profile, topic.unit.subjectId, topicId);
       try {
         const conversation = await this.prisma.client.aIConversation.create({
-          data: { studentId: profile.id, subjectId: topic.unit.subjectId, topicId, title: topic.nameEn },
+          data: { studentId: profile.id, subjectId: entitlementSubjectId, topicId, title: topic.nameEn },
         });
         session = await this.prisma.client.lessonSession.create({
           data: { studentId: profile.id, topicId, conversationId: conversation.id, status: "IN_PROGRESS", currentStepIndex: 0, stepResultsJson: [] },
+          include: { conversation: { select: { subjectId: true } } },
         });
       } catch (err) {
-        await this.releaseEntitlement(profile, topic.unit.subjectId, reservation);
+        await this.releaseEntitlement(profile, entitlementSubjectId, reservation);
         throw err;
       }
     }
@@ -455,6 +459,7 @@ export class InteractiveLessonService {
       const completedSession = await this.prisma.client.lessonSession.update({
         where: { id: session.id },
         data: { status: "COMPLETED", completedAt: new Date() },
+        include: { conversation: { select: { subjectId: true } } },
       });
       await this.syncStudentProgress(profile.id, topic, "completed");
       return this.toPublicState(topic, completedSession, steps, null, true);
@@ -462,6 +467,7 @@ export class InteractiveLessonService {
     const updatedSession = await this.prisma.client.lessonSession.update({
       where: { id: session.id },
       data: { currentStepIndex: nextIndex },
+      include: { conversation: { select: { subjectId: true } } },
     });
     return this.deliverStep(profile, topic, updatedSession, steps, steps[nextIndex], stepResults);
   }
@@ -507,7 +513,7 @@ export class InteractiveLessonService {
     const raw = await this.runLessonAI({
       userId: (profile as any).userId,
       profileId: profile.id,
-      subjectId: topic.unit.subjectId,
+      subjectId: session.conversation?.subjectId ?? topic.unit.subjectId,
       conversationId: session.conversationId,
       systemPrompt,
       userTurnLabel: `Teach the "${step.type}" step now.`,
@@ -534,6 +540,7 @@ export class InteractiveLessonService {
       const completedSession = await this.prisma.client.lessonSession.update({
         where: { id: session.id },
         data: { status: "COMPLETED", completedAt: new Date() },
+        include: { conversation: { select: { subjectId: true } } },
       });
       await this.syncStudentProgress(profile.id, topic, "completed");
       return this.toPublicState(topic, completedSession, steps, content, true, updatedResults);
@@ -710,7 +717,7 @@ export class InteractiveLessonService {
     const say = await this.runLessonAI({
       userId: (profile as any).userId,
       profileId: profile.id,
-      subjectId: topic.unit.subjectId,
+      subjectId: session.conversation?.subjectId ?? topic.unit.subjectId,
       conversationId: session.conversationId,
       systemPrompt,
       userTurnLabel: message,
@@ -804,7 +811,7 @@ export class InteractiveLessonService {
     return this.runLessonAI({
       userId: (profile as any).userId,
       profileId: profile.id,
-      subjectId: topic.unit.subjectId,
+      subjectId: session.conversation?.subjectId ?? topic.unit.subjectId,
       conversationId: session.conversationId,
       systemPrompt,
       userTurnLabel: message,
@@ -900,7 +907,7 @@ export class InteractiveLessonService {
     const raw = await this.runLessonAI({
       userId: (profile as any).userId,
       profileId: profile.id,
-      subjectId: topic.unit.subjectId,
+      subjectId: session.conversation?.subjectId ?? topic.unit.subjectId,
       conversationId: session.conversationId,
       systemPrompt,
       userTurnLabel: message,
@@ -1039,7 +1046,7 @@ export class InteractiveLessonService {
 
   private async assertSubjectAccessible(profile: AccessProfile, subjectId: string) {
     const access = await resolveSubjectAccess(this.prisma, profile, subjectId);
-    if (access.active || await this.trialService.isSubjectTrialBrowsable(profile.id, subjectId)) return;
+    if (access.active || await this.trialService.isSubjectTrialBrowsable(profile.id, access.subject.id)) return;
     throw new ForbiddenException("Purchase this subject before opening its lessons.");
   }
 }

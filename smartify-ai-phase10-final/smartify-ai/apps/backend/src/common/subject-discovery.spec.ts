@@ -18,7 +18,7 @@ function harness(testStudent = false) {
   const profile = { id: "student", userId: "user", curriculumId: "british", gradeId: "y5", fullName: "Student",
     user: { role: "STUDENT", isTestStudent: testStudent }, curriculum: {}, grade: {}, learningPlans: [],
     subjects: [{ subjectId: "math", expiresAt: null, subject: subjects[0] }] };
-  const matches = (s: any, w: any) => (!w.id || s.id === w.id) && s.gradeId === w.gradeId && s.isActive === w.isActive && s.grade.curriculumId === w.grade.curriculumId;
+  const matches = (s: any, w: any) => (!w.id || s.id === w.id) && (w.sharedContentSubjectId === undefined || s.sharedContentSubjectId === w.sharedContentSubjectId) && s.gradeId === w.gradeId && s.isActive === w.isActive && s.grade.curriculumId === w.grade.curriculumId;
   const prisma: any = { client: {
     studentProfile: { findUnique: jest.fn().mockResolvedValue(profile) },
     subject: { findMany: jest.fn(async ({where}) => subjects.filter(s => matches(s, where))), findFirst: jest.fn(async ({where}) => subjects.find(s => matches(s, where)) ?? null) },

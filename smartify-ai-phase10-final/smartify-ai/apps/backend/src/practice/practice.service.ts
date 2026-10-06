@@ -44,22 +44,23 @@ export class PracticeService {
     subjectId: string,
     opts: { topicId?: string; browseOnly?: boolean } = {},
   ) {
-    if ((await resolveSubjectAccess(this.prisma, profile, subjectId)).active) return;
-    if (opts.browseOnly && (await this.trialService.isSubjectTrialBrowsable(profile.id, subjectId))) return;
-    if (opts.topicId && (await this.trialService.isTopicTrialAccessible(profile.id, subjectId, opts.topicId))) return;
+    const access = await resolveSubjectAccess(this.prisma, profile, subjectId);
+    if (access.active) return access;
+    if (opts.browseOnly && (await this.trialService.isSubjectTrialBrowsable(profile.id, access.subject.id))) return access;
+    if (opts.topicId && (await this.trialService.isTopicTrialAccessible(profile.id, access.subject.id, opts.topicId))) return access;
     throw new ForbiddenException("This subject is not part of your selected subjects.");
   }
 
   /** Topics for a subject, annotated with the student's real accuracy so the UI can highlight weak spots. */
   async getTopicsForSubject(userId: string, subjectId: string) {
     const profile = await this.getProfileOrThrow(userId);
-    await this.assertSubjectAccessible(profile, subjectId, { browseOnly: true });
+    const access = await this.assertSubjectAccessible(profile, subjectId, { browseOnly: true });
 
     const topics = await this.prisma.client.topic.findMany({
-      where: { unit: { subjectId } },
+      where: { unit: { subjectId: access?.contentSubjectId ?? subjectId } },
       orderBy: { order: "asc" },
     });
-    const accuracy = await this.topicAccuracy.getPerTopicAccuracy(profile.id, [subjectId]);
+    const accuracy = await this.topicAccuracy.getPerTopicAccuracy(profile.id, [access?.contentSubjectId ?? subjectId]);
     const accuracyByTopic = new Map(accuracy.map((a) => [a.topicId, a.percent]));
 
     return topics.map((t) => ({
@@ -80,9 +81,10 @@ export class PracticeService {
     // A trial student must always pin a specific topicId (the exact one
     // their free lesson was on) — an undifferentiated "any topic in this
     // subject" request (topicId undefined) is never trial-bypassable.
-    await this.assertSubjectAccessible(profile, subjectId, { topicId });
+    const access = await this.assertSubjectAccessible(profile, subjectId, { topicId });
 
-    const topicWhere = topicId ? { id: topicId, unit: { subjectId } } : { unit: { subjectId } };
+    const contentSubjectId = access?.contentSubjectId ?? subjectId;
+    const topicWhere = topicId ? { id: topicId, unit: { subjectId: contentSubjectId } } : { unit: { subjectId: contentSubjectId } };
     const topics = await this.prisma.client.topic.findMany({ where: topicWhere, include: { ...TOPIC_GATE_INCLUDE, unit: { select: UNIT_GATE_SELECT } } });
     if (topics.length === 0) throw new BadRequestException("No topics found for this selection.");
 
@@ -98,7 +100,7 @@ export class PracticeService {
     const avgAccuracy =
       topicId != null
         ? await this.topicAccuracy.getTopicAccuracy(profile.id, topicId)
-        : (await this.topicAccuracy.getPerTopicAccuracy(profile.id, [subjectId]))
+        : (await this.topicAccuracy.getPerTopicAccuracy(profile.id, [contentSubjectId]))
             .filter((a) => topicIds.includes(a.topicId))
             .reduce<number | null>((acc, t, _i, arr) => (acc ?? 0) + t.percent / arr.length, null);
 

@@ -11,6 +11,7 @@ import { validateTocExtraction } from "./subject-ingestion/toc-extraction-valida
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
 import type { ConfirmExtraBookStructureInput, ConfirmSubjectStructureInput } from "@smartify/validation";
 import { UnitGroundingService } from "../../interactive-lesson/unit-grounding/unit-grounding.service";
+import { isSharedLaunchSubject, sharedSubjectKind } from "../../common/shared-content-subject.util";
 
 @Injectable()
 export class AdminCurriculumService {
@@ -326,6 +327,8 @@ export class AdminCurriculumService {
                 nameAr: true,
                 isActive: true,
                 sourceFile: true,
+                sharedContentSubjectId: true,
+                sharedContentSubject: { select: { id: true, nameEn: true, nameAr: true } },
                 priceEGP: true,
                 units: {
                   orderBy: { order: "asc" },
@@ -392,6 +395,9 @@ export class AdminCurriculumService {
             nameAr: subject.nameAr,
             isActive: subject.isActive,
             sourceFile: subject.sourceFile,
+            sharedContentSubjectId: subject.sharedContentSubjectId,
+            sharedContentSubject: subject.sharedContentSubject,
+            shareEligible: isSharedLaunchSubject(subject.nameEn, subject.nameAr),
             textbookMapped: subject.sourceFile != null,
             // Subject-based pricing (2026-09-20) — null means "not yet priced by an admin", never a fabricated default.
             priceEGP: subject.priceEGP != null ? Number(subject.priceEGP) : null,
@@ -496,6 +502,61 @@ export class AdminCurriculumService {
 
   updateSubject(id: string, data: { nameEn?: string; nameAr?: string; icon?: string; isActive?: boolean; priceEGP?: number | null }) {
     return this.prisma.client.subject.update({ where: { id }, data });
+  }
+
+  async updateSharedSubjectContent(targetSubjectId: string, input: { sharedContentSubjectId: string | null }) {
+    const target = await this.prisma.client.subject.findUnique({
+      where: { id: targetSubjectId },
+      include: { grade: { include: { curriculum: true } }, _count: { select: { units: true } } },
+    });
+    if (!target) throw new NotFoundException("Target subject not found.");
+    if (input.sharedContentSubjectId == null) {
+      return this.prisma.client.subject.update({ where: { id: targetSubjectId }, data: { sharedContentSubjectId: null }, select: { id: true, sharedContentSubjectId: true } });
+    }
+    if (input.sharedContentSubjectId === targetSubjectId) throw new BadRequestException("A subject cannot share content with itself.");
+    if (!target.isActive || !target.grade.isActive || !target.grade.curriculum.isActive || !["BRITISH_INTL", "AMERICAN_INTL"].includes(target.grade.curriculum.code)) {
+      throw new BadRequestException("Shared MOE content can only be configured for active British or American subjects.");
+    }
+    if (!isSharedLaunchSubject(target.nameEn, target.nameAr)) throw new BadRequestException("Only Arabic and Social Studies can share MOE content.");
+    if (target.sourceFile || target._count.units > 0) throw new BadRequestException("Remove the target textbook and curriculum structure before sharing canonical content.");
+
+    const source = await this.getCanonicalMoeSubject(input.sharedContentSubjectId);
+    if (source.grade.level !== target.grade.level) throw new BadRequestException("Target and MOE source grades must have the same grade level.");
+    if (!isSharedLaunchSubject(source.nameEn, source.nameAr) || sharedSubjectKind(target.nameEn, target.nameAr) !== sharedSubjectKind(source.nameEn, source.nameAr)) {
+      throw new BadRequestException("The target and MOE source must be the same supported subject.");
+    }
+    return this.prisma.client.subject.update({ where: { id: targetSubjectId }, data: { sharedContentSubjectId: source.id }, select: { id: true, sharedContentSubjectId: true } });
+  }
+
+  private async getCanonicalMoeSubject(sourceSubjectId: string) {
+    const source = await this.prisma.client.subject.findUnique({
+      where: { id: sourceSubjectId },
+      include: { grade: { include: { curriculum: true } }, _count: { select: { units: true } } },
+    });
+    if (!source || !source.isActive || !source.grade.isActive || !source.grade.curriculum.isActive || source.grade.curriculum.code !== "EG_NATIONAL" || source.sharedContentSubjectId) {
+      throw new BadRequestException("Choose an active canonical subject in the Egyptian MOE curriculum.");
+    }
+    if (source._count.units === 0) throw new BadRequestException("The Egyptian MOE subject has no curriculum content to share.");
+    if (!isSharedLaunchSubject(source.nameEn, source.nameAr)) throw new BadRequestException("Only Arabic and Social Studies can be shared.");
+    return source;
+  }
+
+  async createSharedSubjectAlias(targetGradeId: string, sourceSubjectId: string) {
+    const grade = await this.prisma.client.grade.findUnique({ where: { id: targetGradeId }, include: { curriculum: true } });
+    if (!grade || !grade.isActive || !grade.curriculum.isActive || !["BRITISH_INTL", "AMERICAN_INTL"].includes(grade.curriculum.code)) {
+      throw new BadRequestException("Choose an active British or American grade.");
+    }
+    const source = await this.getCanonicalMoeSubject(sourceSubjectId);
+    if (source.grade.level !== grade.level) throw new BadRequestException("Target and MOE source grades must have the same grade level.");
+
+    const existingSubjects = await this.prisma.client.subject.findMany({ where: { gradeId: targetGradeId }, select: { nameEn: true, nameAr: true } });
+    if (existingSubjects.some((item) => sharedSubjectKind(item.nameEn, item.nameAr) === sharedSubjectKind(source.nameEn, source.nameAr))) {
+      throw new BadRequestException("This grade already has an Arabic or Social Studies subject. Link that subject instead.");
+    }
+    return this.prisma.client.subject.create({
+      data: { gradeId: targetGradeId, nameEn: source.nameEn, nameAr: source.nameAr, isActive: true, sourceFile: null, priceEGP: null, sharedContentSubjectId: source.id },
+      select: { id: true, gradeId: true, nameEn: true, nameAr: true, sharedContentSubjectId: true },
+    });
   }
 
   listTopics(subjectId: string) {

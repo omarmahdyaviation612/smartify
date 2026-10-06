@@ -49,8 +49,9 @@ export class QuizzesService {
    * no topicId) is never trial-bypassable.
    */
   private async assertSubjectAccessible(profile: AccessProfile, subjectId: string, topicId?: string) {
-    if ((await resolveSubjectAccess(this.prisma, profile, subjectId)).active) return;
-    if (topicId && (await this.trialService.isTopicTrialAccessible(profile.id, subjectId, topicId))) return;
+    const access = await resolveSubjectAccess(this.prisma, profile, subjectId);
+    if (access.active) return access;
+    if (topicId && (await this.trialService.isTopicTrialAccessible(profile.id, access.subject.id, topicId))) return access;
     throw new ForbiddenException("This subject is not part of your selected subjects.");
   }
 
@@ -86,9 +87,10 @@ export class QuizzesService {
     }
     // mock_exam never carries a topicId, so it's never trial-bypassable —
     // assertSubjectAccessible's own topicId-required check enforces that.
-    await this.assertSubjectAccessible(profile, subjectId, topicId);
+    const access = await this.assertSubjectAccessible(profile, subjectId, topicId);
 
-    const topicWhere = type === "mock_exam" ? { unit: { subjectId } } : { id: topicId, unit: { subjectId } };
+    const contentSubjectId = access?.contentSubjectId ?? subjectId;
+    const topicWhere = type === "mock_exam" ? { unit: { subjectId: contentSubjectId } } : { id: topicId, unit: { subjectId: contentSubjectId } };
     const topics = await this.prisma.client.topic.findMany({ where: topicWhere, include: { ...TOPIC_GATE_INCLUDE, unit: { select: UNIT_GATE_SELECT } } });
     if (topics.length === 0) throw new BadRequestException("No topics found for this quiz.");
 
@@ -139,7 +141,7 @@ export class QuizzesService {
     input: { subjectId: string; type: QuizType; topicId?: string; answers: Array<{ questionId: string; answer: unknown }> },
   ) {
     const profile = await this.getProfileOrThrow(userId);
-    await this.assertSubjectAccessible(profile, input.subjectId, input.topicId);
+    const access = await this.assertSubjectAccessible(profile, input.subjectId, input.topicId);
     if (input.answers.length === 0) throw new BadRequestException("No answers submitted.");
 
     // topic: { include: { unit: {...} } } still fetches all of topic's own
@@ -171,7 +173,7 @@ export class QuizzesService {
     for (const a of input.answers) {
       const q = questionById.get(a.questionId);
       if (!q) continue;
-      if (q.topic.unit.subjectId !== input.subjectId) {
+      if (q.topic.unit.subjectId !== (access?.contentSubjectId ?? input.subjectId)) {
         throw new ForbiddenException("One or more submitted questions are not part of this subject.");
       }
     }

@@ -267,7 +267,7 @@ export class TutorService {
         // A client-supplied Topic must belong to the selected Subject before
         // it can influence this tutor turn. Its Unit grounding is then
         // narrowed to this Topic rather than exposing a whole Unit.
-        if (topic?.unit?.subjectId === input.subjectId) {
+        if (topic?.unit?.subjectId === access.contentSubjectId) {
           topicNameEn = topic.nameEn;
           groundingSlice = assignedGroundingSliceOrNull(topic.groundingAssignment, {
             groundingVersion: topic.unit.groundingVersion,

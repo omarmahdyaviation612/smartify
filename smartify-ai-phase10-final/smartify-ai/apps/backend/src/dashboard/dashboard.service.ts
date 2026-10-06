@@ -3,6 +3,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { TopicAccuracyService } from "../analytics/topic-accuracy.service";
 import { isTestStudent, subjectDiscoveryWhere } from "../common/subject-access";
 import { hasSubjectEntitlementInList } from "../common/subject-entitlement.util";
+import { canonicalContentSubjectId } from "../common/shared-content-subject.util";
 
 @Injectable()
 export class DashboardService {
@@ -42,15 +43,22 @@ export class DashboardService {
     // Per-topic accuracy from real QuestionAttempt data, used to surface
     // weak topics. Empty until the student has actually answered questions
     // (diagnostic or practice) — no synthetic topics are ever invented.
-    const publishedSubjects = await this.prisma.client.subject.findMany({ where: subjectDiscoveryWhere(profile), orderBy: { nameEn: "asc" } });
-    const subjects = publishedSubjects.map((subject) => ({ id: subject.id, nameEn: subject.nameEn, nameAr: subject.nameAr,
+    const publishedSubjects = await this.prisma.client.subject.findMany({
+      where: subjectDiscoveryWhere(profile),
+      orderBy: { nameEn: "asc" },
+      include: { grade: { select: { level: true } }, sharedContentSubject: { select: { id: true, nameEn: true, nameAr: true, isActive: true, sharedContentSubjectId: true, grade: { select: { level: true, isActive: true, curriculum: { select: { code: true, isActive: true } } } } } } },
+    });
+    const visibleSubjects = publishedSubjects.filter((subject) => canonicalContentSubjectId(subject) != null);
+    const subjects = visibleSubjects.map((subject) => ({ id: subject.id, nameEn: subject.nameEn, nameAr: subject.nameAr,
       entitlement: isTestStudent(profile) || hasSubjectEntitlementInList(profile.subjects, subject.id) ? "ACTIVE" as const : "LOCKED" as const }));
     const subjectIds = subjects.filter(s => s.entitlement === "ACTIVE").map(s => s.id);
-    const topicStats = await this.topicAccuracy.getPerTopicAccuracy(profile.id, subjectIds);
+    const contentSubjectIds = [...new Set(visibleSubjects.filter((s) => subjectIds.includes(s.id)).map((s) => canonicalContentSubjectId(s)!))];
+    const targetSubjectByContentId = new Map(visibleSubjects.map((s) => [canonicalContentSubjectId(s)!, s]));
+    const topicStats = await this.topicAccuracy.getPerTopicAccuracy(profile.id, contentSubjectIds);
     const weakTopics = topicStats.filter((t) => t.percent < 60).slice(0, 5);
 
     const attempts = await this.prisma.client.questionAttempt.findMany({
-      where: { studentId: profile.id, question: { topic: { unit: { subjectId: { in: subjectIds } } } } },
+      where: { studentId: profile.id, question: { topic: { unit: { subjectId: { in: contentSubjectIds } } } } },
       orderBy: { attemptedAt: "desc" },
       take: 5,
       include: {
@@ -61,17 +69,16 @@ export class DashboardService {
     const recentActivity = attempts.slice(0, 5).map((a) => ({
       questionPromptEn: a.question.promptEn,
       questionPromptAr: a.question.promptAr,
-      subjectNameEn: a.question.topic.unit.subject.nameEn,
-      subjectNameAr: a.question.topic.unit.subject.nameAr,
+      subjectNameEn: targetSubjectByContentId.get(a.question.topic.unit.subjectId)?.nameEn ?? a.question.topic.unit.subject.nameEn,
+      subjectNameAr: targetSubjectByContentId.get(a.question.topic.unit.subjectId)?.nameAr ?? a.question.topic.unit.subject.nameAr,
       isCorrect: a.isCorrect,
       attemptedAt: a.attemptedAt,
     }));
 
-    // Phase 10C: scoped strictly to the student's own selected subjects —
-    // and, defensively, to their own grade too (never trusting subjectIds
-    // alone to already be grade-correct, in case a future bug elsewhere
-    // ever lets a StudentSubject point at the wrong grade's subject).
-    // Relational IDs only, never a name match. `subjectIds` empty (no
+    // Phase 10C plus shared curriculum content: scope to the canonical
+    // content IDs resolved from valid Subjects in the student's own grade
+    // and curriculum. Never trust a StudentSubject row alone to establish
+    // that mapping. Relational IDs only, never a name match. Empty IDs (no
     // subjects selected yet) naturally yields zero topics via `{ in: [] }`
     // — no separate "incomplete profile" branch needed; this is the
     // fail-closed behavior by construction, not a special case.
@@ -81,7 +88,7 @@ export class DashboardService {
     // simplest to just filter in JS instead of fighting that at the query
     // level; cheap at this scale either way.
     const allTopics = await this.prisma.client.topic.findMany({
-      where: { unit: { subjectId: { in: subjectIds }, subject: { gradeId: profile.gradeId } } },
+      where: { unit: { subjectId: { in: contentSubjectIds } } },
       include: { unit: true },
       orderBy: [{ unit: { order: "asc" } }, { order: "asc" }],
     });
@@ -104,7 +111,7 @@ export class DashboardService {
     const sessionByTopic = new Map(sessions.map((s) => [s.topicId, s]));
     const pilotLessons = allTopics.map((t) => ({
       topicId: t.id,
-      subjectId: t.unit.subjectId, // lets the frontend group/filter this flat list by subject — see `subjects` above for id -> name
+      subjectId: targetSubjectByContentId.get(t.unit.subjectId)?.id ?? t.unit.subjectId, // group shared canonical Topics under this curriculum's catalog Subject
       nameEn: t.nameEn,
       nameAr: t.nameAr,
       unitNameEn: t.unit.nameEn,

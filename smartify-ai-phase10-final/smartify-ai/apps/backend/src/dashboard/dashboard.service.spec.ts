@@ -152,10 +152,10 @@ describe("DashboardService.getSummary — Phase 10C content scoping", () => {
     expect(draft?.status).toBe("NOT_STARTED");
   });
 
-  it("scopes the topic query itself by relational IDs (subjectId + gradeId), never by name", async () => {
+  it("scopes the topic query itself to the selected canonical subject IDs, never by name", async () => {
     const { service, prisma } = makeService({ selectedSubjectIds: ["subject-math-g1-eg"] });
     await service.getSummary("user-1");
     const call = prisma.client.topic.findMany.mock.calls[0][0];
-    expect(call.where).toEqual({ unit: { subjectId: { in: ["subject-math-g1-eg"] }, subject: { gradeId: "grade-1-eg" } } });
+    expect(call.where).toEqual({ unit: { subjectId: { in: ["subject-math-g1-eg"] } } });
   });
 });

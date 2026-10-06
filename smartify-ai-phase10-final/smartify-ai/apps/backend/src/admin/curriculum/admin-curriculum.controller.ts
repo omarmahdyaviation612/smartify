@@ -5,7 +5,7 @@ import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { UserRole } from "@smartify/shared-types";
 import { AdminCurriculumService } from "./admin-curriculum.service";
-import { confirmExtraBookStructureSchema, confirmSubjectStructureSchema, updateCurriculumSchema, updateGradeSchema, updatePricingPlanSchema, updateSubjectSchema } from "@smartify/validation";
+import { confirmExtraBookStructureSchema, confirmSubjectStructureSchema, createSharedSubjectAliasSchema, sharedSubjectContentSchema, updateCurriculumSchema, updateGradeSchema, updatePricingPlanSchema, updateSubjectSchema } from "@smartify/validation";
 import { parseBody } from "../../common/validation/parse-body";
 import { uploadOptions, textbookUploadOptions } from "./upload-options";
 
@@ -65,6 +65,17 @@ export class AdminCurriculumController {
   @Patch("subjects/:id")
   updateSubject(@Param("id") id: string, @Body() body: unknown) {
     return this.service.updateSubject(id, parseBody(updateSubjectSchema, body));
+  }
+
+  @Patch("subjects/:id/shared-content")
+  updateSharedSubjectContent(@Param("id") id: string, @Body() body: unknown) {
+    return this.service.updateSharedSubjectContent(id, parseBody(sharedSubjectContentSchema, body));
+  }
+
+  @Post("subjects/shared-content")
+  createSharedSubjectAlias(@Body() body: unknown) {
+    const input = parseBody(createSharedSubjectAliasSchema, body);
+    return this.service.createSharedSubjectAlias(input.targetGradeId, input.sourceSubjectId);
   }
 
   @Get("topics")

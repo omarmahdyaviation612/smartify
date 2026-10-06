@@ -135,6 +135,17 @@ export const updateSubjectSchema = z.object({
   priceEGP: z.number().nonnegative().finite().nullable().optional(),
 }).strict();
 
+export const sharedSubjectContentSchema = z.object({
+  sharedContentSubjectId: z.string().min(1).max(128).nullable(),
+}).strict();
+export type SharedSubjectContentInput = z.infer<typeof sharedSubjectContentSchema>;
+
+export const createSharedSubjectAliasSchema = z.object({
+  targetGradeId: z.string().min(1).max(128),
+  sourceSubjectId: z.string().min(1).max(128),
+}).strict();
+export type CreateSharedSubjectAliasInput = z.infer<typeof createSharedSubjectAliasSchema>;
+
 // Phase 9.4B — SUPER_ADMIN AI spending controls. A dedicated endpoint (not
 // the generic system-config/:key PATCH) so the per-user-budget <= global-
 // budget cross-field rule can be enforced against the resulting combined

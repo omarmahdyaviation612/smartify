@@ -75,6 +75,9 @@ interface SubjectStatus {
   nameAr: string;
   isActive: boolean;
   sourceFile: string | null;
+  sharedContentSubjectId: string | null;
+  sharedContentSubject: { id: string; nameEn: string; nameAr: string } | null;
+  shareEligible: boolean;
   textbookMapped: boolean;
   priceEGP: number | null;
   units: UnitStatus[];
@@ -816,6 +819,130 @@ function AddExtraBookWizard({ subjectId, subjectNameEn, onDone }: { subjectId: s
   );
 }
 
+function SharedContentEditor({
+  subject,
+  gradeLevel,
+  curriculumCode,
+  curricula,
+  onSaved,
+}: {
+  subject: SubjectStatus;
+  gradeLevel: number;
+  curriculumCode: string;
+  curricula: CurriculumStatus[];
+  onSaved: () => void;
+}) {
+  const { apiFetch } = useApiClient();
+  const [sourceId, setSourceId] = useState(subject.sharedContentSubjectId ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const sources = curricula
+    .filter((curriculum) => curriculum.code === "EG_NATIONAL" && curriculum.isActive)
+    .flatMap((curriculum) => curriculum.grades.filter((grade) => grade.isActive && grade.level === gradeLevel).flatMap((grade) => grade.subjects))
+    .filter((candidate) => candidate.isActive && candidate.units.length > 0 && candidate.shareEligible && subjectKindForShare(candidate.nameEn, candidate.nameAr) === subjectKindForShare(subject.nameEn, subject.nameAr));
+
+  if (!subject.shareEligible || !["BRITISH_INTL", "AMERICAN_INTL"].includes(curriculumCode)) return null;
+
+  async function save() {
+    setBusy(true);
+    setError("");
+    try {
+      await apiFetch(`/admin/curriculum/subjects/${subject.id}/shared-content`, {
+        method: "PATCH",
+        body: JSON.stringify({ sharedContentSubjectId: sourceId || null }),
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not save shared content.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 rounded-sf border border-sf-blue-100 bg-sf-blue-50 p-3 text-xs">
+      <p className="font-medium text-navy-900">Reuse Egyptian MOE content</p>
+      <p className="mt-1 text-neutral-600">Shares the same textbook, topics, and grounding. It does not upload or regenerate content.</p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <select value={sourceId} onChange={(event) => setSourceId(event.target.value)} disabled={busy} className="max-w-full rounded-sf border border-neutral-300 bg-white px-2 py-1">
+          <option value="">No shared source</option>
+          {sources.map((source) => <option key={source.id} value={source.id}>{source.nameEn} · {source.nameAr}</option>)}
+        </select>
+        <button onClick={save} disabled={busy || sourceId === (subject.sharedContentSubjectId ?? "")} className="rounded-sf border border-neutral-300 px-2 py-1 text-navy-900 disabled:opacity-50">
+          {busy ? "Saving…" : "Save sharing"}
+        </button>
+      </div>
+      {subject.sharedContentSubject && <p className="mt-1 text-green-700">Using {subject.sharedContentSubject.nameEn} · {subject.sharedContentSubject.nameAr}</p>}
+      {error && <p className="mt-1 text-error-500">{error}</p>}
+    </div>
+  );
+}
+
+function subjectKindForShare(nameEn: string, nameAr: string): "ARABIC" | "SOCIAL_STUDIES" | null {
+  const value = `${nameEn} ${nameAr}`.toLocaleLowerCase();
+  if (value.includes("arabic") || value.includes("عربي") || value.includes("العربية")) return "ARABIC";
+  if ((value.includes("social") && value.includes("studies")) || value.includes("الدراسات الاجتماعية")) return "SOCIAL_STUDIES";
+  return null;
+}
+
+function AddSharedSubjectControl({
+  grade,
+  curriculumCode,
+  curricula,
+  onCreated,
+}: {
+  grade: GradeStatus;
+  curriculumCode: string;
+  curricula: CurriculumStatus[];
+  onCreated: () => void;
+}) {
+  const { apiFetch } = useApiClient();
+  const [sourceId, setSourceId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const eligibleSources = curricula
+    .filter((curriculum) => curriculum.code === "EG_NATIONAL" && curriculum.isActive)
+    .flatMap((curriculum) => curriculum.grades.filter((sourceGrade) => sourceGrade.isActive && sourceGrade.level === grade.level).flatMap((sourceGrade) => sourceGrade.subjects.filter((source) => source.isActive && source.units.length > 0 && source.shareEligible)))
+    .filter((source) => !grade.subjects.some((current) => subjectKindForShare(current.nameEn, current.nameAr) === subjectKindForShare(source.nameEn, source.nameAr)));
+
+  if (!grade.isActive || !["BRITISH_INTL", "AMERICAN_INTL"].includes(curriculumCode) || eligibleSources.length === 0) return null;
+
+  async function create() {
+    if (!sourceId) return;
+    setBusy(true);
+    setError("");
+    try {
+      await apiFetch("/admin/curriculum/subjects/shared-content", {
+        method: "POST",
+        body: JSON.stringify({ targetGradeId: grade.id, sourceSubjectId: sourceId }),
+      });
+      setSourceId("");
+      onCreated();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not add the shared subject.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-sf border border-dashed border-sf-blue-200 bg-sf-blue-50 p-3 text-xs">
+      <p className="font-medium text-navy-900">Add Arabic or Social Studies from MOE</p>
+      <p className="mt-1 text-neutral-600">Adds the catalog subject for this grade and points to its existing MOE content. No textbook upload or grounding runs.</p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <select value={sourceId} onChange={(event) => setSourceId(event.target.value)} disabled={busy} className="max-w-full rounded-sf border border-neutral-300 bg-white px-2 py-1">
+          <option value="">Choose matching MOE subject</option>
+          {eligibleSources.map((source) => <option key={source.id} value={source.id}>{source.nameEn} · {source.nameAr}</option>)}
+        </select>
+        <button onClick={create} disabled={busy || !sourceId} className="rounded-sf bg-sf-blue-500 px-3 py-1 text-white disabled:opacity-50">
+          {busy ? "Adding…" : "Add shared subject"}
+        </button>
+      </div>
+      {error && <p className="mt-1 text-error-500">{error}</p>}
+    </div>
+  );
+}
+
 function StatusSection() {
   const { apiFetch } = useApiClient();
   const [data, setData] = useState<CurriculumStatusResponse | null>(null);
@@ -871,17 +998,23 @@ function StatusSection() {
                     {g.nameEn} {!g.isActive && <span className="text-xs font-normal text-neutral-400">(inactive)</span>}
                   </summary>
                   <div className="mt-2 space-y-2 pl-4">
+                    <AddSharedSubjectControl grade={g} curriculumCode={c.code} curricula={curricula} onCreated={refetch} />
                     {g.subjects.map((s) => (
                       <details key={s.id} className="rounded-sf border border-neutral-100 p-3">
                         <summary className="cursor-pointer text-sm font-medium text-navy-900">
                           {s.nameEn}{" "}
-                          {s.textbookMapped ? (
+                          {s.sharedContentSubjectId ? (
+                            <span className="text-xs font-normal text-green-700">✓ MOE content shared</span>
+                          ) : s.textbookMapped ? (
                             <span className="text-xs font-normal text-green-700">✓ Textbook mapped</span>
                           ) : (
                             <span className="text-xs font-normal text-neutral-400">✗ No textbook mapped</span>
                           )}
                         </summary>
-                        {s.textbookMapped ? (
+                        <SharedContentEditor subject={s} gradeLevel={g.level} curriculumCode={c.code} curricula={curricula} onSaved={refetch} />
+                        {s.sharedContentSubjectId ? (
+                          <p className="mt-1 pl-2 text-xs text-green-700">Textbook and grounding are managed by the linked Egyptian MOE subject. Do not upload or ground this subject again.</p>
+                        ) : s.textbookMapped ? (
                           <div className="mt-1 pl-2">
                             <p className="text-xs text-neutral-500">Source: {s.sourceFile}</p>
                             <p className="mt-1 text-xs text-neutral-400">Textbook replacement will be available separately.</p>
@@ -895,10 +1028,10 @@ function StatusSection() {
                         </div>
                         <SubjectPriceEditor subjectId={s.id} priceEGP={s.priceEGP} onSaved={() => refetch()} />
 
-                        <SubjectGroundingControl subjectId={s.id} units={s.units} onDone={refetch} />
+                        {!s.sharedContentSubjectId && <SubjectGroundingControl subjectId={s.id} units={s.units} onDone={refetch} />}
 
                         {/* English Extra Book / Story support V1 — clearly secondary to "Add New Subject" above: a small text link, not a button, and only ever appended (never replaces the main textbook or this Subject's existing Units). */}
-                        {extraBookSubjectId === s.id ? (
+                        {!s.sharedContentSubjectId && extraBookSubjectId === s.id ? (
                           <AddExtraBookWizard
                             subjectId={s.id}
                             subjectNameEn={s.nameEn}
@@ -907,11 +1040,11 @@ function StatusSection() {
                               refetch();
                             }}
                           />
-                        ) : (
+                        ) : !s.sharedContentSubjectId ? (
                           <button onClick={() => setExtraBookSubjectId(s.id)} className="mt-1 pl-2 text-xs text-neutral-400 underline hover:text-neutral-600">
                             + Add Extra Book
                           </button>
-                        )}
+                        ) : null}
                         <div className="mt-2 space-y-2 pl-4">
                           {s.units.length === 0 && <p className="text-xs text-neutral-400">No units.</p>}
                           {s.units.map((u) => (

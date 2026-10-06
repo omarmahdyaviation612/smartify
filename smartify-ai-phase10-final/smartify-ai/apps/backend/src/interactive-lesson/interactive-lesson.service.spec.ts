@@ -81,7 +81,7 @@ describe("InteractiveLessonService", () => {
             const id = `session-${++sessCounter}`;
             // nonProgressTurns defaults to 0 in the real schema (@default(0));
             // this mock has no column-default machinery, so it's applied here.
-            const session = { nonProgressTurns: 0, id, ...data };
+            const session = { nonProgressTurns: 0, id, ...data, conversation: { subjectId: state.conversations[data.conversationId]?.subjectId } };
             state.sessions[`${data.studentId}:${data.topicId}`] = session;
             return session;
           }),
@@ -234,6 +234,19 @@ describe("InteractiveLessonService", () => {
       generateSpy,
     };
   }
+
+  it("returns the target curriculum subject ID from the lesson conversation for shared content", () => {
+    const { service } = makeHarness();
+    const result = (service as any).toPublicState(
+      { id: "moe-topic", unit: { subjectId: "moe-arabic" } },
+      { id: "session-1", status: "IN_PROGRESS", currentStepIndex: 0, conversationId: "conv-1", conversation: { subjectId: "british-arabic" } },
+      STEPS,
+      null,
+      false,
+    );
+
+    expect(result.subjectId).toBe("british-arabic");
+  });
 
   it("C: creates a new LessonSession on the first advance() call", async () => {
     const h = makeHarness();
