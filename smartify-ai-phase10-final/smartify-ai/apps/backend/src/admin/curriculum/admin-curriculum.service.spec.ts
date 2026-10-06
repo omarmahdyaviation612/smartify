@@ -10,7 +10,12 @@ import { AdminCurriculumService } from "./admin-curriculum.service";
  */
 describe("AdminCurriculumService.getCurriculumStatus", () => {
   function makeService(findManyImpl: (...args: any[]) => any) {
-    const prisma = { client: { curriculum: { findMany: jest.fn(findManyImpl) } } };
+    const prisma = {
+      client: {
+        curriculum: { findMany: jest.fn(findManyImpl) },
+        gradeSubject: { findMany: jest.fn(async () => []) },
+      },
+    };
     return { service: new AdminCurriculumService(prisma as any, {} as any, {} as any, {} as any, {} as any), prisma };
   }
 
@@ -29,53 +34,58 @@ describe("AdminCurriculumService.getCurriculumStatus", () => {
             nameAr: "السنة الخامسة",
             level: 5,
             isActive: true,
-            subjects: [
+            // Availability is an OFFERING now, so the fixture carries the
+            // GradeSubject shape the query actually returns.
+            offeredSubjects: [
               {
-                id: "s1",
-                nameEn: "Science",
-                nameAr: "العلوم",
                 isActive: true,
-                sourceFile: "british-intl/grade-5/science/science-y5.pdf",
-                units: [
-                  {
-                    id: "u1",
-                    nameEn: "Plant parts",
-                    nameAr: "أجزاء النبات",
-                    order: 1,
-                    sourcePageStart: 8,
-                    sourcePageEnd: 17,
-                    sourceFileOverride: null,
-                    groundingNotesJson: { concepts: [{ name: "Plant Parts" }] },
-                    groundingGeneratedAt: new Date("2026-09-19T18:32:45.307Z"),
-                    groundingVersion: 1,
-                    groundingModel: "gpt-4o-mini",
-                    groundingPromptVersion: "grounding-extraction-v1",
-                    topics: [
-                      {
-                        id: "t1",
-                        nameEn: "Plant parts",
-                        nameAr: "أجزاء النبات",
-                        order: 1,
-                        teachingStepsJson: [{ id: "s1", type: "INTRO" }],
-                        generationSource: "TEXTBOOK_GROUNDED",
-                        groundingVersionUsed: 1,
-                        generationPromptVersion: "auto-lesson-v1",
-                        contentGeneratedAt: new Date("2026-09-19T18:50:24.980Z"),
-                      },
-                      {
-                        // Historical: published via the OLD pre-2026-09-19
-                        // publish() pipeline — teachingStepsJson set, but
-                        // generationSource was never written by that path.
-                        id: "t2",
-                        nameEn: "Letter Alef",
-                        nameAr: "حرف الألف",
-                        order: 2,
-                        teachingStepsJson: [{ id: "s1", type: "INTRO" }],
-                        generationSource: null,
-                        groundingVersionUsed: null,
-                        generationPromptVersion: null,
-                        contentGeneratedAt: null,
-                      },
+                subject: {
+                  id: "s1",
+                  gradeId: "g1",
+                  nameEn: "Science",
+                  nameAr: "العلوم",
+                  isActive: true,
+                  sourceFile: "british-intl/grade-5/science/science-y5.pdf",
+                  units: [
+                    {
+                      id: "u1",
+                      nameEn: "Plant parts",
+                      nameAr: "أجزاء النبات",
+                      order: 1,
+                      sourcePageStart: 8,
+                      sourcePageEnd: 17,
+                      sourceFileOverride: null,
+                      groundingNotesJson: { concepts: [{ name: "Plant Parts" }] },
+                      groundingGeneratedAt: new Date("2026-09-19T18:32:45.307Z"),
+                      groundingVersion: 1,
+                      groundingModel: "gpt-4o-mini",
+                      groundingPromptVersion: "grounding-extraction-v1",
+                      topics: [
+                        {
+                          id: "t1",
+                          nameEn: "Plant parts",
+                          nameAr: "أجزاء النبات",
+                          order: 1,
+                          teachingStepsJson: [{ id: "s1", type: "INTRO" }],
+                          generationSource: "TEXTBOOK_GROUNDED",
+                          groundingVersionUsed: 1,
+                          generationPromptVersion: "auto-lesson-v1",
+                          contentGeneratedAt: new Date("2026-09-19T18:50:24.980Z"),
+                        },
+                        {
+                          // Historical: published via the OLD pre-2026-09-19
+                          // publish() pipeline — teachingStepsJson set, but
+                          // generationSource was never written by that path.
+                          id: "t2",
+                          nameEn: "Letter Alef",
+                          nameAr: "حرف الألف",
+                          order: 2,
+                          teachingStepsJson: [{ id: "s1", type: "INTRO" }],
+                          generationSource: null,
+                          groundingVersionUsed: null,
+                          generationPromptVersion: null,
+                          contentGeneratedAt: null,
+                        },
                       {
                         id: "t3",
                         nameEn: "Untouched topic",
@@ -118,13 +128,18 @@ describe("AdminCurriculumService.getCurriculumStatus", () => {
                   },
                 ],
               },
+            },
               {
-                id: "s2",
-                nameEn: "Mathematics",
-                nameAr: "الرياضيات",
                 isActive: true,
-                sourceFile: null, // no textbook mapped
-                units: [],
+                subject: {
+                  id: "s2",
+                  gradeId: "g1",
+                  nameEn: "Mathematics",
+                  nameAr: "الرياضيات",
+                  isActive: true,
+                  sourceFile: null, // no textbook mapped
+                  units: [],
+                },
               },
             ],
           },
@@ -211,5 +226,60 @@ describe("AdminCurriculumService.getCurriculumStatus", () => {
     expect(serialized).not.toContain("teachingStepsJson");
     // The boolean derived from it is fine, and expected, to be present:
     expect(result.curricula[0].grades[0].subjects[0].units[0].topics[0].hasTeachingSteps).toBe(true);
+  });
+
+  it("getCurriculumStatus flags a subject whose content home is a different grade", async () => {
+    const shared = { id: "subject-arabic-eg5", nameEn: "Arabic", nameAr: "اللغة العربية", gradeId: "grade-eg-5", isActive: true, sourceFile: null, priceEGP: null, units: [] };
+
+    const { service } = makeService(() => [
+      {
+        id: "c-uk", code: "BRITISH_INTL", nameEn: "British", nameAr: "بريطاني", isActive: true,
+        grades: [{
+          id: "grade-uk-6", nameEn: "Year 6", nameAr: "السنة ٦", level: 6, isActive: true,
+          offeredSubjects: [{ isActive: true, subject: shared }],
+        }],
+      },
+    ]);
+
+    const status = await service.getCurriculumStatus();
+    const subject = status.curricula[0].grades[0].subjects[0];
+
+    expect(subject).toMatchObject({ id: shared.id, shared: true });
+    expect(status.curricula[0].grades[0]).not.toHaveProperty("offeredSubjects");
+  });
+
+  it("does not flag a subject whose content home IS the grade as shared", async () => {
+    const local = { id: "subject-science", nameEn: "Science", nameAr: "العلوم", gradeId: "grade-uk-6", isActive: true, sourceFile: null, priceEGP: null, units: [] };
+
+    const { service } = makeService(() => [
+      {
+        id: "c-uk", code: "BRITISH_INTL", nameEn: "British", nameAr: "بريطاني", isActive: true,
+        grades: [{
+          id: "grade-uk-6", nameEn: "Year 6", nameAr: "السنة ٦", level: 6, isActive: true,
+          offeredSubjects: [{ isActive: true, subject: local }],
+        }],
+      },
+    ]);
+
+    const status = await service.getCurriculumStatus();
+
+    expect(status.curricula[0].grades[0].subjects[0]).toMatchObject({ id: local.id, shared: false });
+  });
+});
+
+describe("AdminCurriculumService.listSubjects", () => {
+  const SHARED = { id: "subject-arabic-eg5", nameEn: "Arabic", nameAr: "اللغة العربية", gradeId: "grade-eg-5", isActive: true };
+
+  it("returns the grade's offerings, not only its own subjects", async () => {
+    const gradeSubject = {
+      findMany: jest.fn(async () => [{ isActive: true, subject: SHARED }]),
+    };
+    const prisma = { client: { gradeSubject } } as any;
+    const service = new AdminCurriculumService(prisma, {} as any, {} as any, {} as any, {} as any);
+
+    await expect(service.listSubjects("grade-uk-6")).resolves.toEqual([SHARED]);
+    expect(gradeSubject.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ gradeId: "grade-uk-6", isActive: true }) }),
+    );
   });
 });

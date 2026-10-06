@@ -10,6 +10,7 @@ import { TocExtractionService, type TocExtractionOutcome } from "./subject-inges
 import { validateTocExtraction } from "./subject-ingestion/toc-extraction-validator";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
 import type { ConfirmExtraBookStructureInput, ConfirmSubjectStructureInput } from "@smartify/validation";
+import { findOfferedSubjects } from "../../common/grade-subject.util";
 
 @Injectable()
 export class AdminCurriculumService {
@@ -276,42 +277,29 @@ export class AdminCurriculumService {
             nameAr: true,
             level: true,
             isActive: true,
-            subjects: {
-              orderBy: { nameEn: "asc" },
+            // `shared` is derived below: a subject whose content home
+            // (subject.gradeId) is not this grade was authored elsewhere and
+            // is merely offered here.
+            offeredSubjects: {
+              orderBy: { subject: { nameEn: "asc" } },
               select: {
-                id: true,
-                nameEn: true,
-                nameAr: true,
                 isActive: true,
-                sourceFile: true,
-                priceEGP: true,
-                units: {
-                  orderBy: { order: "asc" },
+                subject: {
                   select: {
-                    id: true,
-                    nameEn: true,
-                    nameAr: true,
-                    order: true,
-                    sourcePageStart: true,
-                    sourcePageEnd: true,
-                    sourceFileOverride: true,
-                    groundingNotesJson: true,
-                    groundingGeneratedAt: true,
-                    groundingVersion: true,
-                    groundingModel: true,
-                    groundingPromptVersion: true,
-                    topics: {
+                    id: true, nameEn: true, nameAr: true, isActive: true, sourceFile: true, priceEGP: true, gradeId: true,
+                    units: {
                       orderBy: { order: "asc" },
                       select: {
-                        id: true,
-                        nameEn: true,
-                        nameAr: true,
-                        order: true,
-                        teachingStepsJson: true,
-                        generationSource: true,
-                        groundingVersionUsed: true,
-                        generationPromptVersion: true,
-                        contentGeneratedAt: true,
+                        id: true, nameEn: true, nameAr: true, order: true, sourcePageStart: true, sourcePageEnd: true,
+                        sourceFileOverride: true, groundingNotesJson: true, groundingGeneratedAt: true, groundingVersion: true,
+                        groundingModel: true, groundingPromptVersion: true,
+                        topics: {
+                          orderBy: { order: "asc" },
+                          select: {
+                            id: true, nameEn: true, nameAr: true, order: true, teachingStepsJson: true, generationSource: true,
+                            groundingVersionUsed: true, generationPromptVersion: true, contentGeneratedAt: true,
+                          },
+                        },
                       },
                     },
                   },
@@ -342,18 +330,18 @@ export class AdminCurriculumService {
         nameAr: grade.nameAr,
         level: grade.level,
         isActive: grade.isActive,
-        subjects: grade.subjects.map((subject) => {
+        subjects: grade.offeredSubjects.map(({ isActive, subject }) => {
+          const { units, ...subjectRest } = subject;
+          // `shared` is the admin's signal that this subject's content home is
+          // another curriculum's grade — authored elsewhere, merely offered here.
           subjectCount++;
           return {
-            id: subject.id,
-            nameEn: subject.nameEn,
-            nameAr: subject.nameAr,
-            isActive: subject.isActive,
-            sourceFile: subject.sourceFile,
-            textbookMapped: subject.sourceFile != null,
-            // Subject-based pricing (2026-09-20) — null means "not yet priced by an admin", never a fabricated default.
+            ...subjectRest,
+            isActive: isActive && subject.isActive,
+            shared: subject.gradeId !== grade.id,
             priceEGP: subject.priceEGP != null ? Number(subject.priceEGP) : null,
-            units: subject.units.map((unit) => {
+            textbookMapped: subject.sourceFile != null,
+            units: units.map((unit) => {
               unitCount++;
               const grounded = unit.groundingNotesJson != null;
               if (grounded) groundedUnitCount++;
@@ -438,7 +426,9 @@ export class AdminCurriculumService {
 
   // ---- Subjects ----
   listSubjects(gradeId: string) {
-    return this.prisma.client.subject.findMany({ where: { gradeId } });
+    // Includes shared subjects whose content home is another curriculum's
+    // grade — the admin must see exactly what a student of this grade sees.
+    return findOfferedSubjects(this.prisma.client, gradeId);
   }
 
   // `isActive` is optional and, when omitted, keeps Prisma's own schema
