@@ -16,7 +16,15 @@ const referralServiceMock = { earnRewardWithinTransaction: jest.fn().mockResolve
  * Prisma + PaymentProviderFactory — no real provider or DB.
  */
 describe("BillingService", () => {
-  const studentProfile = { id: "student-1", curriculumId: "curriculum-A", gradeId: "grade-A" };
+  // `subjects` / `grade` / `curriculum` are required from the origin/main merge:
+  // the entitlement columns (`hasSubjectEntitlementInList`) read profile.subjects,
+  // and the response mapping reads profile.grade.nameEn / profile.curriculum.nameEn.
+  // Without them getAvailableSubjects threw before returning anything.
+  const studentProfile = {
+    id: "student-1", curriculumId: "curriculum-A", gradeId: "grade-A", subjects: [] as any[],
+    grade: { nameEn: "Grade A", nameAr: "الصف أ" },
+    curriculum: { nameEn: "Egyptian National", nameAr: "المصري" },
+  };
   const requiredEnv = {
     DATABASE_URL: "postgresql://test:test@localhost:5432/smartify_test",
     REDIS_URL: "redis://localhost:6379",
@@ -135,7 +143,17 @@ describe("BillingService", () => {
     const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
 
     await expect(service.getAvailableSubjects("user-1")).resolves.toEqual([
-      { id: sharedArabic.id, nameEn: "Arabic", nameAr: "اللغة العربية", priceEGP: 150 },
+      {
+        id: sharedArabic.id,
+        nameEn: "Arabic",
+        nameAr: "اللغة العربية",
+        priceEGP: 150,
+        // Added by the origin/main merge: the catalog now also reports the
+        // learner's entitlement state and their grade/curriculum labels.
+        entitlement: "LOCKED",
+        grade: { nameEn: "Grade A", nameAr: "الصف أ" },
+        curriculum: { nameEn: "Egyptian National", nameAr: "المصري" },
+      },
     ]);
     expect(prisma.client.gradeSubject.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ gradeId: "grade-A" }) }),

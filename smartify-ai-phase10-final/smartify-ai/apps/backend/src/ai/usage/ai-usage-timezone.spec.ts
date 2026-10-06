@@ -79,6 +79,9 @@ describe("daily AI UTC boundaries", () => {
       aIDailyUsageCounter: { findUnique: jest.fn().mockResolvedValue(null) },
       aIUsage: { aggregate: jest.fn().mockResolvedValue({ _sum: { costUsd: null } }) },
       studentProfile: { findUnique: jest.fn().mockResolvedValue({ id: "student", subjects: [{ subjectId: "subject" }] }) },
+      // Availability is an OFFERING since the shared-subjects merge: the scope
+      // check runs through GradeSubject, not subject.gradeId.
+      gradeSubject: { findFirst: jest.fn().mockResolvedValue({ id: "offering", subjectId: "subject", isActive: true, subject: { id: "subject", isActive: true } }) },
       subject: { findFirst: jest.fn().mockResolvedValue({ id: "subject", isActive: true }) },
       tutorExtraQuestionCredit: { findUnique: jest.fn().mockResolvedValue(null) },
     };

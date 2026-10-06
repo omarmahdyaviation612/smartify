@@ -47,14 +47,23 @@ test("an empty id list means no subjects — never every subject of the grade", 
   expect(gradeOfferingWhere("grade-uk-6", [])).toEqual({
     gradeId: "grade-uk-6",
     isActive: true,
-    subject: { isActive: true },
+    subject: { isActive: true, grade: { isActive: true, curriculum: { isActive: true } } },
+    grade: { isActive: true, curriculum: { isActive: true } },
     subjectId: { in: [] },
   });
   expect(await findOfferedSubjects(db, "grade-uk-6", [])).toEqual([]);
 });
 
 test("omitting the id list lists the whole grade", async () => {
-  expect(gradeOfferingWhere("grade-uk-6")).toEqual({ gradeId: "grade-uk-6", isActive: true, subject: { isActive: true } });
+  // The publication gate (2026-10-06, merged from main): a subject is only
+  // available through an active grade under an active curriculum — on both the
+  // offering's grade and the subject's own content-home grade.
+  expect(gradeOfferingWhere("grade-uk-6")).toEqual({
+    gradeId: "grade-uk-6",
+    isActive: true,
+    subject: { isActive: true, grade: { isActive: true, curriculum: { isActive: true } } },
+    grade: { isActive: true, curriculum: { isActive: true } },
+  });
 });
 
 test("findOfferedSubject resolves a single offering, and null when the grade does not offer it", async () => {

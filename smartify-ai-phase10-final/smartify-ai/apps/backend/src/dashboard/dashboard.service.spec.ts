@@ -60,24 +60,25 @@ describe("DashboardService.getSummary — Phase 10C content scoping", () => {
       client: {
         studentProfile: { findUnique: jest.fn().mockResolvedValue(profile) },
         subject: { findMany: jest.fn(async ({ where }: any) => Object.entries(SUBJECTS).filter(([, s]) => s.gradeId === where.gradeId).map(([id]) => ({ id, nameEn: id, nameAr: id }))) },
+        // Availability is an OFFERING (GradeSubject) since the shared-subjects
+        // merge: the dashboard reads `.subject` off each offering row rather
+        // than filtering `subject.gradeId` by the student's grade.
+        gradeSubject: {
+          findMany: jest.fn(async ({ where }: any) =>
+            Object.entries(SUBJECTS)
+              .filter(([, s]) => s.gradeId === where.gradeId)
+              .map(([id, s]) => ({ id: `off-${id}`, gradeId: where.gradeId, subjectId: id, isActive: true, subject: { id, nameEn: id, nameAr: id, ...s } })),
+          ),
+        },
         assessment: { findFirst: jest.fn().mockResolvedValue(null) },
         questionAttempt: { findMany: jest.fn().mockResolvedValue([]) },
         topic: {
           findMany: jest.fn().mockImplementation(async ({ where }: any) => {
             const subjectIdIn: string[] = where?.unit?.subjectId?.in ?? [];
-            // Presence-checked, not truthiness: a filter of `{ gradeId:
-            // undefined }` must still count as "scoped by the student's grade"
-            // so this mock can never quietly accept a removed clause.
-            const gradeFilter = where?.unit?.subject;
-            const requiredGradeId: string | undefined = gradeFilter?.gradeId;
             return ALL_TOPICS.filter((t) => {
               const unit = (UNITS as any)[t.unitId];
               if (!unit) return false;
               if (!subjectIdIn.includes(unit.subjectId)) return false;
-              if (gradeFilter !== undefined) {
-                const subject = (SUBJECTS as any)[unit.subjectId];
-                if (!subject || subject.gradeId !== requiredGradeId) return false;
-              }
               return true;
             }).map((t) => ({ ...t, unit: { nameEn: t.unitId, nameAr: t.unitId, order: 1 } }));
           }),
@@ -124,10 +125,15 @@ describe("DashboardService.getSummary — Phase 10C content scoping", () => {
   // grade-subject-invariants.spec.ts and run read-only against the real
   // database by grade-subject-invariants.postgres.spec.ts).
   //
-  // Net effect recorded here deliberately: a stale StudentSubject row for
-  // another grade's subject is now RENDERED by the dashboard instead of being
-  // silently hidden.
-  it("CASE 3 — a stale StudentSubject row for another grade's subject is no longer hidden by the dashboard (backstop moved to the invariant checker)", async () => {
+  // Net effect recorded here deliberately, and it CHANGED AGAIN with the
+  // origin/main merge (2026-10-06): the dashboard now discovers subjects
+  // through the same offering-based `subjectDiscoveryWhere` the rest of the
+  // app uses, so a stale StudentSubject row pointing at a subject this grade
+  // does not offer never reaches the topic query at all. The guarantee is
+  // therefore RESTORED — and now for the right reason (availability is the
+  // offering) rather than the removed `subject.gradeId` clause — while the
+  // invariant checker still catches the bad row.
+  it("CASE 3 — a stale StudentSubject row for another grade's subject is still hidden, now because the grade does not OFFER it", async () => {
     const { service } = makeService({
       profile: {
         id: "student-2", userId: "user-2", fullName: "Grade 2 Student",
@@ -140,10 +146,8 @@ describe("DashboardService.getSummary — Phase 10C content scoping", () => {
     });
     const summary = await service.getSummary("user-2");
 
-    // The content filter is now owned subjects only — the removed grade clause
-    // was the only thing that hid this, so this documents the change rather
-    // than asserting the old guarantee.
-    expect(summary.pilotLessons.map((l: any) => l.topicId)).toContain("topic-addition-g1-eg");
+    // grade-2-eg offers no such subject, so it is never listed.
+    expect(summary.pilotLessons.map((l: any) => l.topicId)).not.toContain("topic-addition-g1-eg");
   });
 
   it("CASE 4 — a student from another curriculum never receives Egyptian National topics", async () => {
@@ -204,9 +208,22 @@ describe("DashboardService.getSummary — Phase 10C content scoping", () => {
       teachingStepsJson: [{ type: "INTRO" }],
     } as any);
 
-    const { service } = makeService({ selectedSubjectIds: ["subject-arabic-eg1"], gradeId: "grade-1-uk" });
+    const { service, prisma } = makeService({ selectedSubjectIds: ["subject-arabic-eg1"], gradeId: "grade-1-uk" });
+    // The whole point of a shared subject: the offering's grade is the
+    // student's (grade-1-uk) while the subject's own content home is
+    // grade-1-eg. The default fixture mock filters offerings by the subject's
+    // home grade, so it is overridden here to model that deliberately.
+    prisma.client.gradeSubject.findMany = jest.fn(async () => [
+      { id: "off-arabic-uk1", gradeId: "grade-1-uk", subjectId: "subject-arabic-eg1", isActive: true,
+        subject: { id: "subject-arabic-eg1", nameEn: "Arabic", nameAr: "العربية", gradeId: "grade-1-eg", isActive: true } },
+    ]);
+
     const summary = await service.getSummary("user-1");
 
     expect(summary.pilotLessons.map((l: any) => l.topicId)).toContain("topic-arabic-eg1");
+    // And it was discovered through the offering filter for the student's own grade.
+    expect(prisma.client.gradeSubject.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ gradeId: "grade-1-uk" }) }),
+    );
   });
 });
