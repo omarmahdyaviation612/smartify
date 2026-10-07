@@ -1,10 +1,16 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomBytes } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
+import { TopicAccuracyService } from "../analytics/topic-accuracy.service";
+import { AIUsageService } from "../ai/usage/ai-usage.service";
 
 @Injectable()
 export class ParentService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly topicAccuracy: TopicAccuracyService,
+    private readonly aiUsage: AIUsageService,
+  ) {}
   private get db(): any { return this.prisma.client as any; }
 
   async bootstrapProfile(userId: string, fullName: string) {
@@ -97,7 +103,12 @@ export class ParentService {
     const parent = await this.getParent(userId);
     const links = await this.db.parentStudentRelation.findMany({
       where: { parentId: parent.id },
-      include: { student: { include: { _count: { select: { questionAttempts: true, quizResults: true } } } } },
+      include: { student: { include: {
+        curriculum: true,
+        grade: true,
+        subjects: { include: { subject: true } },
+        _count: { select: { questionAttempts: true, quizResults: true } },
+      } } },
     });
     return {
       parent: { fullName: parent.fullName },
@@ -141,9 +152,28 @@ export class ParentService {
             },
           }),
         ]);
+        const selectedSubjects = link.student.subjects.map((studentSubject: any) => studentSubject.subject);
+        const subjectUsage = await Promise.all(selectedSubjects.map(async (subject: any) => ({
+          subjectId: subject.id,
+          nameEn: subject.nameEn,
+          nameAr: subject.nameAr,
+          ...(await this.aiUsage.getRemainingToday(link.studentId, subject.id)),
+        })));
+        const canonicalSubjectIds: string[] = Array.from(new Set<string>(selectedSubjects.map((subject: any) => subject.sharedContentSubjectId ?? subject.id)));
+        const topicAccuracy = canonicalSubjectIds.length
+          ? await this.topicAccuracy.getPerTopicAccuracy(link.studentId, canonicalSubjectIds)
+          : [];
+        const weakTopics = topicAccuracy
+          .filter((topic) => topic.total >= 3 && topic.percent < 60)
+          .slice(0, 5);
         const result: any = {
           id: link.student.id, fullName: link.student.fullName,
           attempts: link.student._count.questionAttempts, quizzes: link.student._count.quizResults,
+          curriculum: { nameEn: link.student.curriculum.nameEn, nameAr: link.student.curriculum.nameAr },
+          grade: { nameEn: link.student.grade.nameEn, nameAr: link.student.grade.nameAr },
+          subjects: selectedSubjects.map((subject: any) => ({ id: subject.id, nameEn: subject.nameEn, nameAr: subject.nameAr })),
+          subjectUsage,
+          weakTopics,
           recentActivity: recent,
           completedLessonsCount,
           completedLessons,

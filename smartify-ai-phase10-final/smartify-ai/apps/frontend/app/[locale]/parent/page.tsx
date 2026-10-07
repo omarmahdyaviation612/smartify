@@ -23,6 +23,17 @@ type ExamResult = {
   createdAt: string;
   topic: { nameEn: string; nameAr: string } | null;
 };
+type LocalizedName = { nameEn: string; nameAr: string };
+type ParentSubject = LocalizedName & { id: string };
+type SubjectUsage = LocalizedName & { subjectId: string; used: number; limit: number; remaining: number };
+type WeakTopic = LocalizedName & {
+  topicId: string;
+  subjectNameEn: string;
+  subjectNameAr: string;
+  correct: number;
+  total: number;
+  percent: number;
+};
 type Student = {
   id: string;
   fullName: string;
@@ -32,6 +43,11 @@ type Student = {
   completedLessons: CompletedLesson[];
   examResults: ExamResult[];
   recentActivity: RecentActivity[];
+  curriculum: LocalizedName;
+  grade: LocalizedName;
+  subjects: ParentSubject[];
+  subjectUsage: SubjectUsage[];
+  weakTopics: WeakTopic[];
 };
 type AccessState = "checking" | "authorized" | "unauthorized" | "error";
 
@@ -97,6 +113,12 @@ export default function ParentDashboardPage() {
   const formatDate = (value: string | null) => value
     ? new Date(value).toLocaleDateString(isAr ? "ar-EG" : "en-GB")
     : "—";
+  const isAlwaysArabicSubject = (nameEn: string, nameAr: string) =>
+    /arabic|social studies/i.test(nameEn) || /اللغة العربية|الدراسات الاجتماعية/.test(nameAr);
+  const localizedSubject = (nameEn: string, nameAr: string) =>
+    isAlwaysArabicSubject(nameEn, nameAr) || isAr ? nameAr : nameEn;
+  const localizedTopic = (topic: LocalizedName, subject: LocalizedName) =>
+    isAlwaysArabicSubject(subject.nameEn, subject.nameAr) || isAr ? topic.nameAr : topic.nameEn;
 
   return <><Navbar locale={locale} copy={getMarketingCopy(locale)} /><main className="min-h-[70vh] bg-neutral-50 py-10"><SmartifyContainer>
     <h1 className="mb-8 text-3xl font-bold text-navy-900">{isAr ? "لوحة ولي الأمر" : "Parent dashboard"}</h1>
@@ -118,6 +140,11 @@ export default function ParentDashboardPage() {
 
     {accessState === "authorized" && <div className="space-y-6">{students.map((student) => <article key={student.id} className="rounded-sf-xl border border-neutral-200 bg-white p-6 shadow-sm">
       <h2 className="text-2xl font-semibold text-navy-900">{student.fullName}</h2>
+      <p className="mt-2 text-sm text-neutral-600">{isAr ? "المنهج والصف:" : "Curriculum and grade:"} {isAr ? student.curriculum.nameAr : student.curriculum.nameEn} · {isAr ? student.grade.nameAr : student.grade.nameEn}</p>
+      <section className="mt-5" aria-label={isAr ? "المواد المسجلة" : "Enrolled subjects"}>
+        <h3 className="mb-2 text-lg font-semibold text-navy-900">{isAr ? "المواد" : "Subjects"}</h3>
+        {student.subjects.length === 0 ? <p className="text-sm text-neutral-500">{isAr ? "لا توجد مواد مسجلة حتى الآن." : "No subjects selected yet."}</p> : <ul className="flex flex-wrap gap-2">{student.subjects.map((subject) => <li key={subject.id} className="rounded-full bg-neutral-100 px-3 py-1 text-sm text-neutral-700">{localizedSubject(subject.nameEn, subject.nameAr)}</li>)}</ul>}
+      </section>
       <section className="mt-5 grid gap-3 sm:grid-cols-3" aria-label={isAr ? "ملخص الأداء" : "Performance summary"}>
         <div className="rounded-sf-lg bg-neutral-50 p-4"><p className="text-sm text-neutral-600">{isAr ? "الإجابات المسجلة" : "Answers recorded"}</p><p className="mt-1 text-2xl font-bold text-navy-900">{student.attempts}</p></div>
         <div className="rounded-sf-lg bg-neutral-50 p-4"><p className="text-sm text-neutral-600">{isAr ? "الدروس المكتملة" : "Lessons completed"}</p><p className="mt-1 text-2xl font-bold text-navy-900">{student.completedLessonsCount}</p></div>
@@ -131,8 +158,8 @@ export default function ParentDashboardPage() {
       <div className="mt-7 grid gap-7 lg:grid-cols-2">
         <section><h3 className="mb-3 text-lg font-semibold text-navy-900">{isAr ? "الدروس التي أكملها" : "Completed lessons"}</h3>
           {student.completedLessons.length === 0 ? <p className="text-sm text-neutral-500">{isAr ? "لم يُكمل أي درس بعد." : "No lessons completed yet."}</p> : <ul className="divide-y divide-neutral-100">{student.completedLessons.map((lesson) => <li key={lesson.id} className="py-3">
-            <p className="font-medium text-navy-900">{isAr ? lesson.topic.nameAr : lesson.topic.nameEn}</p>
-            <p className="mt-1 text-sm text-neutral-500">{isAr ? lesson.topic.unit.subject.nameAr : lesson.topic.unit.subject.nameEn} · {formatDate(lesson.completedAt)}</p>
+            <p className="font-medium text-navy-900">{localizedTopic(lesson.topic, lesson.topic.unit.subject)}</p>
+            <p className="mt-1 text-sm text-neutral-500">{localizedSubject(lesson.topic.unit.subject.nameEn, lesson.topic.unit.subject.nameAr)} · {formatDate(lesson.completedAt)}</p>
           </li>)}</ul>}
         </section>
 
@@ -141,6 +168,14 @@ export default function ParentDashboardPage() {
             <div><p className="font-medium text-navy-900">{result.topic ? (isAr ? result.topic.nameAr : result.topic.nameEn) : quizTypeLabel(result.quizType)}</p><p className="mt-1 text-sm text-neutral-500">{quizTypeLabel(result.quizType)} · {formatDate(result.createdAt)}</p></div>
             <p className="shrink-0 font-semibold text-navy-900">{result.score}% <span className="text-xs font-normal text-neutral-500">({result.correctCount}/{result.totalQuestions})</span></p>
           </li>)}</ul>}
+        </section>
+      </div>
+      <div className="mt-7 grid gap-7 lg:grid-cols-2">
+        <section><h3 className="mb-3 text-lg font-semibold text-navy-900">{isAr ? "استخدام المساعد اليوم" : "AI tutor usage today"}</h3>
+          {student.subjectUsage.length === 0 ? <p className="text-sm text-neutral-500">{isAr ? "لا توجد مواد لحساب الاستخدام بعد." : "Usage will appear after subjects are selected."}</p> : <ul className="space-y-2">{student.subjectUsage.map((usage) => <li key={usage.subjectId} className="flex items-center justify-between gap-3 rounded-sf-lg bg-neutral-50 p-3 text-sm"><span className="font-medium text-navy-900">{localizedSubject(usage.nameEn, usage.nameAr)}</span><span className="text-neutral-600">{isAr ? `${usage.remaining} من ${usage.limit} سؤال متبقٍ اليوم` : `${usage.remaining} of ${usage.limit} questions remaining today`}</span></li>)}</ul>}
+        </section>
+        <section><h3 className="mb-3 text-lg font-semibold text-navy-900">{isAr ? "موضوعات مقترحة للمراجعة" : "Topics to review"}</h3>
+          {student.attempts === 0 ? <p className="text-sm text-neutral-500">{isAr ? "لا توجد محاولات مسجلة بعد لتحديد موضوعات للمراجعة." : "There are no recorded attempts yet to suggest review topics."}</p> : student.weakTopics.length === 0 ? <p className="text-sm text-neutral-500">{isAr ? "لا توجد موضوعات بحاجة إلى مراجعة بناءً على المحاولات المسجلة." : "No topics need review based on recorded attempts."}</p> : <ul className="space-y-2">{student.weakTopics.map((topic) => <li key={topic.topicId} className="rounded-sf-lg bg-amber-50 p-3"><p className="font-medium text-navy-900">{localizedTopic(topic, { nameEn: topic.subjectNameEn, nameAr: topic.subjectNameAr })}</p><p className="mt-1 text-sm text-neutral-600">{localizedSubject(topic.subjectNameEn, topic.subjectNameAr)} · {isAr ? `${topic.percent}% دقة (${topic.correct} من ${topic.total})` : `${topic.percent}% accuracy (${topic.correct} of ${topic.total})`}</p></li>)}</ul>}
         </section>
       </div>
     </article>)}</div>}
