@@ -15,6 +15,7 @@ import type { VisualInstruction } from "@smartify/shared-types";
 import { decideStrategySwitch, getCurrentStrategy, isMathSubject, strategyGuidance } from "./teaching-strategy.util";
 import { assignedGroundingSliceOrNull } from "../ai/context/topic-grounding-assignment.util";
 import { canServeTopicSteps, evaluateTopicGroundingGate, TOPIC_GATE_INCLUDE } from "../ai/context/topic-content-provenance.util";
+import { getLessonLanguage, isArabicOnlySubject } from "./lesson-language.util";
 
 const MAX_HINTS_BEFORE_FORCED_RESOLUTION = 1;
 
@@ -188,7 +189,7 @@ export class InteractiveLessonService {
 
     await this.draftGenerator.ensureTopicHasLesson(
       topicId,
-      { preferredLang: profile.preferredLang === "ar" ? "ar" : "en", studentAgeRange: String(profile.age ?? 7) },
+      { preferredLang: this.preferredLessonLanguage(profile, existing), studentAgeRange: String(profile.age ?? 7) },
       profile.userId,
     );
 
@@ -224,7 +225,7 @@ export class InteractiveLessonService {
   }
 
   private toPublicState(
-    topic: { id: string; unit: { subjectId: string } },
+    topic: { id: string; unit: { subjectId: string; subject?: { nameEn?: string | null; nameAr?: string | null } } },
     session: { id: string; status: string; currentStepIndex: number; conversationId: string; conversation?: { subjectId: string | null } },
     steps: TeachingStep[],
     content: string | null,
@@ -242,6 +243,7 @@ export class InteractiveLessonService {
       // round-trip to look up which subject this topic belongs to.
       topicId: topic.id,
       subjectId: session.conversation?.subjectId ?? topic.unit.subjectId,
+      forceArabic: isArabicOnlySubject(topic.unit.subject?.nameEn, topic.unit.subject?.nameAr),
       status: session.status,
       currentStepIndex: session.currentStepIndex,
       totalSteps: steps.length,
@@ -258,6 +260,10 @@ export class InteractiveLessonService {
       visual: currentStep?.visual ? { type: currentStep.visual.type, status: currentStep.visual.status, url: currentStep.visual.url } : null,
       responseVisual,
     };
+  }
+
+  private preferredLessonLanguage(profile: { preferredLang?: string }, topic: any): "ar" | "en" {
+    return getLessonLanguage(profile.preferredLang, topic?.unit?.subject?.nameEn, topic?.unit?.subject?.nameAr);
   }
 
   /**
@@ -487,7 +493,7 @@ export class InteractiveLessonService {
     const ctx: LessonTeachingContext = {
       studentFirstName: (profile as any).fullName?.split(" ")[0] ?? "there",
       age: (profile as any).age ?? 7,
-      preferredLang: (profile as any).preferredLang === "ar" ? "ar" : "en",
+      preferredLang: this.preferredLessonLanguage(profile as any, topic),
       subjectNameEn: topic.unit.subject.nameEn,
       lessonTitleEn: topic.nameEn,
       currentStep: { type: step.type, objective: step.objective, conceptKey: step.conceptKey, checkType: step.checkType },
@@ -702,7 +708,7 @@ export class InteractiveLessonService {
     const ctx: LessonTeachingContext = {
       studentFirstName: (profile as any).fullName?.split(" ")[0] ?? "there",
       age: (profile as any).age ?? 7,
-      preferredLang: (profile as any).preferredLang === "ar" ? "ar" : "en",
+      preferredLang: this.preferredLessonLanguage(profile as any, topic),
       subjectNameEn: topic.unit.subject.nameEn,
       lessonTitleEn: topic.nameEn,
       currentStep: { type: step.type, objective: step.objective, conceptKey: step.conceptKey, checkType: step.checkType },
@@ -754,7 +760,7 @@ export class InteractiveLessonService {
 
     if (currentStep.type !== "CHECK") {
       if (!(await this.consumeNonProgressBudget(session))) {
-        return this.toPublicState(topic, session, steps, this.nonProgressLimitMessage(profile), false, stepResults);
+        return this.toPublicState(topic, session, steps, this.nonProgressLimitMessage(profile, topic), false, stepResults);
       }
       const activeProblemForPrompt = stepResults.find((r) => r.stepId === currentStep.id)?.activeMathProblem;
       let content = await this.runInterruption(profile, topic, session, currentStep, trimmed, activeProblemForPrompt);
@@ -788,8 +794,8 @@ export class InteractiveLessonService {
     return true;
   }
 
-  private nonProgressLimitMessage(profile: { preferredLang?: string }): string {
-    return profile.preferredLang === "ar"
+  private nonProgressLimitMessage(profile: { preferredLang?: string }, topic?: any): string {
+    return this.preferredLessonLanguage(profile, topic) === "ar"
       ? "سألت أسئلة كتير في الدرس ده — خلّينا نكمل خطوات الدرس دلوقتي، وتقدر تسأل المزيد في الدرس الجاي."
       : "You've asked quite a few questions in this lesson — let's continue with the lesson steps for now. You can ask more next time.";
   }
@@ -798,7 +804,7 @@ export class InteractiveLessonService {
     const ctx: LessonTeachingContext = {
       studentFirstName: (profile as any).fullName?.split(" ")[0] ?? "there",
       age: (profile as any).age ?? 7,
-      preferredLang: (profile as any).preferredLang === "ar" ? "ar" : "en",
+      preferredLang: this.preferredLessonLanguage(profile as any, topic),
       subjectNameEn: topic.unit.subject.nameEn,
       lessonTitleEn: topic.nameEn,
       currentStep: { type: step.type, objective: step.objective, conceptKey: step.conceptKey },
@@ -886,13 +892,13 @@ export class InteractiveLessonService {
     // session-scoped budget applies here too (never to the deterministic
     // branch above, which is exempt — normal CHECK retries are unaffected).
     if (!(await this.consumeNonProgressBudget(session))) {
-      return this.toPublicState(topic, session, steps, this.nonProgressLimitMessage(profile as any), false, stepResults);
+      return this.toPublicState(topic, session, steps, this.nonProgressLimitMessage(profile as any, topic), false, stepResults);
     }
 
     const ctx: LessonTeachingContext = {
       studentFirstName: (profile as any).fullName?.split(" ")[0] ?? "there",
       age: (profile as any).age ?? 7,
-      preferredLang: (profile as any).preferredLang === "ar" ? "ar" : "en",
+      preferredLang: this.preferredLessonLanguage(profile as any, topic),
       subjectNameEn: topic.unit.subject.nameEn,
       lessonTitleEn: topic.nameEn,
       currentStep: { type: step.type, objective: step.objective, conceptKey: step.conceptKey, checkType: step.checkType },

@@ -46,6 +46,7 @@ interface PilotLesson {
   nameAr: string;
   unitNameEn: string;
   unitNameAr: string;
+  term: "TERM_1" | "TERM_2" | null;
   status: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
 }
 interface DashboardSummary {
@@ -241,27 +242,43 @@ export default function DashboardPage() {
             {(() => {
               const lessonsForSubject = summary.pilotLessons.filter((l) => l.subjectId === selectedSubjectId);
               return lessonsForSubject.length > 0 ? (
-              <ul className="max-h-96 space-y-3 overflow-y-auto">
-                {lessonsForSubject.map((lesson) => (
-                  <li key={lesson.topicId} className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm text-neutral-700">{isAr ? lesson.nameAr : lesson.nameEn}</p>
-                      <p className="text-xs text-neutral-400">{isAr ? lesson.unitNameAr : lesson.unitNameEn}</p>
-                    </div>
-                    {lesson.status === "COMPLETED" ? (
-                      <span className="rounded-full bg-success-100 px-3 py-1 text-xs font-medium text-success-500">
-                        {copy.sections.pilotLessons.completed}
-                      </span>
-                    ) : (
-                      <Link href={`/${locale}/lesson/${lesson.topicId}`}>
-                        <SmartifyButton variant="ai">
-                          {lesson.status === "IN_PROGRESS" ? copy.sections.pilotLessons.continueLabel : copy.sections.pilotLessons.start}
-                        </SmartifyButton>
-                      </Link>
-                    )}
-                  </li>
-                ))}
-              </ul>
+                <div className="max-h-96 space-y-5 overflow-y-auto">
+                  {(["TERM_1", "TERM_2", null] as const).map((term) => {
+                    const lessons = lessonsForSubject.filter((lesson) => lesson.term === term);
+                    if (lessons.length === 0) return null;
+                    const heading = term === "TERM_1"
+                      ? (isAr ? "الترم الأول" : "Term 1")
+                      : term === "TERM_2"
+                        ? (isAr ? "الترم الثاني" : "Term 2")
+                        : (isAr ? "غير محدد الترم" : "Term not set");
+                    return (
+                      <section key={term ?? "unassigned-term"} aria-label={heading}>
+                        <h3 className="mb-2 border-b border-neutral-100 pb-2 text-sm font-semibold text-navy-900">{heading}</h3>
+                        <ul className="space-y-3">
+                          {lessons.map((lesson) => (
+                            <li key={lesson.topicId} className="flex items-center justify-between gap-3">
+                              <div>
+                                <p className="text-sm text-neutral-700">{isAr ? lesson.nameAr : lesson.nameEn}</p>
+                                <p className="text-xs text-neutral-400">{isAr ? lesson.unitNameAr : lesson.unitNameEn}</p>
+                              </div>
+                              {lesson.status === "COMPLETED" ? (
+                                <span className="rounded-full bg-success-100 px-3 py-1 text-xs font-medium text-success-500">
+                                  {copy.sections.pilotLessons.completed}
+                                </span>
+                              ) : (
+                                <Link href={`/${locale}/lesson/${lesson.topicId}`}>
+                                  <SmartifyButton variant="ai">
+                                    {lesson.status === "IN_PROGRESS" ? copy.sections.pilotLessons.continueLabel : copy.sections.pilotLessons.start}
+                                  </SmartifyButton>
+                                </Link>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    );
+                  })}
+                </div>
               ) : (
                 <p className="text-sm text-neutral-500">{copy.sections.pilotLessons.empty}</p>
               );

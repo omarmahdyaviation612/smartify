@@ -97,6 +97,7 @@ model StudentProfile {
   questionPackPurchases TutorQuestionPackPurchase[]
   extraQuestionCredits  TutorExtraQuestionCredit[]
   instapaySubmissions   InstapayPaymentSubmission[]
+  practiceSubmissions   PracticeSubmission[]
 
   // Free Trial + Referral V1 (2026-09-20)
   lessonTrial             LessonTrial?
@@ -104,6 +105,7 @@ model StudentProfile {
   referralCode            ReferralCode?
   referralsMade           Referral[]               @relation("ReferralsMade")
   referredBy              Referral?                @relation("ReferredStudent")
+  teacherSessionRequests  TeacherSessionRequest[]
 }
 
 model ParentProfile {
@@ -112,7 +114,10 @@ model ParentProfile {
   user     User   @relation(fields: [userId], references: [id])
   fullName String
 
-  children ParentStudentRelation[]
+  children                  ParentStudentRelation[]
+  notificationLocale        String    @default("ar")
+  resultNotifications       ParentResultNotification[]
+  teacherSessionRequests    TeacherSessionRequest[]
 }
 
 model TeacherProfile {
@@ -262,6 +267,7 @@ model Subject {
   referralRewards         Referral[]
   homeworkSessions        HomeworkSession[]
   homeworkAccessSessions  HomeworkSession[] @relation("HomeworkAccessSubject")
+  teacherSessionRequests  TeacherSessionRequest[]
 
   @@index([gradeId])
   @@index([sharedContentSubjectId])
@@ -432,6 +438,7 @@ model Topic {
   nameEn String
   nameAr String
   order  Int
+  teacherSessionRequests TeacherSessionRequest[]
 
   // Pilot addition: compact, ordered pedagogy for the Interactive Lesson
   // engine — WHAT to teach and in what order (step type, objective,
@@ -954,6 +961,7 @@ model QuizResult {
   correctCount   Int
   resultJson     Json // detailed breakdown, weak topics, recommendations
   createdAt      DateTime       @default(now())
+  parentNotifications ParentResultNotification[]
 
   @@index([studentId])
   @@index([topicId])
@@ -1305,6 +1313,63 @@ model AIMessage {
   createdAt      DateTime       @default(now())
 
   @@index([conversationId])
+}
+
+model PracticeSubmission {
+  id                 String   @id @default(cuid())
+  studentId          String
+  idempotencyKey     String
+  requestFingerprint String
+  correctCount       Int
+  total              Int
+  subjectIds         Json
+  createdAt          DateTime @default(now())
+  student            StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  notifications      ParentResultNotification[]
+
+  @@unique([studentId, idempotencyKey])
+  @@index([studentId, createdAt])
+}
+
+model ParentResultNotification {
+  id                   String   @id @default(cuid())
+  parentId             String
+  eventKey             String
+  quizResultId         String?
+  practiceSubmissionId String?
+  summaryJson          Json
+  emailStatus          String   @default("PENDING")
+  emailFailureCode     String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  parent               ParentProfile @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  quizResult           QuizResult? @relation(fields: [quizResultId], references: [id], onDelete: Cascade)
+  practiceSubmission   PracticeSubmission? @relation(fields: [practiceSubmissionId], references: [id], onDelete: Cascade)
+
+  @@unique([parentId, eventKey])
+  @@index([parentId, createdAt])
+  @@index([emailStatus, createdAt])
+}
+
+model TeacherSessionRequest {
+  id             String   @id @default(cuid())
+  parentId       String
+  studentId      String
+  subjectId      String
+  topicId        String?
+  preferredTimes String   @db.Text
+  contactNote    String?  @db.Text
+  status         String   @default("PENDING")
+  adminNote      String?  @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  parent         ParentProfile @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  student        StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject        Subject @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  topic          Topic? @relation(fields: [topicId], references: [id], onDelete: SetNull)
+
+  @@index([parentId, status, createdAt])
+  @@index([status, createdAt])
 }
 
 // Photo-based homework sessions store extracted text and tutoring state only.

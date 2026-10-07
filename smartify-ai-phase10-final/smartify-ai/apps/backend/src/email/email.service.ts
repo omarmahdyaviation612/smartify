@@ -49,18 +49,18 @@ export class EmailService {
    */
   async send(input: SendEmailInput): Promise<{ sent: boolean }> {
     if (!this.client) {
-      this.logger.log(`Email not sent (no provider configured) — would have sent "${input.subject}" to ${input.to}.`);
+      this.logger.log("Email not sent because no provider is configured.");
       return { sent: false };
     }
     try {
       const result = await this.client.emails.send({ from: this.from, to: input.to, subject: input.subject, html: input.html });
       if (result.error) {
-        this.logger.warn(`Resend rejected email to ${input.to}: ${result.error.message}`);
+        this.logger.warn("Resend rejected an email.");
         return { sent: false };
       }
       return { sent: true };
     } catch (err) {
-      this.logger.warn(`Email send failed for ${input.to}: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.warn("Email send failed.");
       return { sent: false };
     }
   }

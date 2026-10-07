@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
 import { Prisma } from "@smartify/database";
 import { PrismaService } from "../prisma/prisma.service";
 import { TopicAccuracyService } from "../analytics/topic-accuracy.service";
@@ -8,8 +8,9 @@ import { shuffleQuestionPool } from "./shuffle-question-pool";
 import { TrialService } from "../trial/trial.service";
 import { AccessProfile, resolveSubjectAccess } from "../common/subject-access";
 import { questionServabilityByTopic, QUESTION_PROVENANCE_SELECT, TOPIC_GATE_INCLUDE, UNIT_GATE_SELECT } from "../ai/context/topic-content-provenance.util";
+import { ResultNotificationService } from "../notifications/result-notification.service";
 
-type QuizType = "topic_assessment" | "mock_exam" | "lesson_check";
+type QuizType = "quiz" | "topic_assessment" | "mock_exam" | "lesson_check";
 
 // Deliberately small — a "did you understand the lesson" spot-check, not a
 // full assessment (that's what topic_assessment is for). 3 keeps the pool
@@ -30,6 +31,7 @@ export class QuizzesService {
     // QuizzesService(...)` test construction keeps working unchanged —
     // see PracticeService's identical pattern for the rationale.
     private readonly trialService: TrialService = new TrialService(prisma),
+    @Optional() private readonly resultNotifications?: ResultNotificationService,
   ) {}
 
   private async getProfileOrThrow(userId: string) {
@@ -248,60 +250,23 @@ export class QuizzesService {
       },
     });
 
-    // Launch-speed addition (2026-09-19): the one place a "lesson_check"
-    // result triggers a parent-notification email — every other quiz type
-    // (Practice's own topic_assessment, mock_exam) is student-initiated and
-    // deliberately does NOT notify a parent, matching what was actually
-    // asked for ("after each lesson, a simple check, and the RESULT of
-    // that goes to the parent") rather than every quiz a student takes.
-    let parentsNotified = 0;
-    if (input.type === "lesson_check" && breakdown.length > 0) {
-      parentsNotified = await this.notifyParentsOfLessonCheck(profile, {
-        topicNameEn: breakdown[0].topicNameEn,
-        topicNameAr: breakdown[0].topicNameAr,
-        score,
-        correctCount,
-        total: breakdown.length,
-      });
+    if (this.resultNotifications && breakdown.length > 0) {
+      try {
+        await this.resultNotifications.notifyResult({
+          eventKey: `quiz:${quizResult.id}`,
+          studentId: profile.id,
+          studentName: profile.fullName,
+          subjectNames: { en: [access.subject.nameEn], ar: [access.subject.nameAr] },
+          score,
+          completedAt: quizResult.createdAt ?? new Date(),
+          quizResultId: quizResult.id,
+        });
+      } catch {
+        // Parent delivery is an auxiliary channel; the student's result is already persisted.
+      }
     }
 
-    return { id: quizResult.id, score, correctCount, total: breakdown.length, parentsNotified, ...resultJson };
-  }
-
-  /**
-   * Best-effort — a parent with no email on file can't happen (User.email
-   * is required/unique), but a Resend outage or missing API key must never
-   * fail the student's own quiz submission response. Returns how many
-   * parents were actually emailed, purely for the frontend to show (or not
-   * show) a "sent to your parent" confirmation.
-   */
-  private async notifyParentsOfLessonCheck(
-    profile: { id: string; fullName: string },
-    check: { topicNameEn: string; topicNameAr: string; score: number; correctCount: number; total: number },
-  ): Promise<number> {
-    const relations = await this.prisma.client.parentStudentRelation.findMany({
-      where: { studentId: profile.id },
-      include: { parent: { include: { user: { select: { email: true } } } } },
-    });
-    if (relations.length === 0) return 0;
-
-    let sentCount = 0;
-    for (const relation of relations) {
-      const to = relation.parent.user.email;
-      const subject = `${profile.fullName} finished a lesson: ${check.topicNameEn}`;
-      const html = [
-        `<p>Hi ${relation.parent.fullName},</p>`,
-        `<p><strong>${profile.fullName}</strong> just finished the lesson "<strong>${check.topicNameEn}</strong>" (${check.topicNameAr}) and completed a short understanding check.</p>`,
-        `<p>Result: <strong>${check.correctCount} / ${check.total}</strong> correct (${check.score}%).</p>`,
-        `<p>— Smartify AI</p>`,
-      ].join("\n");
-      const result = await this.emailService.send({ to, subject, html }).catch((err) => {
-        this.logger.warn(`Lesson-check email failed for parent ${relation.parentId}: ${err instanceof Error ? err.message : String(err)}`);
-        return { sent: false };
-      });
-      if (result.sent) sentCount++;
-    }
-    return sentCount;
+    return { id: quizResult.id, score, correctCount, total: breakdown.length, ...resultJson };
   }
 
   async getResult(userId: string, quizResultId: string) {

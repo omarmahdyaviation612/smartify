@@ -24,6 +24,7 @@ describe("ParentService", () => {
         questionAttempt: { findMany: jest.fn().mockResolvedValue([]) },
         lessonSession: { count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) },
         quizResult: { findMany: jest.fn().mockResolvedValue([]) },
+        subject: { findMany: jest.fn().mockResolvedValue([]) },
         aIConversation: { findMany: jest.fn() },
       },
     } as any;
@@ -44,6 +45,7 @@ describe("ParentService", () => {
       questionAttempt: { findMany: jest.fn().mockResolvedValue([]) },
       lessonSession: { count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) },
       quizResult: { findMany: jest.fn().mockResolvedValue([]) },
+      subject: { findMany: jest.fn().mockResolvedValue([]) },
     } } as any;
     usageService.getRemainingToday.mockImplementation(async (_studentId: string, subjectId: string) =>
       subjectId === "arabic-y5" ? { used: 2, limit: 10, remaining: 8 } : { used: 4, limit: 10, remaining: 6 });

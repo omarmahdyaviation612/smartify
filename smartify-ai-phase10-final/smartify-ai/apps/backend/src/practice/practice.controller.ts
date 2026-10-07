@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Post, Query, UseGuards } from "@nestjs/common";
 import { ClerkAuthGuard } from "../auth/clerk-auth.guard";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { PracticeService } from "./practice.service";
@@ -24,7 +24,10 @@ export class PracticeController {
   }
 
   @Post("submit")
-  submit(@CurrentUser() user: any, @Body() body: { answers: Array<{ questionId: string; answer: unknown }> }) {
-    return this.practiceService.submitPractice(user.id, body.answers ?? []);
+  submit(@CurrentUser() user: any, @Body() body: { idempotencyKey: string; answers: Array<{ questionId: string; answer: unknown }> }) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(body?.idempotencyKey ?? "")) {
+      throw new BadRequestException("A valid submission key is required.");
+    }
+    return this.practiceService.submitPractice(user.id, body.answers ?? [], body.idempotencyKey);
   }
 }

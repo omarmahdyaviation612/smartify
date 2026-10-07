@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useClerk } from "@clerk/nextjs";
 import { SmartifyContainer } from "@smartify/ui";
 import { AdminGuard } from "@/components/AdminGuard";
@@ -59,13 +59,15 @@ export default function AdminOverviewPage() {
   const [userCount, setUserCount] = useState<number | null>(null);
   const [curriculumSummary, setCurriculumSummary] = useState<CurriculumStatusSummary["summary"] | null>(null);
   const [growth, setGrowth] = useState<GrowthSummary | null>(null);
+  const [newReceiptAlert, setNewReceiptAlert] = useState(false);
+  const lastPendingCount = useRef<number | null>(null);
 
   useEffect(() => {
     apiFetch<RevenueSummary>("/admin/revenue/summary")
       .then(setSummary)
       .catch(() => setForbidden(true));
     apiFetch<{ count: number }>("/admin/instapay/pending-count")
-      .then((res) => setPendingInstapay(res.count))
+      .then((res) => { lastPendingCount.current = res.count; setPendingInstapay(res.count); })
       .catch(() => {});
     apiFetch<Array<unknown>>("/users")
       .then((res) => setUserCount(res.length))
@@ -78,6 +80,25 @@ export default function AdminOverviewPage() {
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    let inFlight = false;
+    const timer = window.setInterval(() => {
+      if (inFlight) return;
+      inFlight = true;
+      apiFetch<{ count: number }>("/admin/instapay/pending-count")
+        .then((res) => {
+          if (!active) return;
+          if (lastPendingCount.current !== null && res.count > lastPendingCount.current) setNewReceiptAlert(true);
+          lastPendingCount.current = res.count;
+          setPendingInstapay(res.count);
+        })
+        .catch(() => {})
+        .finally(() => { inFlight = false; });
+    }, 30_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [apiFetch]);
 
   return (
     <AdminGuard allowedRoles={["SUPER_ADMIN", "ADMIN", "CONTENT_MANAGER", "SUPPORT"]}>
@@ -116,6 +137,8 @@ export default function AdminOverviewPage() {
               Revenue summary requires Super Admin access — you can still use the sections below.
             </p>
           )}
+
+          {newReceiptAlert && <div role="status" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-sf-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><span>{locale === "ar" ? "وصلت إيصالات دفع جديدة للمراجعة." : "New payment receipts are waiting for review."}</span><div className="flex gap-3"><Link className="font-semibold underline" href={`/${locale}/admin/instapay`}>{locale === "ar" ? "مراجعة الإيصالات" : "Review receipts"}</Link><button type="button" onClick={() => setNewReceiptAlert(false)}>{locale === "ar" ? "إخفاء" : "Dismiss"}</button></div></div>}
 
           {(userCount != null || curriculumSummary) && (
             <div className="mt-4 grid gap-4 sm:grid-cols-4">
@@ -187,6 +210,8 @@ export default function AdminOverviewPage() {
               body="Review and confirm manual InstaPay payment submissions."
               badge={pendingInstapay}
             />
+            <AdminNavCard href={`/${locale}/admin/parent-notifications`} title="Parent result notifications" body="Review failed result emails and retry delivery." />
+            <AdminNavCard href={`/${locale}/admin/teacher-requests`} title="Teacher session requests" body="Review requests and confirm a booking after coordination." />
             <AdminNavCard
               href={`/${locale}/admin/ai-usage`}
               title="AI Cost & Budget"

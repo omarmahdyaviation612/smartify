@@ -31,6 +31,8 @@ import { TrialModule } from "./trial/trial.module";
 import { ReferralModule } from "./referral/referral.module";
 import { SchoolsModule } from "./schools/schools.module";
 import { HomeworkModule } from "./homework/homework.module";
+import { AdminNotificationsModule } from "./admin/notifications/admin-notifications.module";
+import { TeacherRequestsModule } from "./teacher-requests/teacher-requests.module";
 
 @Module({
   imports: [
@@ -71,6 +73,8 @@ import { HomeworkModule } from "./homework/homework.module";
     ReferralModule,
     SchoolsModule,
     HomeworkModule,
+    AdminNotificationsModule,
+    TeacherRequestsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

@@ -1,4 +1,5 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { createHash, randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { TopicAccuracyService } from "../analytics/topic-accuracy.service";
 import { QuestionDraftGeneratorService } from "../question-bank/question-draft-generator/question-draft-generator.service";
@@ -7,6 +8,7 @@ import { pickDifficultyWeights } from "./difficulty-weights";
 import { TrialService } from "../trial/trial.service";
 import { AccessProfile, resolveSubjectAccess } from "../common/subject-access";
 import { questionServabilityByTopic, QUESTION_PROVENANCE_SELECT, TOPIC_GATE_INCLUDE, UNIT_GATE_SELECT } from "../ai/context/topic-content-provenance.util";
+import { ResultNotificationService } from "../notifications/result-notification.service";
 
 @Injectable()
 export class PracticeService {
@@ -20,6 +22,7 @@ export class PracticeService {
     // own doc comment), so a real instance backed by a test's bare-bones
     // mocked Prisma client is always safe to construct here.
     private readonly trialService: TrialService = new TrialService(prisma),
+    @Optional() private readonly resultNotifications?: ResultNotificationService,
   ) {}
 
   private async getProfileOrThrow(userId: string) {
@@ -157,9 +160,11 @@ export class PracticeService {
     return { averageAccuracy: avgAccuracy, questions: selected };
   }
 
-  async submitPractice(userId: string, answers: Array<{ questionId: string; answer: unknown }>) {
+  async submitPractice(userId: string, answers: Array<{ questionId: string; answer: unknown }>, idempotencyKey: string = randomUUID()) {
     const profile = await this.getProfileOrThrow(userId);
     if (answers.length === 0) throw new BadRequestException("No answers submitted.");
+    if (idempotencyKey.length > 80) throw new BadRequestException("Invalid submission key.");
+    const requestFingerprint = createHash("sha256").update(JSON.stringify(answers)).digest("hex");
 
     // Question.topic.unit.subjectId is the ONE real source of truth for a
     // Question's Subject — never a client-supplied field (submitPractice
@@ -168,7 +173,19 @@ export class PracticeService {
     // not one-per-question.
     const loaded = await this.prisma.client.question.findMany({
       where: { id: { in: answers.map((a) => a.questionId) } },
-      include: { topic: { select: { id: true, ...TOPIC_GATE_INCLUDE, unit: { select: { subjectId: true, ...UNIT_GATE_SELECT } } } } },
+      include: {
+        topic: {
+          select: {
+            id: true,
+            ...TOPIC_GATE_INCLUDE,
+            unit: { select: {
+              subjectId: true,
+              subject: { select: { id: true, nameEn: true, nameAr: true } },
+              ...UNIT_GATE_SELECT,
+            } },
+          },
+        },
+      },
     });
     // A Question that could never have been served (its Topic is not
     // READY_CURRENT_NON_EMPTY, or its provenance is not servable) is treated
@@ -211,9 +228,56 @@ export class PracticeService {
       feedback.push({ questionId: q.id, isCorrect, correctAnswer: q.correctAnswerJson, explanationEn: q.explanationEn, explanationAr: q.explanationAr });
     }
 
-    await this.prisma.client.questionAttempt.createMany({ data: attemptRows });
-
     const correctCount = feedback.filter((f) => f.isCorrect).length;
-    return { correctCount, total: feedback.length, feedback };
+    let batch: { submission: any; created: boolean };
+    try {
+      batch = await this.prisma.client.$transaction(async (tx: any) => {
+        const existing = await tx.practiceSubmission.findUnique({
+          where: { studentId_idempotencyKey: { studentId: profile.id, idempotencyKey } },
+        });
+        if (existing) {
+          if (existing.requestFingerprint !== requestFingerprint) throw new BadRequestException("This submission key was already used for different answers.");
+          return { submission: existing, created: false };
+        }
+        const submission = await tx.practiceSubmission.create({
+          data: {
+            studentId: profile.id,
+            idempotencyKey,
+            requestFingerprint,
+            correctCount,
+            total: feedback.length,
+            subjectIds: [...new Set(questions.map((question: any) => question.topic.unit.subjectId))],
+          },
+        });
+        if (attemptRows.length > 0) await tx.questionAttempt.createMany({ data: attemptRows });
+        return { submission, created: true };
+      });
+    } catch (error) {
+      if ((error as any)?.code !== "P2002") throw error;
+      const existing = await this.prisma.client.practiceSubmission.findUnique({
+        where: { studentId_idempotencyKey: { studentId: profile.id, idempotencyKey } },
+      });
+      if (!existing) throw error;
+      if (existing.requestFingerprint !== requestFingerprint) throw new BadRequestException("This submission key was already used for different answers.");
+      batch = { submission: existing, created: false };
+    }
+
+    if (batch.created && this.resultNotifications && feedback.length > 0) {
+      const subjects = Array.from(new Map(questions.map((question: any) => [question.topic.unit.subjectId, question.topic.unit.subject])).values())
+        .filter((subject: any) => subject?.id && subject.nameEn && subject.nameAr);
+      if (subjects.length > 0) {
+        await this.resultNotifications.notifyResult({
+          eventKey: `practice:${batch.submission.id}`,
+          studentId: profile.id,
+          studentName: profile.fullName,
+          subjectNames: { en: subjects.map((subject: any) => subject.nameEn), ar: subjects.map((subject: any) => subject.nameAr) },
+          score: Math.round((correctCount / feedback.length) * 100),
+          completedAt: batch.submission.createdAt ?? new Date(),
+          practiceSubmissionId: batch.submission.id,
+        });
+      }
+    }
+
+    return { submissionId: batch.submission.id, correctCount: batch.submission.correctCount, total: batch.submission.total, feedback };
   }
 }

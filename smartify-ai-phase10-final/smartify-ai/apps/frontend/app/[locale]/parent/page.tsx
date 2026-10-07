@@ -1,6 +1,7 @@
 "use client";
 
 import { useParams, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Navbar } from "@/components/Navbar";
 import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
@@ -46,9 +47,11 @@ type Student = {
   curriculum: LocalizedName;
   grade: LocalizedName;
   subjects: ParentSubject[];
+  availableSubjects: Array<ParentSubject & { payable: boolean }>;
   subjectUsage: SubjectUsage[];
   weakTopics: WeakTopic[];
 };
+type TeacherRequest = { id: string; studentId: string; subjectId: string; status: string; createdAt: string; subject: LocalizedName };
 type AccessState = "checking" | "authorized" | "unauthorized" | "error";
 
 export default function ParentDashboardPage() {
@@ -60,6 +63,11 @@ export default function ParentDashboardPage() {
   const [accessState, setAccessState] = useState<AccessState>("checking");
   const [students, setStudents] = useState<Student[]>([]);
   const [errorMessage, setErrorMessage] = useState("");
+  const [teacherRequests, setTeacherRequests] = useState<TeacherRequest[]>([]);
+  const [requestSubject, setRequestSubject] = useState<Record<string, string>>({});
+  const [requestTimes, setRequestTimes] = useState<Record<string, string>>({});
+  const [requestNote, setRequestNote] = useState<Record<string, string>>({});
+  const [requestFeedback, setRequestFeedback] = useState("");
 
   const loadErrorMessage = isAr
     ? "حدث خطأ أثناء تحميل لوحة ولي الأمر. حاول مرة أخرى."
@@ -72,6 +80,7 @@ export default function ParentDashboardPage() {
     try {
       const data = await apiFetch<{ students: Student[] }>("/parent/dashboard/summary");
       setStudents(data.students);
+      try { setTeacherRequests(await apiFetch<TeacherRequest[]>("/parent/teacher-requests")); } catch { setTeacherRequests([]); }
       setAccessState("authorized");
     } catch (error) {
       setAccessState(error instanceof ApiError && error.status === 403 ? "unauthorized" : "error");
@@ -120,6 +129,17 @@ export default function ParentDashboardPage() {
   const localizedTopic = (topic: LocalizedName, subject: LocalizedName) =>
     isAlwaysArabicSubject(subject.nameEn, subject.nameAr) || isAr ? topic.nameAr : topic.nameEn;
 
+  async function createTeacherRequest(student: Student) {
+    const subjectId = requestSubject[student.id] || student.subjects[0]?.id;
+    if (!subjectId || !requestTimes[student.id]?.trim()) { setRequestFeedback(isAr ? "اختر مادة واكتب الأوقات المناسبة." : "Choose a subject and preferred times."); return; }
+    try {
+      await apiFetch("/parent/teacher-requests", { method: "POST", body: JSON.stringify({ studentId: student.id, subjectId, preferredTimes: requestTimes[student.id], contactNote: requestNote[student.id] || undefined }) });
+      setTeacherRequests(await apiFetch<TeacherRequest[]>("/parent/teacher-requests"));
+      setRequestTimes(current => ({ ...current, [student.id]: "" })); setRequestNote(current => ({ ...current, [student.id]: "" }));
+      setRequestFeedback(isAr ? "تم إرسال طلب الجلسة للفريق للمراجعة والتنسيق. لم يتم تأكيد حجز بعد." : "Your session request was sent for review and coordination. No booking is confirmed yet.");
+    } catch { setRequestFeedback(isAr ? "تعذر إرسال الطلب. حاول مرة أخرى." : "Could not send the request. Please try again."); }
+  }
+
   return <><Navbar locale={locale} copy={getMarketingCopy(locale)} /><main className="min-h-[70vh] bg-neutral-50 py-10"><SmartifyContainer>
     <h1 className="mb-8 text-3xl font-bold text-navy-900">{isAr ? "لوحة ولي الأمر" : "Parent dashboard"}</h1>
 
@@ -138,6 +158,11 @@ export default function ParentDashboardPage() {
       {isAr ? "لا يوجد أبناء مرتبطون بهذا الحساب حتى الآن. اطلب من ابنك إرسال رابط دعوة جديد." : "No children are linked to this account yet. Ask your child to send a new invitation link."}
     </p>}
 
+    {accessState === "authorized" && <section className="mb-6 rounded-sf-lg border border-neutral-200 bg-white p-5">
+      <h2 className="text-lg font-semibold text-navy-900">{isAr ? "إشعارات نتائج الأبناء" : "Children’s result notifications"}</h2>
+      <p className="mt-1 text-sm text-neutral-600">{isAr ? "نرسل نتيجة كل اختبار أو تدريب إلى بريد ولي الأمر المسجل. تتضمن الرسالة اسم الطالب والمادة والنتيجة ووقت الإتمام فقط." : "Quiz and practice results are sent to the parent’s registered email. Each message includes only the student, subject, score, and completion time."}</p>
+    </section>}
+
     {accessState === "authorized" && <div className="space-y-6">{students.map((student) => <article key={student.id} className="rounded-sf-xl border border-neutral-200 bg-white p-6 shadow-sm">
       <h2 className="text-2xl font-semibold text-navy-900">{student.fullName}</h2>
       <p className="mt-2 text-sm text-neutral-600">{isAr ? "المنهج والصف:" : "Curriculum and grade:"} {isAr ? student.curriculum.nameAr : student.curriculum.nameEn} · {isAr ? student.grade.nameAr : student.grade.nameEn}</p>
@@ -145,6 +170,7 @@ export default function ParentDashboardPage() {
         <h3 className="mb-2 text-lg font-semibold text-navy-900">{isAr ? "المواد" : "Subjects"}</h3>
         {student.subjects.length === 0 ? <p className="text-sm text-neutral-500">{isAr ? "لا توجد مواد مسجلة حتى الآن." : "No subjects selected yet."}</p> : <ul className="flex flex-wrap gap-2">{student.subjects.map((subject) => <li key={subject.id} className="rounded-full bg-neutral-100 px-3 py-1 text-sm text-neutral-700">{localizedSubject(subject.nameEn, subject.nameAr)}</li>)}</ul>}
       </section>
+      <Link href={`/${locale}/parent/payments?studentId=${encodeURIComponent(student.id)}`} className="mt-4 inline-flex rounded border border-sf-blue-300 px-4 py-2 text-sm font-medium text-sf-blue-700">{isAr ? "دفع اشتراك لهذا الابن" : "Pay for this child"}</Link>
       <section className="mt-5 grid gap-3 sm:grid-cols-3" aria-label={isAr ? "ملخص الأداء" : "Performance summary"}>
         <div className="rounded-sf-lg bg-neutral-50 p-4"><p className="text-sm text-neutral-600">{isAr ? "الإجابات المسجلة" : "Answers recorded"}</p><p className="mt-1 text-2xl font-bold text-navy-900">{student.attempts}</p></div>
         <div className="rounded-sf-lg bg-neutral-50 p-4"><p className="text-sm text-neutral-600">{isAr ? "الدروس المكتملة" : "Lessons completed"}</p><p className="mt-1 text-2xl font-bold text-navy-900">{student.completedLessonsCount}</p></div>
@@ -178,6 +204,11 @@ export default function ParentDashboardPage() {
           {student.attempts === 0 ? <p className="text-sm text-neutral-500">{isAr ? "لا توجد محاولات مسجلة بعد لتحديد موضوعات للمراجعة." : "There are no recorded attempts yet to suggest review topics."}</p> : student.weakTopics.length === 0 ? <p className="text-sm text-neutral-500">{isAr ? "لا توجد موضوعات بحاجة إلى مراجعة بناءً على المحاولات المسجلة." : "No topics need review based on recorded attempts."}</p> : <ul className="space-y-2">{student.weakTopics.map((topic) => <li key={topic.topicId} className="rounded-sf-lg bg-amber-50 p-3"><p className="font-medium text-navy-900">{localizedTopic(topic, { nameEn: topic.subjectNameEn, nameAr: topic.subjectNameAr })}</p><p className="mt-1 text-sm text-neutral-600">{localizedSubject(topic.subjectNameEn, topic.subjectNameAr)} · {isAr ? `${topic.percent}% دقة (${topic.correct} من ${topic.total})` : `${topic.percent}% accuracy (${topic.correct} of ${topic.total})`}</p></li>)}</ul>}
         </section>
       </div>
+      <section className="mt-7 border-t border-neutral-100 pt-5"><h3 className="text-lg font-semibold text-navy-900">{isAr ? "طلب جلسة مع معلم" : "Request a teacher session"}</h3>
+        {student.subjects.length === 0 ? <p className="mt-2 text-sm text-neutral-500">{isAr ? "سجل مادة للطالب أولًا." : "Select a subject for this student first."}</p> : <div className="mt-3 grid gap-3 sm:grid-cols-2"><select aria-label={isAr ? "المادة" : "Subject"} className="rounded border p-2" value={requestSubject[student.id] ?? student.subjects[0]?.id ?? ""} onChange={event => setRequestSubject(v => ({ ...v, [student.id]: event.target.value }))}>{student.subjects.map(subject => <option key={subject.id} value={subject.id}>{localizedSubject(subject.nameEn, subject.nameAr)}</option>)}</select><input aria-label={isAr ? "الأوقات المناسبة" : "Preferred times"} className="rounded border p-2" maxLength={1000} placeholder={isAr ? "الأوقات المناسبة" : "Preferred times"} value={requestTimes[student.id] ?? ""} onChange={event => setRequestTimes(v => ({ ...v, [student.id]: event.target.value }))}/><input aria-label={isAr ? "ملاحظة أو وسيلة تواصل" : "Contact note"} className="rounded border p-2 sm:col-span-2" maxLength={1000} placeholder={isAr ? "ملاحظة أو وسيلة تواصل (اختياري)" : "Contact note (optional)"} value={requestNote[student.id] ?? ""} onChange={event => setRequestNote(v => ({ ...v, [student.id]: event.target.value }))}/><button type="button" onClick={() => void createTeacherRequest(student)} className="rounded bg-navy-900 px-4 py-2 text-sm text-white">{isAr ? "إرسال طلب" : "Send request"}</button></div>}
+        {teacherRequests.filter(request => request.studentId === student.id).length > 0 && <ul className="mt-4 space-y-2">{teacherRequests.filter(request => request.studentId === student.id).map(request => <li key={request.id} className="rounded bg-neutral-50 p-3 text-sm">{localizedSubject(request.subject.nameEn, request.subject.nameAr)} · {request.status === "CONFIRMED" ? (isAr ? "تم تأكيد الحجز" : "Booking confirmed") : request.status === "DECLINED" ? (isAr ? "لم تتم الموافقة" : "Declined") : request.status === "CONTACTED" ? (isAr ? "سيتواصل معك الفريق" : "Team will contact you") : (isAr ? "قيد المراجعة — لم يتم تأكيد الحجز" : "Under review — not yet confirmed")}</li>)}</ul>}
+        {requestFeedback && <p role="status" className="mt-2 text-sm text-neutral-600">{requestFeedback}</p>}
+      </section>
     </article>)}</div>}
   </SmartifyContainer></main></>;
 }

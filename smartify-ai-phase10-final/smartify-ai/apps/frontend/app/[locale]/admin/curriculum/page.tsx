@@ -55,6 +55,7 @@ interface UnitStatus {
   nameEn: string;
   nameAr: string;
   order: number;
+  term: "TERM_1" | "TERM_2" | null;
   sourcePageStart: number | null;
   sourcePageEnd: number | null;
   // English Extra Book / Story support V1 (2026-09-20) — true when this
@@ -248,6 +249,7 @@ interface DraftUnit {
   nameAr: string;
   sourcePageStart: number;
   sourcePageEnd: number;
+  term?: "TERM_1" | "TERM_2";
   topics: DraftTopic[];
 }
 interface AnalyzeResponse {
@@ -282,7 +284,7 @@ function UnitsTopicsEditor({ units, onChange }: { units: DraftUnit[]; onChange: 
     onChange(units.filter((_, i) => i !== index));
   }
   function addUnit() {
-    onChange([...units, { nameEn: "New unit", nameAr: "وحدة جديدة", sourcePageStart: 1, sourcePageEnd: 1, topics: [{ nameEn: "New topic", nameAr: "موضوع جديد" }] }]);
+    onChange([...units, { nameEn: "New unit", nameAr: "وحدة جديدة", sourcePageStart: 1, sourcePageEnd: 1, term: "TERM_1", topics: [{ nameEn: "New topic", nameAr: "موضوع جديد" }] }]);
   }
   function moveUnit(index: number, direction: -1 | 1) {
     onChange(moveItem(units, index, direction));
@@ -308,6 +310,10 @@ function UnitsTopicsEditor({ units, onChange }: { units: DraftUnit[]; onChange: 
             <div className="flex flex-wrap items-center gap-2">
               <input className={editorInputCls} value={unit.nameEn} onChange={(e) => updateUnit(uIndex, { nameEn: e.target.value })} placeholder="Unit name (English)" />
               <input className={editorInputCls} value={unit.nameAr} onChange={(e) => updateUnit(uIndex, { nameAr: e.target.value })} placeholder="اسم الوحدة" dir="rtl" />
+              <select aria-label="Unit term" className={editorInputCls} value={unit.term ?? "TERM_1"} onChange={(e) => updateUnit(uIndex, { term: e.target.value as "TERM_1" | "TERM_2" })}>
+                <option value="TERM_1">Term 1</option>
+                <option value="TERM_2">Term 2</option>
+              </select>
               <div dir="ltr" className="flex items-center gap-2">
                 <span className="text-xs text-neutral-400">pages</span>
                 <input type="number" aria-label="Unit start page" className={`${editorInputCls} w-20`} value={unit.sourcePageStart} onChange={(e) => updateUnit(uIndex, { sourcePageStart: Number(e.target.value) })} />
@@ -460,7 +466,7 @@ function AddSubjectWizard({ onCreated, onCancel }: { onCreated: () => void; onCa
     try {
       const r = await apiFetch<{ subjectId: string; unitsCreated: number; topicsCreated: number }>(
         `/admin/curriculum/subjects/${subjectId}/confirm-structure`,
-        { method: "POST", body: JSON.stringify({ curriculumId, gradeId, units: units.map((u) => ({ nameEn: u.nameEn, nameAr: u.nameAr, sourcePageStart: u.sourcePageStart, sourcePageEnd: u.sourcePageEnd, topics: u.topics.map((t) => ({ nameEn: t.nameEn, nameAr: t.nameAr })) })) }) },
+        { method: "POST", body: JSON.stringify({ curriculumId, gradeId, units: units.map((u) => ({ nameEn: u.nameEn, nameAr: u.nameAr, term: u.term ?? "TERM_1", sourcePageStart: u.sourcePageStart, sourcePageEnd: u.sourcePageEnd, topics: u.topics.map((t) => ({ nameEn: t.nameEn, nameAr: t.nameAr })) })) }) },
       );
       setResult(r);
       setStep(5);
@@ -701,7 +707,7 @@ function AddExtraBookWizard({ subjectId, subjectNameEn, onDone }: { subjectId: s
 
   function enterManually() {
     const label = bookLabel.trim();
-    setUnits([{ nameEn: `Story — ${label}`, nameAr: `قصة — ${label}`, sourcePageStart: 1, sourcePageEnd: 1, topics: [{ nameEn: "Chapter 1", nameAr: "الفصل 1" }] }]);
+    setUnits([{ nameEn: `Story — ${label}`, nameAr: `قصة — ${label}`, sourcePageStart: 1, sourcePageEnd: 1, term: "TERM_1", topics: [{ nameEn: "Chapter 1", nameAr: "الفصل 1" }] }]);
     setPdfPageCount(null);
     setPagesInspected(null);
     setError("");
@@ -718,7 +724,7 @@ function AddExtraBookWizard({ subjectId, subjectNameEn, onDone }: { subjectId: s
           method: "POST",
           body: JSON.stringify({
             bookLabel: bookLabel.trim(),
-            units: units.map((u) => ({ nameEn: u.nameEn, nameAr: u.nameAr, sourcePageStart: u.sourcePageStart, sourcePageEnd: u.sourcePageEnd, topics: u.topics.map((t) => ({ nameEn: t.nameEn, nameAr: t.nameAr })) })),
+            units: units.map((u) => ({ nameEn: u.nameEn, nameAr: u.nameAr, term: u.term ?? "TERM_1", sourcePageStart: u.sourcePageStart, sourcePageEnd: u.sourcePageEnd, topics: u.topics.map((t) => ({ nameEn: t.nameEn, nameAr: t.nameAr })) })),
           }),
         },
       );
@@ -943,16 +949,78 @@ function AddSharedSubjectControl({
   );
 }
 
+type SharedRepairResult = {
+  linked: number;
+  created: number;
+  activated: number;
+  alreadyReady: number;
+  missingSources: Array<{ gradeId: string; level: number; kind: string }>;
+  conflicts: Array<{ gradeId: string; curriculumCode: string; kind: string; reason: string }>;
+};
+
 function StatusSection() {
   const { apiFetch } = useApiClient();
   const [data, setData] = useState<CurriculumStatusResponse | null>(null);
   const [error, setError] = useState("");
   const [extraBookSubjectId, setExtraBookSubjectId] = useState<string | null>(null);
+  const [repairBusy, setRepairBusy] = useState(false);
+  const [repairResult, setRepairResult] = useState<SharedRepairResult | null>(null);
+  const [repairError, setRepairError] = useState("");
+  const [termAssignBusy, setTermAssignBusy] = useState(false);
+  const [deletingSubjectId, setDeletingSubjectId] = useState<string | null>(null);
 
   function refetch() {
     return apiFetch<CurriculumStatusResponse>("/admin/curriculum/status")
       .then(setData)
       .catch(() => setError("Could not load curriculum status."));
+  }
+
+  async function repairSharedSubjects() {
+    setRepairBusy(true);
+    setRepairResult(null);
+    setRepairError("");
+    try {
+      const result = await apiFetch<SharedRepairResult>("/admin/curriculum/shared-content/repair", { method: "POST" });
+      setRepairResult(result);
+      await refetch();
+    } catch {
+      setRepairError("Could not repair Arabic and Social Studies sharing. Refresh and try again.");
+    } finally {
+      setRepairBusy(false);
+    }
+  }
+
+  async function assignUnassignedUnitsToTerm1() {
+    if (!window.confirm("Set all Units that do not have a term yet to Term 1? Existing Term 1/Term 2 assignments will stay unchanged.")) return;
+    setTermAssignBusy(true);
+    try {
+      const result = await apiFetch<{ updatedUnits: number }>("/admin/curriculum/units/unassigned-term", {
+        method: "PATCH",
+        body: JSON.stringify({ term: "TERM_1" }),
+      });
+      await refetch();
+      setError("");
+      window.alert(`${result.updatedUnits} Unit(s) assigned to Term 1.`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not assign untagged Units to Term 1.");
+    } finally {
+      setTermAssignBusy(false);
+    }
+  }
+
+  async function deleteSubject(subject: SubjectStatus) {
+    const confirmed = window.confirm(`Permanently delete ${subject.nameEn} and its Units, Topics, generated lessons, and questions? Student access or learning history will block deletion. This cannot be undone.`);
+    if (!confirmed) return;
+    setDeletingSubjectId(subject.id);
+    try {
+      await apiFetch(`/admin/curriculum/subjects/${subject.id}`, { method: "DELETE" });
+      setError("");
+      await refetch();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : `Could not delete ${subject.nameEn}.`);
+    } finally {
+      setDeletingSubjectId(null);
+    }
   }
 
   useEffect(() => {
@@ -976,6 +1044,24 @@ function StatusSection() {
         Review textbook mapping, Unit grounding, and Topic generation. Grounding starts only when you explicitly run it for a Subject.
       </p>
 
+      <div className="mt-4 rounded-sf border border-neutral-200 bg-white p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="font-medium text-navy-900">Arabic and Social Studies visibility</p>
+            <p className="mt-1 text-sm text-neutral-500">Link same-grade MOE content to British and American curricula. This does not upload books, run grounding, or change prices.</p>
+          </div>
+          <button onClick={() => void repairSharedSubjects()} disabled={repairBusy} className="rounded-sf bg-sf-blue-500 px-4 py-2 text-sm text-white disabled:opacity-50">
+            {repairBusy ? "Repairing…" : "Repair subject sharing"}
+          </button>
+        </div>
+        {repairResult && <div className="mt-3 text-sm text-neutral-700" role="status">
+          <p>Linked {repairResult.linked}, added {repairResult.created}, activated {repairResult.activated}, already ready {repairResult.alreadyReady}.</p>
+          {repairResult.missingSources.length > 0 && <p className="mt-1 text-amber-700">MOE content unavailable for {repairResult.missingSources.length} grade/subject pair(s); no substitute material was created.</p>}
+          {repairResult.conflicts.length > 0 && <p className="mt-1 text-amber-700">{repairResult.conflicts.length} existing subject(s) need review because they contain their own content or have conflicting links.</p>}
+        </div>}
+        {repairError && <p className="mt-3 text-sm text-error-500" role="alert">{repairError}</p>}
+      </div>
+
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <SummaryTile label="Subjects" value={summary.subjects} />
         <SummaryTile label="Units" value={summary.units} />
@@ -983,6 +1069,16 @@ function StatusSection() {
         <SummaryTile label="Topics" value={summary.topics} />
         <SummaryTile label="Generated topics" value={summary.generatedTopics} />
         <SummaryTile label="Textbook-grounded topics" value={summary.textbookGroundedTopics} />
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-sf border border-neutral-200 bg-white p-4">
+        <div>
+          <p className="font-medium text-navy-900">School terms</p>
+          <p className="mt-1 text-sm text-neutral-500">Current unassigned Units can be marked as Term 1. New Units default to Term 1; change them to Term 2 when you add that material.</p>
+        </div>
+        <button type="button" onClick={() => void assignUnassignedUnitsToTerm1()} disabled={termAssignBusy} className="rounded-sf border border-sf-blue-300 px-4 py-2 text-sm text-sf-blue-700 disabled:opacity-50">
+          {termAssignBusy ? "Saving…" : "Mark unassigned Units as Term 1"}
+        </button>
       </div>
 
       <div className="mt-4 space-y-3">
@@ -1003,6 +1099,7 @@ function StatusSection() {
                       <details key={s.id} className="rounded-sf border border-neutral-100 p-3">
                         <summary className="cursor-pointer text-sm font-medium text-navy-900">
                           {s.nameEn}{" "}
+                          {!s.isActive && <span className="text-xs font-normal text-amber-700">(inactive — hidden from students)</span>}{" "}
                           {s.sharedContentSubjectId ? (
                             <span className="text-xs font-normal text-green-700">✓ MOE content shared</span>
                           ) : s.textbookMapped ? (
@@ -1011,7 +1108,24 @@ function StatusSection() {
                             <span className="text-xs font-normal text-neutral-400">✗ No textbook mapped</span>
                           )}
                         </summary>
+                        {!s.isActive && (s.units.length > 0 || s.sharedContentSubjectId) && <button
+                          type="button"
+                          onClick={async () => {
+                            if (!window.confirm(`Publish ${s.nameEn} for students?`)) return;
+                            try {
+                              await apiFetch(`/admin/curriculum/subjects/${s.id}`, { method: "PATCH", body: JSON.stringify({ isActive: true }) });
+                              await refetch();
+                            } catch { setError(`Could not publish ${s.nameEn}.`); }
+                          }}
+                          className="ml-2 rounded border border-amber-300 px-2 py-1 text-xs text-amber-800"
+                        >Publish subject</button>}
                         <SharedContentEditor subject={s} gradeLevel={g.level} curriculumCode={c.code} curricula={curricula} onSaved={refetch} />
+                        <button
+                          type="button"
+                          onClick={() => void deleteSubject(s)}
+                          disabled={deletingSubjectId === s.id}
+                          className="ml-2 rounded border border-error-200 px-2 py-1 text-xs text-error-600 disabled:opacity-50"
+                        >{deletingSubjectId === s.id ? "Deleting…" : "Delete subject"}</button>
                         {s.sharedContentSubjectId ? (
                           <p className="mt-1 pl-2 text-xs text-green-700">Textbook and grounding are managed by the linked Egyptian MOE subject. Do not upload or ground this subject again.</p>
                         ) : s.textbookMapped ? (
@@ -1051,6 +1165,9 @@ function StatusSection() {
                             <details key={u.id} className="rounded-sf border border-neutral-100 p-3">
                               <summary className="cursor-pointer text-sm text-navy-900">
                                 {u.nameEn}{" "}
+                                <span className={`rounded-full px-2 py-0.5 text-xs ${u.term === "TERM_2" ? "bg-blue-50 text-blue-700" : u.term === "TERM_1" ? "bg-purple-50 text-purple-700" : "bg-neutral-100 text-neutral-500"}`}>
+                                  {u.term === "TERM_2" ? "Term 2" : u.term === "TERM_1" ? "Term 1" : "Term not set"}
+                                </span>{" "}
                                 {u.sourcePageStart != null && u.sourcePageEnd != null && (
                                   <span className="text-xs text-neutral-400">
                                     (pages {u.sourcePageStart}–{u.sourcePageEnd})
@@ -1067,6 +1184,27 @@ function StatusSection() {
                                   <span className="text-xs font-medium text-neutral-400">✗ Ungrounded</span>
                                 )}
                               </summary>
+                              <label className="mt-2 inline-flex items-center gap-2 pl-2 text-xs text-neutral-500">
+                                Term
+                                <select
+                                  aria-label={`Term for ${u.nameEn}`}
+                                  value={u.term ?? ""}
+                                  onChange={async (event) => {
+                                    if (!event.target.value) return;
+                                    try {
+                                      await apiFetch(`/admin/curriculum/units/${u.id}/term`, { method: "PATCH", body: JSON.stringify({ term: event.target.value }) });
+                                      await refetch();
+                                    } catch (err) {
+                                      setError(err instanceof ApiError ? err.message : `Could not update the term for ${u.nameEn}.`);
+                                    }
+                                  }}
+                                  className="rounded border border-neutral-300 bg-white px-2 py-1"
+                                >
+                                  <option value="">Term not set</option>
+                                  <option value="TERM_1">Term 1</option>
+                                  <option value="TERM_2">Term 2</option>
+                                </select>
+                              </label>
                               {u.grounded && (
                                 <p className="mt-1 pl-2 text-xs text-neutral-500">
                                   Model: {u.groundingModel ?? "—"} · Grounded:{" "}
@@ -1177,6 +1315,8 @@ function CurriculaSection() {
   const [curricula, setCurricula] = useState<Curriculum[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [grades, setGrades] = useState<Grade[]>([]);
+  const [curriculumActionBusy, setCurriculumActionBusy] = useState(false);
+  const [curriculumActionError, setCurriculumActionError] = useState("");
 
   useEffect(() => {
     apiFetch<Curriculum[]>("/admin/curriculum/curricula").then((data) => {
@@ -1192,8 +1332,17 @@ function CurriculaSection() {
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function toggleCurriculumActive(c: Curriculum) {
-    await apiFetch(`/admin/curriculum/curricula/${c.id}`, { method: "PATCH", body: JSON.stringify({ isActive: !c.isActive }) });
-    setCurricula((prev) => prev.map((x) => (x.id === c.id ? { ...x, isActive: !x.isActive } : x)));
+    if (c.isActive && !window.confirm(`Hide ${c.nameEn} from student curriculum choices? Existing student records and subscriptions will be kept.`)) return;
+    setCurriculumActionBusy(true);
+    setCurriculumActionError("");
+    try {
+      await apiFetch(`/admin/curriculum/curricula/${c.id}`, { method: "PATCH", body: JSON.stringify({ isActive: !c.isActive }) });
+      setCurricula((prev) => prev.map((x) => (x.id === c.id ? { ...x, isActive: !x.isActive } : x)));
+    } catch (err) {
+      setCurriculumActionError(err instanceof ApiError ? err.message : "Could not update this curriculum.");
+    } finally {
+      setCurriculumActionBusy(false);
+    }
   }
 
   async function toggleGradeActive(g: Grade) {
@@ -1221,11 +1370,13 @@ function CurriculaSection() {
       {curricula.length > 0 && (
         <button
           onClick={() => toggleCurriculumActive(curricula.find((c) => c.id === selectedId)!)}
-          className="mt-3 text-xs text-neutral-500 underline"
+          disabled={curriculumActionBusy}
+          className="mt-3 rounded-sf border border-amber-300 px-3 py-2 text-sm font-medium text-amber-800 disabled:opacity-50"
         >
-          Toggle active for selected curriculum
+          {curriculumActionBusy ? "Saving…" : curricula.find((c) => c.id === selectedId)?.isActive ? "Hide curriculum from students" : "Show curriculum to students"}
         </button>
       )}
+      {curriculumActionError && <p className="mt-2 text-sm text-error-600" role="alert">{curriculumActionError}</p>}
 
       <h3 className="mb-2 mt-6 text-sm font-semibold uppercase tracking-wide text-neutral-500">Grades</h3>
       <ul className="space-y-2 text-sm">

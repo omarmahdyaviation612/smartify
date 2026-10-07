@@ -5,6 +5,8 @@ export interface LessonCopy {
   starting: string;
   startingFirstTime: string;
   preparing: string;
+  waitingForLesson: string;
+  waitingQuotes: string[];
   preparingTextbook: string;
   understandingLesson: string;
   creatingLesson: string;
@@ -40,13 +42,19 @@ export interface LessonCopy {
   checkSubmit: string;
   checkSubmitting: string;
   checkResult: (correct: number, total: number) => string;
-  checkParentNotified: (n: number) => string;
-  checkNoParentLinked: string;
+  checkResultSaved: string;
   checkError: string;
 }
 
 const en: LessonCopy = {
   preparing: "Preparing your lesson...",
+  waitingForLesson: "Your lesson is getting ready",
+  waitingQuotes: [
+    "Every question you ask is a step toward understanding.",
+    "Mistakes are clues that help your brain learn.",
+    "Small steps every day lead to big discoveries.",
+    "Take your time—understanding matters more than speed.",
+  ],
   preparingTextbook: "Preparing textbook...",
   understandingLesson: "Understanding this lesson...",
   creatingLesson: "Creating your lesson...",
@@ -85,13 +93,19 @@ const en: LessonCopy = {
   checkSubmit: "Submit",
   checkSubmitting: "Checking...",
   checkResult: (correct: number, total: number) => `You got ${correct} out of ${total}.`,
-  checkParentNotified: (n: number) => (n === 1 ? "We've let your parent know how it went." : `We've let ${n} parents know how it went.`),
-  checkNoParentLinked: "Nice work! (Link a parent from your dashboard to have results sent automatically.)",
+  checkResultSaved: "Your result is saved. Your parent can view it from the parent dashboard.",
   checkError: "Couldn't submit the check — please try again.",
 };
 
 const ar: LessonCopy = {
   preparing: "بنجهز لك الدرس...",
+  waitingForLesson: "بنجهز درسك دلوقتي",
+  waitingQuotes: [
+    "كل سؤال بتسأله بيقربك من الفهم.",
+    "الغلط بيدلّك على الطريق الصح للتعلّم.",
+    "خطوات صغيرة كل يوم توصّلك لاكتشافات كبيرة.",
+    "خد وقتك؛ الفهم أهم من السرعة.",
+  ],
   preparingTextbook: "بنجهز الكتاب المدرسي...",
   understandingLesson: "بنفهم محتوى الدرس...",
   creatingLesson: "بنجهز درسك...",
@@ -130,8 +144,7 @@ const ar: LessonCopy = {
   checkSubmit: "إرسال",
   checkSubmitting: "جاري التحقق...",
   checkResult: (correct: number, total: number) => `إجابتك صح في ${correct} من ${total}.`,
-  checkParentNotified: (n: number) => (n === 1 ? "أبلغنا ولي أمرك بالنتيجة." : `أبلغنا ${n} من أولياء الأمور بالنتيجة.`),
-  checkNoParentLinked: "أحسنت! (اربط ولي أمر من لوحة التحكم عشان تتبعت له النتايج تلقائيًا.)",
+  checkResultSaved: "تم حفظ نتيجتك، ويمكن لولي أمرك الاطلاع عليها من لوحة ولي الأمر.",
   checkError: "تعذر إرسال التحقق — حاول مرة أخرى.",
 };
 

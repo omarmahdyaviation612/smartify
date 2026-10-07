@@ -4,6 +4,11 @@
  */
 export function subjectAccessFixture(prisma: any) {
   const client = prisma.client;
+  client.$transaction ??= jest.fn(async (callback: (tx: any) => Promise<any>) => callback(client));
+  client.practiceSubmission ??= {
+    findUnique: jest.fn().mockResolvedValue(null),
+    create: jest.fn(async ({ data }: any) => ({ id: "practice-submission-test", ...data })),
+  };
   client.subject ??= {};
   client.subject.findFirst ??= jest.fn(async ({ where }: any) => {
     const implementation = client.studentProfile?.findUnique?.getMockImplementation?.();

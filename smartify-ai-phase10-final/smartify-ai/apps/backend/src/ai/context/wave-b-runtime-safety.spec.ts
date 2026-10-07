@@ -80,7 +80,7 @@ describe("B — a BLOCKED Topic's existing Questions are never served", () => {
     h.prisma.client.questionAttempt = { createMany: jest.fn() };
     const r = await h.practice.submitPractice("u", [{ questionId: "q1", answer: "4" }]);
     expect(r.feedback).toEqual([]);
-    expect(h.prisma.client.questionAttempt.createMany).toHaveBeenCalledWith({ data: [] });
+    expect(h.prisma.client.questionAttempt.createMany).not.toHaveBeenCalled();
   });
   it("a READY Topic still serves its LEGACY Questions during TRANSITION (migration breaks nothing)", async () => {
     const h = questionHarness(topicRow("READY"), [legacyQ("q1"), legacyQ("q2")]);

@@ -178,14 +178,8 @@ describe("QuizzesService.getQuizQuestions — Phase 10E hardening", () => {
   });
 });
 
-/**
- * Launch-speed addition (2026-09-19): "lesson_check" is the short
- * post-lesson understanding check — the ONE quiz type that emails a
- * linked parent with the result. Every other quiz type (topic_assessment,
- * mock_exam) is student-initiated practice and must never trigger that
- * email, even though they all share the same submitQuiz() code path.
- */
-describe("QuizzesService.submitQuiz — lesson_check parent notification", () => {
+/** Parent result delivery uses the shared four-field notification coordinator. */
+describe("QuizzesService.submitQuiz — parent result notification", () => {
   const studentProfile = { id: "student-1", fullName: "Test Student", subjects: [{ subjectId: "subject-1" }] };
 
   function makeQuestions() {
@@ -216,50 +210,46 @@ describe("QuizzesService.submitQuiz — lesson_check parent notification", () =>
 
   const ANSWERS = [{ questionId: "q1", answer: "a" }, { questionId: "q2", answer: "b" }];
 
-  it("emails every linked parent for a lesson_check submission and reports how many were notified", async () => {
+  it("queues a four-field parent result summary for a completed lesson check", async () => {
     const prisma = makePrisma();
     const emailService = { send: jest.fn().mockResolvedValue({ sent: true }) } as any;
-    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, { ensurePoolForTopic: jest.fn() } as any, emailService);
+    const notifications = { notifyResult: jest.fn().mockResolvedValue(undefined) } as any;
+    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, { ensurePoolForTopic: jest.fn() } as any, emailService, undefined as any, notifications);
 
     const result = await service.submitQuiz("user-1", { subjectId: "subject-1", type: "lesson_check", topicId: "topic-1", answers: ANSWERS });
 
-    expect(emailService.send).toHaveBeenCalledTimes(1);
-    expect(emailService.send).toHaveBeenCalledWith(expect.objectContaining({ to: "parent1@example.com" }));
-    expect((result as any).parentsNotified).toBe(1);
+    expect(emailService.send).not.toHaveBeenCalled();
+    expect(notifications.notifyResult).toHaveBeenCalledWith(expect.objectContaining({
+      eventKey: "quiz:result-1", studentId: "student-1", studentName: "Test Student",
+      subjectNames: { en: ["Mathematics"], ar: [""] }, score: 100, quizResultId: "result-1",
+    }));
+    expect(JSON.stringify(notifications.notifyResult.mock.calls[0][0])).not.toMatch(/question|answer|explanation|conversation/i);
     expect(prisma.client.quizResult.create.mock.calls[0][0].data.topicId).toBe("topic-1");
   });
 
-  it("never emails anyone for topic_assessment or mock_exam, even with a parent linked", async () => {
+  it("queues summaries for all assessment types without sending directly through email", async () => {
     const prisma = makePrisma();
     const emailService = { send: jest.fn().mockResolvedValue({ sent: true }) } as any;
-    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, { ensurePoolForTopic: jest.fn() } as any, emailService);
+    const notifications = { notifyResult: jest.fn().mockResolvedValue(undefined) } as any;
+    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, { ensurePoolForTopic: jest.fn() } as any, emailService, undefined as any, notifications);
 
     const result = await service.submitQuiz("user-1", { subjectId: "subject-1", type: "topic_assessment", topicId: "topic-1", answers: ANSWERS });
 
     expect(emailService.send).not.toHaveBeenCalled();
-    expect((result as any).parentsNotified).toBe(0);
+    expect(notifications.notifyResult).toHaveBeenCalledTimes(1);
+    expect(result.score).toBe(100);
     expect(prisma.client.quizResult.create.mock.calls[0][0].data.topicId).toBeNull();
   });
 
-  it("is a safe no-op (0 notified, no crash) when the student has no linked parent", async () => {
+  it("does not fail a saved quiz result when the notification coordinator fails", async () => {
     const prisma = makePrisma({ relations: [] });
     const emailService = { send: jest.fn().mockResolvedValue({ sent: true }) } as any;
-    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, { ensurePoolForTopic: jest.fn() } as any, emailService);
+    const notifications = { notifyResult: jest.fn().mockRejectedValue(new Error("provider unavailable")) } as any;
+    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, { ensurePoolForTopic: jest.fn() } as any, emailService, undefined as any, notifications);
 
     const result = await service.submitQuiz("user-1", { subjectId: "subject-1", type: "lesson_check", topicId: "topic-1", answers: ANSWERS });
 
     expect(emailService.send).not.toHaveBeenCalled();
-    expect((result as any).parentsNotified).toBe(0);
-  });
-
-  it("still returns a normal result even when Resend/EmailService fails", async () => {
-    const prisma = makePrisma();
-    const emailService = { send: jest.fn().mockRejectedValue(new Error("Resend down")) } as any;
-    const service = new QuizzesService(subjectAccessFixture(prisma), {} as any, { ensurePoolForTopic: jest.fn() } as any, emailService);
-
-    const result = await service.submitQuiz("user-1", { subjectId: "subject-1", type: "lesson_check", topicId: "topic-1", answers: ANSWERS });
-
-    expect((result as any).parentsNotified).toBe(0);
     expect((result as any).score).toBe(100);
   });
 });

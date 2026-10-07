@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomBytes } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { TopicAccuracyService } from "../analytics/topic-accuracy.service";
@@ -99,6 +99,16 @@ export class ParentService {
     }));
   }
 
+  async assertLinkedStudent(parentUserId: string, studentId: string) {
+    const parent = await this.getParent(parentUserId);
+    const relation = await this.db.parentStudentRelation.findUnique({
+      where: { parentId_studentId: { parentId: parent.id, studentId } },
+      include: { student: { select: { id: true, userId: true } } },
+    });
+    if (!relation) throw new ForbiddenException("This student is not linked to your account.");
+    return relation.student;
+  }
+
   async dashboardSummary(userId: string) {
     const parent = await this.getParent(userId);
     const links = await this.db.parentStudentRelation.findMany({
@@ -138,7 +148,7 @@ export class ParentService {
             },
           }),
           this.db.quizResult.findMany({
-            where: { studentId: link.studentId, quizType: { in: ["quiz", "topic_assessment", "mock_exam"] } },
+            where: { studentId: link.studentId, quizType: { in: ["quiz", "topic_assessment", "mock_exam", "lesson_check"] } },
             orderBy: { createdAt: "desc" },
             take: 10,
             select: {
@@ -153,6 +163,11 @@ export class ParentService {
           }),
         ]);
         const selectedSubjects = link.student.subjects.map((studentSubject: any) => studentSubject.subject);
+        const availableSubjects = await this.db.subject.findMany({
+          where: { gradeId: link.student.gradeId, isActive: true, grade: { curriculumId: link.student.curriculumId, isActive: true, curriculum: { isActive: true } } },
+          orderBy: { nameEn: "asc" },
+          select: { id: true, nameEn: true, nameAr: true, priceEGP: true },
+        });
         const subjectUsage = await Promise.all(selectedSubjects.map(async (subject: any) => ({
           subjectId: subject.id,
           nameEn: subject.nameEn,
@@ -172,6 +187,7 @@ export class ParentService {
           curriculum: { nameEn: link.student.curriculum.nameEn, nameAr: link.student.curriculum.nameAr },
           grade: { nameEn: link.student.grade.nameEn, nameAr: link.student.grade.nameAr },
           subjects: selectedSubjects.map((subject: any) => ({ id: subject.id, nameEn: subject.nameEn, nameAr: subject.nameAr })),
+          availableSubjects: availableSubjects.map((subject: any) => ({ id: subject.id, nameEn: subject.nameEn, nameAr: subject.nameAr, payable: subject.priceEGP != null })),
           subjectUsage,
           weakTopics,
           recentActivity: recent,

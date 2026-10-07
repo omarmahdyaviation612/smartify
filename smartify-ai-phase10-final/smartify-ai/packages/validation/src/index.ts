@@ -135,6 +135,9 @@ export const updateSubjectSchema = z.object({
   priceEGP: z.number().nonnegative().finite().nullable().optional(),
 }).strict();
 
+export const updateUnitTermSchema = z.object({ term: z.enum(["TERM_1", "TERM_2"]) }).strict();
+export const assignUnassignedUnitsTermSchema = z.object({ term: z.enum(["TERM_1", "TERM_2"]) }).strict();
+
 export const sharedSubjectContentSchema = z.object({
   sharedContentSubjectId: z.string().min(1).max(128).nullable(),
 }).strict();
@@ -184,6 +187,7 @@ const tocUnitsSchema = z
     z.object({
       nameEn: z.string().trim().min(1).max(200),
       nameAr: z.string().trim().min(1).max(200),
+      term: z.enum(["TERM_1", "TERM_2"]).optional(),
       sourcePageStart: z.number().int().positive(),
       sourcePageEnd: z.number().int().positive(),
       topics: z

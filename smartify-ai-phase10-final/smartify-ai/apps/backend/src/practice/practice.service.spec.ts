@@ -131,6 +131,25 @@ describe("PracticeService.submitPractice — grading & persistence", () => {
     });
   });
 
+  it("returns an existing Practice batch on an idempotent retry without writing another attempt", async () => {
+    const { prisma, attemptCreateMany } = makePrisma();
+    const answers = [{ questionId: "q1", answer: "Paris" }];
+    const { createHash } = await import("crypto");
+    const requestFingerprint = createHash("sha256").update(JSON.stringify(answers)).digest("hex");
+    const prismaWithHelpers = subjectAccessFixture(prisma);
+    prismaWithHelpers.client.practiceSubmission.findUnique.mockResolvedValue({
+      id: "existing-batch", requestFingerprint, correctCount: 1, total: 1,
+    });
+    const notifications = { notifyResult: jest.fn() };
+    const service = new (PracticeService as any)(prismaWithHelpers, {} as any, {} as any, undefined, notifications);
+
+    const result = await (service as any).submitPractice("user-1", answers, "06ad3f3c-23ec-4d89-88c0-ace011223344");
+
+    expect(result).toMatchObject({ submissionId: "existing-batch", correctCount: 1, total: 1 });
+    expect(attemptCreateMany).not.toHaveBeenCalled();
+    expect(notifications.notifyResult).not.toHaveBeenCalled();
+  });
+
   it("B: an incorrect answer grades isCorrect=false and persists it as such", async () => {
     const { prisma, attemptCreateMany } = makePrisma();
     const service = new PracticeService(subjectAccessFixture(prisma), {} as any, {} as any);

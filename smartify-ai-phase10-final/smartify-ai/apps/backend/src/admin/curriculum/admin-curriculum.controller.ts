@@ -5,7 +5,7 @@ import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { UserRole } from "@smartify/shared-types";
 import { AdminCurriculumService } from "./admin-curriculum.service";
-import { confirmExtraBookStructureSchema, confirmSubjectStructureSchema, createSharedSubjectAliasSchema, sharedSubjectContentSchema, updateCurriculumSchema, updateGradeSchema, updatePricingPlanSchema, updateSubjectSchema } from "@smartify/validation";
+import { assignUnassignedUnitsTermSchema, confirmExtraBookStructureSchema, confirmSubjectStructureSchema, createSharedSubjectAliasSchema, sharedSubjectContentSchema, updateCurriculumSchema, updateGradeSchema, updatePricingPlanSchema, updateSubjectSchema, updateUnitTermSchema } from "@smartify/validation";
 import { parseBody } from "../../common/validation/parse-body";
 import { uploadOptions, textbookUploadOptions } from "./upload-options";
 
@@ -67,6 +67,23 @@ export class AdminCurriculumController {
     return this.service.updateSubject(id, parseBody(updateSubjectSchema, body));
   }
 
+  @Delete("subjects/:id")
+  deleteSubject(@Param("id") id: string) {
+    return this.service.deleteSubject(id);
+  }
+
+  @Patch("units/:id/term")
+  updateUnitTerm(@Param("id") id: string, @Body() body: unknown) {
+    const input = parseBody(updateUnitTermSchema, body);
+    return this.service.updateUnitTerm(id, input.term);
+  }
+
+  @Patch("units/unassigned-term")
+  assignUnassignedUnitsToTerm(@Body() body: unknown) {
+    const input = parseBody(assignUnassignedUnitsTermSchema, body);
+    return this.service.assignUnassignedUnitsToTerm(input.term);
+  }
+
   @Patch("subjects/:id/shared-content")
   updateSharedSubjectContent(@Param("id") id: string, @Body() body: unknown) {
     return this.service.updateSharedSubjectContent(id, parseBody(sharedSubjectContentSchema, body));
@@ -76,6 +93,11 @@ export class AdminCurriculumController {
   createSharedSubjectAlias(@Body() body: unknown) {
     const input = parseBody(createSharedSubjectAliasSchema, body);
     return this.service.createSharedSubjectAlias(input.targetGradeId, input.sourceSubjectId);
+  }
+
+  @Post("shared-content/repair")
+  repairSharedSubjectAliases() {
+    return this.service.repairSharedSubjectAliases();
   }
 
   @Get("topics")

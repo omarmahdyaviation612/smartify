@@ -116,6 +116,7 @@ export class DashboardService {
       nameAr: t.nameAr,
       unitNameEn: t.unit.nameEn,
       unitNameAr: t.unit.nameAr,
+      term: t.unit.term,
       status: sessionByTopic.get(t.id)?.status ?? "NOT_STARTED",
     }));
 

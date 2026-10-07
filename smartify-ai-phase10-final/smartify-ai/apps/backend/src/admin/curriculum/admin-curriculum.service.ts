@@ -12,6 +12,7 @@ import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.con
 import type { ConfirmExtraBookStructureInput, ConfirmSubjectStructureInput } from "@smartify/validation";
 import { UnitGroundingService } from "../../interactive-lesson/unit-grounding/unit-grounding.service";
 import { isSharedLaunchSubject, sharedSubjectKind } from "../../common/shared-content-subject.util";
+import type { Term } from "@smartify/database";
 
 @Injectable()
 export class AdminCurriculumService {
@@ -152,7 +153,7 @@ export class AdminCurriculumService {
       for (let uIndex = 0; uIndex < validated.units.length; uIndex++) {
         const unit = validated.units[uIndex];
         const createdUnit = await tx.unit.create({
-          data: { subjectId, nameEn: unit.nameEn, nameAr: unit.nameAr, order: uIndex + 1, sourcePageStart: unit.sourcePageStart, sourcePageEnd: unit.sourcePageEnd },
+          data: { subjectId, nameEn: unit.nameEn, nameAr: unit.nameAr, order: uIndex + 1, term: input.units[uIndex]?.term ?? "TERM_1", sourcePageStart: unit.sourcePageStart, sourcePageEnd: unit.sourcePageEnd },
         });
         unitsCreated++;
         await tx.topic.createMany({
@@ -277,9 +278,10 @@ export class AdminCurriculumService {
 
       let unitsCreated = 0;
       let topicsCreated = 0;
-      for (const unit of validated.units) {
+      for (let unitIndex = 0; unitIndex < validated.units.length; unitIndex++) {
+        const unit = validated.units[unitIndex];
         const createdUnit = await tx.unit.create({
-          data: { subjectId, nameEn: unit.nameEn, nameAr: unit.nameAr, order: nextOrder++, sourcePageStart: unit.sourcePageStart, sourcePageEnd: unit.sourcePageEnd, sourceFileOverride },
+          data: { subjectId, nameEn: unit.nameEn, nameAr: unit.nameAr, order: nextOrder++, term: input.units[unitIndex]?.term ?? "TERM_1", sourcePageStart: unit.sourcePageStart, sourcePageEnd: unit.sourcePageEnd, sourceFileOverride },
         });
         unitsCreated++;
         await tx.topic.createMany({
@@ -337,6 +339,7 @@ export class AdminCurriculumService {
                     nameEn: true,
                     nameAr: true,
                     order: true,
+                    term: true,
                     sourcePageStart: true,
                     sourcePageEnd: true,
                     sourceFileOverride: true,
@@ -410,6 +413,7 @@ export class AdminCurriculumService {
                 nameEn: unit.nameEn,
                 nameAr: unit.nameAr,
                 order: unit.order,
+                term: unit.term,
                 sourcePageStart: unit.sourcePageStart,
                 sourcePageEnd: unit.sourcePageEnd,
                 // English Extra Book / Story support V1 (2026-09-20): a
@@ -504,6 +508,106 @@ export class AdminCurriculumService {
     return this.prisma.client.subject.update({ where: { id }, data });
   }
 
+  async updateUnitTerm(unitId: string, term: Term) {
+    const unit = await this.prisma.client.unit.findUnique({ where: { id: unitId }, select: { id: true } });
+    if (!unit) throw new NotFoundException("Unit not found.");
+    return this.prisma.client.unit.update({ where: { id: unitId }, data: { term }, select: { id: true, term: true } });
+  }
+
+  async assignUnassignedUnitsToTerm(term: Term) {
+    return this.prisma.client.$transaction(async (tx) => {
+      const result = await tx.unit.updateMany({ where: { term: null }, data: { term } });
+      return { updatedUnits: result.count, term };
+    });
+  }
+
+  /**
+   * Permanently removes an unused Subject and its generated curriculum tree.
+   * Any entitlement, score, learning history, AI usage, or shared-content
+   * dependency blocks deletion so a mistaken catalog entry cannot erase a
+   * learner's history or break another curriculum's alias.
+   */
+  async deleteSubject(subjectId: string) {
+    return this.prisma.client.$transaction(async (tx) => {
+      const subject = await tx.subject.findUnique({
+        where: { id: subjectId },
+        select: {
+          id: true,
+          nameEn: true,
+          sharedContentSubjectId: true,
+          sharedToSubjects: { select: { id: true } },
+          units: { select: { id: true, topics: { select: { id: true, lessons: { select: { id: true } }, questions: { select: { id: true } } } } } },
+          _count: { select: {
+            studentSubjects: true,
+            assessments: true,
+            questionPackPurchases: true,
+            extraQuestionCredits: true,
+            freeTutorTrials: true,
+            lessonTrialConsumptions: true,
+            referralRewards: true,
+            homeworkSessions: true,
+            homeworkAccessSessions: true,
+            teacherSessionRequests: true,
+          } },
+        },
+      });
+      if (!subject) throw new NotFoundException("Subject not found.");
+      if (subject.sharedToSubjects.length > 0) {
+        throw new BadRequestException("This subject provides shared content to another curriculum and cannot be deleted.");
+      }
+
+      const unitIds = subject.units.map((unit) => unit.id);
+      const topics = subject.units.flatMap((unit) => unit.topics);
+      const topicIds = topics.map((topic) => topic.id);
+      const lessonIds = topics.flatMap((topic) => topic.lessons.map((lesson) => lesson.id));
+      const questionIds = topics.flatMap((topic) => topic.questions.map((question) => question.id));
+      const relationCounts = Object.values(subject._count);
+      const [progress, attempts, quizResults, lessonSessions, conversations, aiUsage, dailyUsage, practiceHistory, lessonTrials, subscriptions] = await Promise.all([
+        tx.studentProgress.count({ where: { lesson: { topicId: { in: topicIds } } } }),
+        tx.questionAttempt.count({ where: { question: { topicId: { in: topicIds } } } }),
+        tx.quizResult.count({ where: { topicId: { in: topicIds } } }),
+        tx.lessonSession.count({ where: { topicId: { in: topicIds } } }),
+        tx.aIConversation.count({ where: { OR: [{ subjectId }, { topicId: { in: topicIds } }] } }),
+        tx.aIUsage.count({ where: { subjectId } }),
+        tx.aIDailyUsageCounter.count({ where: { subjectId } }),
+        tx.practiceSubmission.count({ where: { subjectIds: { array_contains: [subjectId] } } }),
+        tx.lessonTrial.count({ where: { subjectIds: { array_contains: [subjectId] } } }),
+        tx.subscription.count({ where: { selectedSubjectIds: { array_contains: [subjectId] } } }),
+      ]);
+      if ([...relationCounts, progress, attempts, quizResults, lessonSessions, conversations, aiUsage, dailyUsage, practiceHistory, lessonTrials, subscriptions].some((count) => count > 0)) {
+        throw new BadRequestException("This subject has student access or history and cannot be deleted. Deactivate it to hide it instead.");
+      }
+
+      if (unitIds.length > 0) {
+        await tx.lessonDraft.deleteMany({ where: { OR: [{ targetUnitId: { in: unitIds } }, { publishedTopicId: { in: topicIds } }] } });
+        await tx.questionDraft.deleteMany({ where: { topicId: { in: topicIds } } });
+        await tx.lessonVisualAsset.deleteMany({ where: { topicId: { in: topicIds } } });
+        await tx.topicGroundingAssignment.deleteMany({ where: { topicId: { in: topicIds } } });
+        await tx.topicSourceEvidence.deleteMany({ where: { unitId: { in: unitIds } } });
+        await tx.groundingConceptAlias.deleteMany({ where: { unitId: { in: unitIds } } });
+        await tx.unitGroundingProgress.deleteMany({ where: { unitId: { in: unitIds } } });
+        await tx.tutorAnswerCache.deleteMany({ where: { OR: [{ subjectId }, { topicId: { in: topicIds } }] } });
+        if (lessonIds.length > 0) {
+          await tx.learningObjective.deleteMany({ where: { lessonId: { in: lessonIds } } });
+          await tx.studentProgress.deleteMany({ where: { lessonId: { in: lessonIds } } });
+          await tx.lesson.deleteMany({ where: { id: { in: lessonIds } } });
+        }
+        if (questionIds.length > 0) {
+          await tx.questionAttempt.deleteMany({ where: { questionId: { in: questionIds } } });
+          await tx.question.updateMany({ where: { OR: [{ id: { in: questionIds } }, { replacedByQuestionId: { in: questionIds } }] }, data: { replacedByQuestionId: null } });
+          await tx.question.deleteMany({ where: { id: { in: questionIds } } });
+        }
+        if (topicIds.length > 0) await tx.topic.deleteMany({ where: { id: { in: topicIds } } });
+        await tx.unit.deleteMany({ where: { id: { in: unitIds } } });
+      }
+      await tx.learningMaterial.deleteMany({ where: { subjectId } });
+      await tx.tutorAnswerCache.deleteMany({ where: { subjectId } });
+      await tx.aIDailyUsageCounter.deleteMany({ where: { subjectId } });
+      await tx.subject.delete({ where: { id: subjectId } });
+      return { deletedSubjectId: subjectId, deletedUnits: unitIds.length, deletedTopics: topicIds.length };
+    }, { isolationLevel: "Serializable" });
+  }
+
   async updateSharedSubjectContent(targetSubjectId: string, input: { sharedContentSubjectId: string | null }) {
     const target = await this.prisma.client.subject.findUnique({
       where: { id: targetSubjectId },
@@ -556,6 +660,85 @@ export class AdminCurriculumService {
     return this.prisma.client.subject.create({
       data: { gradeId: targetGradeId, nameEn: source.nameEn, nameAr: source.nameAr, isActive: true, sourceFile: null, priceEGP: null, sharedContentSubjectId: source.id },
       select: { id: true, gradeId: true, nameEn: true, nameAr: true, sharedContentSubjectId: true },
+    });
+  }
+
+  /**
+   * Repairs Arabic/Social Studies visibility across British and American
+   * grades by linking only canonical, active MOE content from the same grade.
+   * Existing materials are never overwritten; ambiguous or locally populated
+   * targets are returned as conflicts for manual review. This performs no AI
+   * work and never changes an existing price.
+   */
+  async repairSharedSubjectAliases() {
+    return this.prisma.client.$transaction(async (tx) => {
+      const sourceGrades = await tx.grade.findMany({
+        where: { isActive: true, curriculum: { code: "EG_NATIONAL", isActive: true } },
+        select: { id: true, level: true, subjects: {
+          where: { isActive: true, sharedContentSubjectId: null },
+          select: { id: true, nameEn: true, nameAr: true, _count: { select: { units: true } } },
+        } },
+      });
+      const targetGrades = await tx.grade.findMany({
+        where: { isActive: true, curriculum: { code: { in: ["BRITISH_INTL", "AMERICAN_INTL"] }, isActive: true } },
+        select: { id: true, level: true, curriculum: { select: { code: true } }, subjects: {
+          select: { id: true, nameEn: true, nameAr: true, isActive: true, sourceFile: true, sharedContentSubjectId: true, _count: { select: { units: true } } },
+        } },
+      });
+      const report = { linked: 0, created: 0, activated: 0, alreadyReady: 0, missingSources: [] as Array<{ gradeId: string; level: number; kind: string }>, conflicts: [] as Array<{ gradeId: string; curriculumCode: string; kind: string; reason: string }> };
+
+      for (const targetGrade of targetGrades) {
+        const matchingSourceGrades = sourceGrades.filter((grade) => grade.level === targetGrade.level);
+        if (matchingSourceGrades.length > 1) {
+          for (const kind of ["ARABIC", "SOCIAL_STUDIES"] as const) {
+            report.conflicts.push({ gradeId: targetGrade.id, curriculumCode: targetGrade.curriculum.code, kind, reason: "MULTIPLE_MOE_GRADES" });
+          }
+          continue;
+        }
+        const sourceGrade = matchingSourceGrades[0];
+        for (const kind of ["ARABIC", "SOCIAL_STUDIES"] as const) {
+          const sources = sourceGrade?.subjects.filter((subject) => sharedSubjectKind(subject.nameEn, subject.nameAr) === kind && subject._count.units > 0) ?? [];
+          if (sources.length > 1) {
+            report.conflicts.push({ gradeId: targetGrade.id, curriculumCode: targetGrade.curriculum.code, kind, reason: "MULTIPLE_MOE_SOURCES" });
+            continue;
+          }
+          if (sources.length === 0) {
+            report.missingSources.push({ gradeId: targetGrade.id, level: targetGrade.level, kind });
+            continue;
+          }
+          const source = sources[0];
+          const targets = targetGrade.subjects.filter((subject) => sharedSubjectKind(subject.nameEn, subject.nameAr) === kind);
+          if (targets.length > 1) {
+            report.conflicts.push({ gradeId: targetGrade.id, curriculumCode: targetGrade.curriculum.code, kind, reason: "MULTIPLE_TARGETS" });
+            continue;
+          }
+          const target = targets[0];
+          if (!target) {
+            await tx.subject.create({ data: {
+              gradeId: targetGrade.id, nameEn: source.nameEn, nameAr: source.nameAr, isActive: true,
+              sourceFile: null, priceEGP: null, sharedContentSubjectId: source.id,
+            } });
+            report.created++;
+            continue;
+          }
+          if (target.sharedContentSubjectId && target.sharedContentSubjectId !== source.id) {
+            report.conflicts.push({ gradeId: targetGrade.id, curriculumCode: targetGrade.curriculum.code, kind, reason: "LINKED_TO_DIFFERENT_SOURCE" });
+            continue;
+          }
+          if (!target.sharedContentSubjectId && (target.sourceFile || target._count.units > 0)) {
+            report.conflicts.push({ gradeId: targetGrade.id, curriculumCode: targetGrade.curriculum.code, kind, reason: "TARGET_HAS_OWN_CONTENT" });
+            continue;
+          }
+          if (target.sharedContentSubjectId === source.id && target.isActive) {
+            report.alreadyReady++;
+            continue;
+          }
+          await tx.subject.update({ where: { id: target.id }, data: { sharedContentSubjectId: source.id, isActive: true } });
+          if (!target.sharedContentSubjectId) report.linked++;
+          if (!target.isActive) report.activated++;
+        }
+      }
+      return report;
     });
   }
 

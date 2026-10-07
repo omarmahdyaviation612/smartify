@@ -65,6 +65,7 @@ export default function PracticePage() {
   const [questions, setQuestions] = useState<Question[] | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [results, setResults] = useState<{ correctCount: number; total: number; feedback: Feedback[] } | null>(null);
+  const [submissionKey, setSubmissionKey] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -102,6 +103,7 @@ export default function PracticePage() {
     setTopicId("");
     setQuestions(null);
     setResults(null);
+    setSubmissionKey("");
     return () => { active = false; };
   }, [subjectId, retry, locale]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -116,6 +118,7 @@ export default function PracticePage() {
     setQuestions(data.questions);
     setAnswers({});
     setResults(null);
+    setSubmissionKey(window.crypto.randomUUID());
     } catch (err: any) {
       setError(err?.status === 400 ? feedback.questionsUnavailable : feedback.loadError);
     } finally { setBusy(false); }
@@ -126,9 +129,9 @@ export default function PracticePage() {
     setBusy(true);
     setError(null);
     try {
-    const res = await apiFetch<{ correctCount: number; total: number; feedback: Feedback[] }>("/practice/submit", {
+    const res = await apiFetch<{ submissionId: string; correctCount: number; total: number; feedback: Feedback[] }>("/practice/submit", {
       method: "POST",
-      body: JSON.stringify({ answers: questions.map((q) => ({ questionId: q.id, answer: answers[q.id] ?? null })) }),
+      body: JSON.stringify({ idempotencyKey: submissionKey, answers: questions.map((q) => ({ questionId: q.id, answer: answers[q.id] ?? null })) }),
     });
     setResults(res);
     } catch { setError(feedback.submitError); }

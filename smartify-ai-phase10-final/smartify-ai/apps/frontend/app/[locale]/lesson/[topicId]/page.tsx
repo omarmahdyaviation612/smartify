@@ -37,6 +37,7 @@ interface LessonState {
   conversationId?: string;
   topicId?: string;
   subjectId?: string;
+  forceArabic?: boolean;
   status?: string;
   currentStepIndex?: number;
   totalSteps?: number;
@@ -80,6 +81,7 @@ export default function InteractiveLessonPage() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [preparing, setPreparing] = useState(false);
+  const [waitingQuoteIndex, setWaitingQuoteIndex] = useState(0);
   // Truthful, stage-aware waiting copy for first-time lazy generation
   // (2026-09-26): no fake percentage, just an honest label for whichever
   // REAL backend phase is actually happening — "grounding" (the textbook is
@@ -90,21 +92,32 @@ export default function InteractiveLessonPage() {
   // actually happening.
   const [preparingStage, setPreparingStage] = useState<"grounding" | "authoring" | null>(null);
   const preparingSinceRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!preparing) {
+      setWaitingQuoteIndex(0);
+      return;
+    }
+    const timer = setInterval(() => {
+      setWaitingQuoteIndex((index) => (index + 1) % copy.waitingQuotes.length);
+    }, 6000);
+    return () => clearInterval(timer);
+  }, [preparing, copy.waitingQuotes.length]);
   const [slowStart, setSlowStart] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notAvailable, setNotAvailable] = useState(false);
   const [visualFailed, setVisualFailed] = useState(false);
 
   // Post-lesson understanding check — a short (3-question) quiz offered
-  // once the lesson itself is complete; submitting it is what triggers a
-  // parent-notification email server-side (QuizzesService.submitQuiz,
-  // type "lesson_check"). `checkQuestions === null` means "not fetched
+  // once the lesson itself is complete. The saved result appears in the
+  // linked parent's dashboard; notification delivery is a separate
+  // best-effort channel. `checkQuestions === null` means "not fetched
   // yet"; `[]` means "fetched, nothing available" (e.g. question
   // generation is still catching up) — rendered differently.
   const [checkQuestions, setCheckQuestions] = useState<LessonCheckQuestion[] | null>(null);
   const [checkAnswers, setCheckAnswers] = useState<Record<string, string>>({});
   const [checkSubmitting, setCheckSubmitting] = useState(false);
-  const [checkResult, setCheckResult] = useState<{ correctCount: number; total: number; parentsNotified: number } | null>(null);
+  const [checkResult, setCheckResult] = useState<{ correctCount: number; total: number } | null>(null);
   const [checkError, setCheckError] = useState<string | null>(null);
 
   const [listening, setListening] = useState(false);
@@ -198,7 +211,7 @@ export default function InteractiveLessonPage() {
     if (!SpeechRecognitionCtor) return;
     setMicError(null);
     const recognition = new SpeechRecognitionCtor();
-    recognition.lang = isAr ? "ar-EG" : "en-US";
+    recognition.lang = isAr || state?.forceArabic ? "ar-EG" : "en-US";
     recognition.interimResults = true;
     recognition.continuous = false;
     recognition.maxAlternatives = 1;
@@ -360,7 +373,7 @@ export default function InteractiveLessonPage() {
     setCheckError(null);
     try {
       const answers = checkQuestions.filter((q) => checkAnswers[q.id] !== undefined).map((q) => ({ questionId: q.id, answer: checkAnswers[q.id] }));
-      const result = await apiFetch<{ correctCount: number; total: number; parentsNotified: number }>("/quizzes/submit", {
+      const result = await apiFetch<{ correctCount: number; total: number }>("/quizzes/submit", {
         method: "POST",
         body: JSON.stringify({ subjectId: state.subjectId, type: "lesson_check", topicId, answers }),
       });
@@ -501,7 +514,19 @@ export default function InteractiveLessonPage() {
             {turns.length === 0 && !started && (
               <div className="flex h-full flex-col items-center justify-center gap-4">
                 {preparing ? (
-                  <p role="status" aria-live="polite" className="text-sm text-neutral-500">{preparingMessage()}</p>
+                  <section className="w-full max-w-md rounded-2xl border border-sf-purple-100 bg-gradient-to-br from-white via-white to-sf-purple-50 p-6 text-center shadow-sm" aria-label={copy.waitingForLesson}>
+                    <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-sf-purple-50">
+                      <span aria-hidden="true" className="h-8 w-8 animate-spin rounded-full border-[3px] border-sf-purple-100 border-t-sf-purple-600 motion-reduce:animate-none" />
+                    </div>
+                    <p className="text-base font-semibold text-navy-900">{copy.waitingForLesson}</p>
+                    <p role="status" aria-live="polite" className="mt-2 text-sm text-neutral-600">{preparingMessage()}</p>
+                    <div className="mt-5 rounded-xl border border-sf-purple-100 bg-white/80 px-4 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-sf-purple-600">{isAr ? "ومضة تعليمية" : "A learning thought"}</p>
+                      <p key={waitingQuoteIndex} aria-live="off" className="mt-2 min-h-12 text-sm leading-6 text-neutral-700 transition-opacity duration-300">
+                        “{copy.waitingQuotes[waitingQuoteIndex]}”
+                      </p>
+                    </div>
+                  </section>
                 ) : (
                   <SmartifyButton type="button" variant="ai" onClick={handleStart} disabled={busy}>
                     {busy ? (slowStart ? copy.startingFirstTime : copy.starting) : copy.startLesson}
@@ -586,7 +611,7 @@ export default function InteractiveLessonPage() {
                   <div className="text-center text-sm">
                     <p className="font-medium text-navy-900">{copy.checkResult(checkResult.correctCount, checkResult.total)}</p>
                     <p className="mt-1 text-neutral-500">
-                      {checkResult.parentsNotified > 0 ? copy.checkParentNotified(checkResult.parentsNotified) : copy.checkNoParentLinked}
+                      {copy.checkResultSaved}
                     </p>
                   </div>
                 ) : (
@@ -594,7 +619,7 @@ export default function InteractiveLessonPage() {
                     {checkQuestions.map((q, qi) => (
                       <fieldset key={q.id}>
                         <legend className="mb-2 text-sm text-neutral-700">
-                          {qi + 1}. {isAr && q.promptAr ? q.promptAr : q.promptEn}
+                          {qi + 1}. {(isAr || state?.forceArabic) && q.promptAr ? q.promptAr : q.promptEn}
                         </legend>
                         <div className="space-y-1">
                           {(q.optionsJson ?? []).map((option) => (
