@@ -89,6 +89,18 @@ export interface LessonTeachingContext {
   teachingStrategyGuidance?: string;
 }
 
+/** Arabic Language and Social Studies remain Arabic-taught subjects in every curriculum. */
+function isAlwaysArabicSubject(subjectName: string): boolean {
+  const normalized = subjectName.normalize("NFKC").trim().toLocaleLowerCase().replace(/[\s_-]+/gu, " ");
+  return [
+    "arabic",
+    "arabic language",
+    "social studies",
+    "اللغة العربية",
+    "الدراسات الاجتماعية",
+  ].includes(normalized);
+}
+
 @Injectable()
 export class AIContextBuilderService {
   // Shared across BOTH the free-form Tutor prompt and the structured
@@ -221,8 +233,9 @@ export class AIContextBuilderService {
     // English. Language-matching must always win; the tone instruction is
     // now folded in here, conditioned on the RESPONSE language, not the
     // student's stored preference.
-    const languageInstruction =
-      ctx.preferredLang === "ar"
+    const languageInstruction = isAlwaysArabicSubject(ctx.subjectNameEn)
+      ? "SUBJECT LANGUAGE RULE: This is Arabic Language or Social Studies. Always teach and respond in clear, age-appropriate Arabic (فصحى مبسطة), regardless of the student's saved preference or the language of their message. Never switch the lesson content to English."
+      : ctx.preferredLang === "ar"
         ? "Respond in Arabic by default. If the student's message is in English, respond in English instead — always match the language the student actually wrote in, above any other preference. When responding in Arabic, use gentle Egyptian colloquial Arabic (عامية مصرية لطيفة) with a warm supportive tone. When responding in English, use a warm, patient teacher tone."
         : "Respond in English by default. If the student's message is in Arabic, respond in Arabic instead — always match the language the student actually wrote in, above any other preference. When responding in Arabic, use gentle Egyptian colloquial Arabic (عامية مصرية لطيفة) with a warm supportive tone. When responding in English, use a warm, patient teacher tone.";
 
@@ -306,8 +319,9 @@ export class AIContextBuilderService {
    * step or skip ahead on its own.
    */
   buildLessonTeachingPrompt(ctx: LessonTeachingContext): string {
-    const languageInstruction =
-      ctx.preferredLang === "ar"
+    const languageInstruction = isAlwaysArabicSubject(ctx.subjectNameEn)
+      ? "SUBJECT LANGUAGE RULE: This is Arabic Language or Social Studies. Always teach and respond in clear, age-appropriate Arabic (فصحى مبسطة), regardless of the student's saved preference or the language of their message. Never switch the lesson content to English."
+      : ctx.preferredLang === "ar"
         ? "Speak in warm, simple, child-friendly Egyptian colloquial Arabic (عامية مصرية بسيطة وودودة), suitable for reading aloud. Keep correct mathematical/educational terms clear even while using colloquial phrasing — do not sacrifice correctness for casualness. If the student writes in English, answer in English instead."
         : "Speak in warm, simple, encouraging English suitable for a young child and for reading aloud. If the student writes in Arabic, answer in Arabic using gentle Egyptian colloquial Arabic instead.";
 
