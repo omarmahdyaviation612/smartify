@@ -63,6 +63,7 @@ export default function ParentDashboardPage() {
   const [accessState, setAccessState] = useState<AccessState>("checking");
   const [students, setStudents] = useState<Student[]>([]);
   const [errorMessage, setErrorMessage] = useState("");
+  const [requiresSignIn, setRequiresSignIn] = useState(false);
   const [teacherRequests, setTeacherRequests] = useState<TeacherRequest[]>([]);
   const [requestSubject, setRequestSubject] = useState<Record<string, string>>({});
   const [requestTimes, setRequestTimes] = useState<Record<string, string>>({});
@@ -101,6 +102,7 @@ export default function ParentDashboardPage() {
           if (!cancelled) window.location.replace(`/${locale}/parent`);
         } catch (error) {
           if (cancelled) return;
+          setRequiresSignIn(error instanceof ApiError && error.status === 401);
           setErrorMessage(error instanceof ApiError && error.status === 400 ? invitationErrorMessage : loadErrorMessage);
           setAccessState(error instanceof ApiError && error.status === 403 ? "unauthorized" : "error");
         }
@@ -151,6 +153,10 @@ export default function ParentDashboardPage() {
 
     {accessState === "error" && <div role="alert" className="rounded-sf-lg border border-error-200 bg-white p-5 text-sm text-error-600">
       <p>{errorMessage || loadErrorMessage}</p>
+      {requiresSignIn && invitationCode && <Link
+        href={`/${locale}/sign-in?redirect_url=${encodeURIComponent(`/${locale}/parent?code=${encodeURIComponent(invitationCode)}`)}`}
+        className="mt-3 inline-flex rounded border border-sf-blue-300 px-4 py-2 font-medium text-sf-blue-700"
+      >{isAr ? "سجّل الدخول ثم أكمل ربط الطفل" : "Sign in to finish linking this child"}</Link>}
       {!invitationCode && <SmartifyButton variant="secondary" className="mt-3" onClick={() => { setAccessState("checking"); void load(); }}>{isAr ? "إعادة المحاولة" : "Try again"}</SmartifyButton>}
     </div>}
 

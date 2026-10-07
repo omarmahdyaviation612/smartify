@@ -16,6 +16,57 @@ describe("ParentService", () => {
     await expect(new ParentService(prisma, accuracyService, usageService).acceptCode("parent", "abc")).rejects.toThrow(BadRequestException);
   });
 
+  it("allows the same parent to retry an invitation already used to link that child", async () => {
+    const relation = { id: "relation-1", studentId: "student-1", canViewConversations: false };
+    const tx = {
+      parentLinkInvitation: { findUnique: jest.fn().mockResolvedValue({
+        id: "invite-1", usedAt: new Date(), expiresAt: new Date(Date.now() + 60_000),
+        studentId: "student-1", createdByUserId: "student-user",
+      }) },
+      user: { findUnique: jest.fn().mockResolvedValue({ id: "parent-user", role: "PARENT", email: "mom@example.com" }) },
+      parentProfile: { findUnique: jest.fn().mockResolvedValue({ id: "parent-1" }) },
+      parentStudentRelation: { findUnique: jest.fn().mockResolvedValue(relation) },
+    };
+    const prisma = { client: { $transaction: jest.fn((callback: (client: any) => any) => callback(tx)) } } as any;
+
+    await expect(new ParentService(prisma, accuracyService, usageService).acceptCode("parent-user", "abc123"))
+      .resolves.toEqual(relation);
+  });
+
+  it("accepts separate invitations for two children into one parent account", async () => {
+    const invitations = new Map([
+      ["DAGHER1", { id: "invite-1", usedAt: null, expiresAt: new Date(Date.now() + 60_000), studentId: "dagher", createdByUserId: "dagher-user" }],
+      ["KENDA1", { id: "invite-2", usedAt: null, expiresAt: new Date(Date.now() + 60_000), studentId: "kenda", createdByUserId: "kenda-user" }],
+    ]);
+    const relations = new Map<string, any>();
+    const tx = {
+      parentLinkInvitation: {
+        findUnique: jest.fn(({ where }: any) => Promise.resolve(invitations.get(where.code) ?? null)),
+        updateMany: jest.fn(({ where, data }: any) => {
+          const invitation = [...invitations.values()].find((item) => item.id === where.id);
+          if (!invitation || invitation.usedAt || invitation.expiresAt <= where.expiresAt.gt) return Promise.resolve({ count: 0 });
+          invitation.usedAt = data.usedAt;
+          return Promise.resolve({ count: 1 });
+        }),
+      },
+      user: { findUnique: jest.fn().mockResolvedValue({ id: "parent-user", role: "PARENT", email: "mom@example.com" }) },
+      parentProfile: { upsert: jest.fn().mockResolvedValue({ id: "parent-1" }) },
+      parentStudentRelation: { upsert: jest.fn(({ create }: any) => {
+        const relation = { id: `relation-${relations.size + 1}`, ...create, canViewConversations: false };
+        relations.set(create.studentId, relation);
+        return Promise.resolve(relation);
+      }) },
+    };
+    const prisma = { client: { $transaction: jest.fn((callback: (client: any) => any) => callback(tx)) } } as any;
+    const service = new ParentService(prisma, accuracyService, usageService);
+
+    await service.acceptCode("parent-user", "DAGHER1");
+    await service.acceptCode("parent-user", "KENDA1");
+
+    expect([...relations.keys()]).toEqual(["dagher", "kenda"]);
+    expect(tx.parentStudentRelation.upsert).toHaveBeenCalledTimes(2);
+  });
+
   it("does not query conversations when permission is disabled", async () => {
     const prisma = {
       client: {

@@ -38,10 +38,26 @@ export class ParentService {
     return this.db.$transaction(async (tx: any) => {
       const now = new Date();
       const invitation = await tx.parentLinkInvitation.findUnique({ where: { code } });
-      if (!invitation || invitation.usedAt || invitation.expiresAt <= now) {
+      if (!invitation) {
         throw new BadRequestException("This link code is invalid or expired.");
       }
       if (invitation.createdByUserId === userId) throw new BadRequestException("You cannot link your own account.");
+
+      // A client may lose the successful response after the relationship was
+      // committed. Let only that same parent safely retry the consumed link.
+      if (invitation.usedAt) {
+        const parent = await tx.parentProfile.findUnique({ where: { userId }, select: { id: true } });
+        if (parent) {
+          const existing = await tx.parentStudentRelation.findUnique({
+            where: { parentId_studentId: { parentId: parent.id, studentId: invitation.studentId } },
+          });
+          if (existing) return existing;
+        }
+        throw new BadRequestException("This link code is invalid or expired.");
+      }
+      if (invitation.expiresAt <= now) {
+        throw new BadRequestException("This link code is invalid or expired.");
+      }
 
       const user = await tx.user.findUnique({ where: { id: userId }, select: { id: true, role: true, email: true } });
       if (!user || !["STUDENT", "PARENT"].includes(user.role)) {
