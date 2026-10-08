@@ -179,8 +179,8 @@ export class BillingService {
     const profile = await this.getProfileOrThrow(userId);
 
     const selectedSubjectIds = [...new Set(input.subjectIds ?? [])];
-    if (selectedSubjectIds.length === 0) {
-      throw new BadRequestException("Select at least one subject.");
+    if (selectedSubjectIds.length === 0 && input.homeworkAddon !== true) {
+      throw new BadRequestException("Select at least one subject or Homework Helper.");
     }
 
     const subjects = (await this.prisma.client.subject.findMany({
@@ -315,7 +315,7 @@ export class BillingService {
       studentUserId: userId,
       subscriptionId: subscription.id,
       amountEGP: monthlyTotalEGP,
-      description: `Smartify AI — ${subjects.map((s) => s.nameEn).join(", ")}${homeworkAddonActive ? " + Homework Helper" : ""}`,
+      description: `Smartify AI — ${subjects.map((s) => s.nameEn).join(", ") || (homeworkAddonActive ? "Homework Helper" : "Subscription")}`,
       successUrl: `${env.FRONTEND_URL}/billing/success`,
       cancelUrl: `${env.FRONTEND_URL}/billing`,
     };

@@ -110,6 +110,15 @@ export default function BillingPage() {
   const priceById = new Map((subjects ?? []).map((subject) => [subject.id, subject.priceEGP]));
   const selectedHomeworkTier = homeworkTiers.find(t => t.allowance === homeworkAllowance);
   const monthlyTotal = selectedSubjectIds.reduce((total, id) => total + Number(priceById.get(id) ?? 0), 0) + (homeworkAddon ? Number(selectedHomeworkTier?.amountEGP ?? 0) : 0);
+  const unchangedAddonOnly = subscription?.status === "active"
+    && selectedSubjectIds.length === 0
+    && subscription.homeworkAddonActive === true
+    && homeworkAddon
+    && homeworkAllowance === subscription.homeworkAddonMonthlyAllowance;
+  const canStartInstapay = !submitting
+    && monthlyTotal > 0
+    && !unchangedAddonOnly
+    && (selectedSubjectIds.length > 0 || (homeworkAddon && homeworkConfigured));
 
   async function handleCancel() {
     if (!confirm(copy.cancelConfirm)) return;
@@ -259,7 +268,7 @@ export default function BillingPage() {
               <SmartifyButton
                 variant="secondary"
                 className="mt-3 w-full"
-                disabled={selectedSubjectIds.length === 0}
+                disabled={!canStartInstapay}
                 onClick={() => {
                   const params = new URLSearchParams({ kind: "subscription", subjectIds: selectedSubjectIds.join(","), homeworkAddon: String(homeworkAddon), homeworkAddonAllowance: String(homeworkAllowance) });
                   router.push(`/${locale}/billing/instapay?${params.toString()}`);
@@ -267,6 +276,11 @@ export default function BillingPage() {
               >
                 {instapayCopy.payWithInstapay}
               </SmartifyButton>
+              {monthlyTotal === 0 && (
+                <p className="mt-2 text-center text-sm text-neutral-500">
+                  {isAr ? "اختر مادة أو فعّل مساعد حل الواجب للمتابعة إلى الدفع." : "Choose a subject or enable Homework Helper to continue to payment."}
+                </p>
+              )}
             </div>
           )}
         </SmartifyContainer>

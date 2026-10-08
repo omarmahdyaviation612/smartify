@@ -161,6 +161,38 @@ describe("BillingService", () => {
       expect(subscriptionUpsert.mock.calls[0][0].create.monthlyTotalEGP).toBe(400);
     });
 
+    it("allows an InstaPay Homework Helper subscription without selecting a subject", async () => {
+      const originalRecipientName = process.env.INSTAPAY_RECIPIENT_NAME;
+      const originalRecipientHandle = process.env.INSTAPAY_RECIPIENT_HANDLE;
+      process.env.INSTAPAY_RECIPIENT_NAME = "Test Recipient";
+      process.env.INSTAPAY_RECIPIENT_HANDLE = "test-handle";
+      const subscriptionUpsert = jest.fn().mockResolvedValue({ id: "sub-1" });
+      const prisma = makePrismaMock({ subscriptionUpsert, homeworkAddonPrice10: 150, homeworkAddonPrice20: 250 });
+      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
+
+      try {
+        const result = await service.startInstapayCheckout("user-1", {
+          subjectIds: [],
+          homeworkAddon: true,
+          homeworkAddonAllowance: 10,
+        });
+
+        expect(result.expectedAmountEGP).toBe(150);
+        expect(subscriptionUpsert.mock.calls[0][0].create).toMatchObject({
+          selectedSubjectIds: [],
+          monthlyTotalEGP: 150,
+          homeworkAddonPendingActive: true,
+          homeworkAddonPendingAmountEGP: 150,
+          homeworkAddonPendingAllowance: 10,
+        });
+      } finally {
+        if (originalRecipientName === undefined) delete process.env.INSTAPAY_RECIPIENT_NAME;
+        else process.env.INSTAPAY_RECIPIENT_NAME = originalRecipientName;
+        if (originalRecipientHandle === undefined) delete process.env.INSTAPAY_RECIPIENT_HANDLE;
+        else process.env.INSTAPAY_RECIPIENT_HANDLE = originalRecipientHandle;
+      }
+    });
+
     it("fails closed when the add-on price is not configured", async () => {
       const prisma = makePrismaMock({
         subjects: [{ id: "math", nameEn: "Math", priceEGP: 150 }],
