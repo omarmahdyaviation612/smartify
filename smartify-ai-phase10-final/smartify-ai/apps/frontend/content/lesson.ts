@@ -20,6 +20,9 @@ export interface LessonCopy {
   listening: string;
   micPermissionDenied: string;
   micNoSpeech: string;
+  micUnavailable: string;
+  micNetworkError: string;
+  micServiceUnavailable: string;
   transcriptionFailed: string;
   autoPlayOn: string;
   autoPlayOff: string;
@@ -71,6 +74,9 @@ const en: LessonCopy = {
   listening: "Listening...",
   micPermissionDenied: "Microphone access was denied.",
   micNoSpeech: "No speech was detected — please try again.",
+  micUnavailable: "The microphone isn't available. Check that it's connected and allowed in your browser.",
+  micNetworkError: "Speech recognition couldn't connect. Check your internet connection and try again.",
+  micServiceUnavailable: "This browser can't start speech recognition right now. Try Chrome or type your answer instead.",
   transcriptionFailed: "Couldn't understand that — please try again or type instead.",
   autoPlayOn: "Voice: on",
   autoPlayOff: "Voice: off",
@@ -122,6 +128,9 @@ const ar: LessonCopy = {
   listening: "جاري الاستماع...",
   micPermissionDenied: "تم رفض الوصول إلى الميكروفون.",
   micNoSpeech: "لم يتم رصد أي صوت — حاول مرة أخرى.",
+  micUnavailable: "الميكروفون غير متاح. تأكد من توصيله والسماح باستخدامه في المتصفح.",
+  micNetworkError: "تعذر الاتصال بخدمة التعرّف على الكلام. تحقق من الإنترنت وحاول مرة أخرى.",
+  micServiceUnavailable: "تعذر بدء التعرّف على الكلام في هذا المتصفح الآن. جرّب Chrome أو اكتب إجابتك.",
   transcriptionFailed: "تعذر فهم ذلك — حاول مرة أخرى أو اكتب بدلاً من ذلك.",
   autoPlayOn: "الصوت: مفعّل",
   autoPlayOff: "الصوت: متوقف",

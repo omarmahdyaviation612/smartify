@@ -212,33 +212,51 @@ export default function InteractiveLessonPage() {
   }
 
   function toggleListening() {
-    if (listening) { recognitionInstance.current?.stop(); return; }
+    if (listening) {
+      try { recognitionInstance.current?.stop(); } catch { setListening(false); }
+      return;
+    }
+    if (recognitionInstance.current) return;
     const SpeechRecognitionCtor = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
     if (!SpeechRecognitionCtor) return;
     setMicError(null);
-    const recognition = new SpeechRecognitionCtor();
-    recognition.lang = isAr || state?.forceArabic ? "ar-EG" : "en-US";
-    recognition.interimResults = true;
-    recognition.continuous = false;
-    recognition.maxAlternatives = 1;
-    recognition.onstart = () => setListening(true);
-    recognition.onresult = (event: any) => {
-      let transcript = "";
-      for (let i = 0; i < event.results.length; i++) transcript += event.results[i][0].transcript;
-      setInput(transcript);
-    };
-    recognition.onerror = (event: any) => {
-      if (event.error === "not-allowed" || event.error === "permission-denied") setMicError(copy.micPermissionDenied);
-      else if (event.error === "no-speech") setMicError(copy.micNoSpeech);
-      else setMicError(copy.transcriptionFailed);
-    };
-    recognition.onend = () => {
+    try {
+      const recognition = new SpeechRecognitionCtor();
+      // Shared Arabic and Social Studies subjects remain Arabic even if the
+      // student has selected the English UI.
+      recognition.lang = isAr || state?.forceArabic ? "ar-EG" : "en-US";
+      recognition.interimResults = true;
+      recognition.continuous = false;
+      recognition.maxAlternatives = 1;
+      recognition.onstart = () => setListening(true);
+      recognition.onresult = (event: any) => {
+        let transcript = "";
+        for (let i = 0; i < event.results.length; i++) transcript += event.results[i][0].transcript;
+        if (transcript.trim()) setInput(transcript.trim());
+      };
+      recognition.onerror = (event: any) => {
+        if (event.error === "not-allowed" || event.error === "permission-denied") setMicError(copy.micPermissionDenied);
+        else if (event.error === "no-speech") setMicError(copy.micNoSpeech);
+        else if (event.error === "audio-capture") setMicError(copy.micUnavailable);
+        else if (event.error === "network") setMicError(copy.micNetworkError);
+        else if (event.error === "service-not-allowed" || event.error === "language-not-supported") setMicError(copy.micServiceUnavailable);
+        else setMicError(copy.transcriptionFailed);
+      };
+      recognition.onend = () => {
+        recognitionInstance.current = null;
+        setListening(false);
+        if (micTimeoutRef.current) { clearTimeout(micTimeoutRef.current); micTimeoutRef.current = null; }
+      };
+      recognitionInstance.current = recognition;
+      recognition.start();
+      micTimeoutRef.current = setTimeout(() => {
+        try { recognition.stop(); } catch { recognitionInstance.current = null; setListening(false); }
+      }, 30_000);
+    } catch {
+      recognitionInstance.current = null;
       setListening(false);
-      if (micTimeoutRef.current) { clearTimeout(micTimeoutRef.current); micTimeoutRef.current = null; }
-    };
-    recognitionInstance.current = recognition;
-    recognition.start();
-    micTimeoutRef.current = setTimeout(() => recognition.stop(), 30_000);
+      setMicError(copy.micServiceUnavailable);
+    }
   }
 
   // Honest, stage-derived waiting copy — never a fake percentage. The
