@@ -9,17 +9,24 @@ export function StudentDashboardShortcut({ locale }: { locale: Locale }) {
   const { isLoaded, isSignedIn } = useAuth();
   const { user, loading } = useCurrentUser();
 
-  if (!isLoaded || !isSignedIn || loading || !["STUDENT", "PARENT"].includes(user?.role ?? "")) return null;
+  if (!isLoaded || !isSignedIn || loading || !["STUDENT", "PARENT", "ADMIN", "SUPER_ADMIN"].includes(user?.role ?? "")) return null;
 
   const isParent = user?.role === "PARENT";
+  const isAdmin = user?.role === "ADMIN" || user?.role === "SUPER_ADMIN";
+  const dashboardPath = isAdmin ? "admin" : isParent ? "parent" : "dashboard";
+  const dashboardLabel = isAdmin
+    ? locale === "ar" ? "لوحة الإدارة" : "Admin dashboard"
+    : isParent
+      ? locale === "ar" ? "لوحة ولي الأمر" : "Parent dashboard"
+      : locale === "ar" ? "لوحة التحكم" : "Dashboard";
 
   return (
     <Link
-      href={`/${locale}/${isParent ? "parent" : "dashboard"}`}
-      aria-label={isParent ? (locale === "ar" ? "الذهاب إلى لوحة ولي الأمر" : "Go to parent dashboard") : (locale === "ar" ? "الذهاب إلى لوحة التحكم" : "Go to dashboard")}
+      href={`/${locale}/${dashboardPath}`}
+      aria-label={locale === "ar" ? `الذهاب إلى ${dashboardLabel}` : `Go to ${dashboardLabel}`}
       className="fixed bottom-4 end-4 z-50 inline-flex min-h-12 items-center justify-center rounded-full bg-sf-purple-600 px-5 text-sm font-semibold text-white shadow-lg transition-colors hover:bg-sf-purple-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sf-purple-600"
     >
-      {isParent ? (locale === "ar" ? "لوحة ولي الأمر" : "Parent dashboard") : (locale === "ar" ? "لوحة التحكم" : "Dashboard")}
+      {dashboardLabel}
     </Link>
   );
 }
