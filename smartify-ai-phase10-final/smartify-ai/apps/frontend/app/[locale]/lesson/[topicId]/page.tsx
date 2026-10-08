@@ -177,7 +177,7 @@ export default function InteractiveLessonPage() {
     const existing = audioElements.current[index];
     if (cachedUrl && existing) {
       existing.currentTime = 0;
-      try { await existing.play(); } catch { setPlayback((p) => ({ ...p, [index]: "idle" })); }
+      try { await existing.play(); } catch { setPlayback((p) => ({ ...p, [index]: "error" })); }
       return;
     }
     if (!conversationId) { setPlayback((p) => ({ ...p, [index]: "error" })); return; }
@@ -192,13 +192,19 @@ export default function InteractiveLessonPage() {
       audio.onended = () => setPlayback((p) => ({ ...p, [index]: "idle" }));
       audio.onerror = () => setPlayback((p) => ({ ...p, [index]: "error" }));
       audioElements.current[index] = audio;
-      try { await audio.play(); } catch { setPlayback((p) => ({ ...p, [index]: "idle" })); }
+      // The TTS request finishes asynchronously, so browsers may reject
+      // autoplay after the original user gesture has expired. Keep the
+      // fetched audio and expose a direct Resume click instead of silently
+      // returning to Idle and making playback appear unavailable.
+      try { await audio.play(); } catch { setPlayback((p) => ({ ...p, [index]: "paused" })); }
     } catch {
       setPlayback((p) => ({ ...p, [index]: "error" }));
     }
   }
   function pauseTurn(index: number) { audioElements.current[index]?.pause(); }
-  function resumeTurn(index: number) { audioElements.current[index]?.play().catch(() => undefined); }
+  function resumeTurn(index: number) {
+    audioElements.current[index]?.play().catch(() => setPlayback((p) => ({ ...p, [index]: "error" })));
+  }
   function stopTurn(index: number) {
     const audio = audioElements.current[index];
     if (audio) { audio.pause(); audio.currentTime = 0; }
