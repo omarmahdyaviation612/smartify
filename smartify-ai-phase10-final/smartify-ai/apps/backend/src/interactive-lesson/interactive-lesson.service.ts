@@ -105,12 +105,18 @@ export class InteractiveLessonService {
 
   /**
    * A Topic with NO steps yet whose Unit is already grounded but whose own
-   * assignment is not READY_CURRENT_NON_EMPTY can never be generated — refuse
-   * up front (no grounding preparation, no lock, no provider call). A Topic
-   * whose Unit is not grounded yet keeps the existing preparation flow.
+   * persisted assignment is BLOCKED/STALE/EMPTY is refused before any provider
+   * call. A missing assignment is allowed through to the deterministic,
+   * no-provider preparation in LessonDraftGeneratorService. A Topic whose Unit
+   * is not grounded yet keeps the existing preparation flow.
    */
   private assertGenerationPossible(topic: any) {
     if (!topic.unit?.groundingNotesJson) return;
+    // A missing per-Topic assignment is repairable by the deterministic,
+    // no-provider preparation step in LessonDraftGeneratorService. Let the
+    // initial state request reach the normal preparation UI; blocked, stale,
+    // or empty persisted decisions remain fail-closed.
+    if (!topic.groundingAssignment) return;
     if (evaluateTopicGroundingGate(topic).state === "READY") return;
     this.logger.warn(`LESSON_GENERATION_REFUSED topicId=${topic.id} reason=grounding-unavailable`);
     throw new NotFoundException(LESSON_NOT_AVAILABLE);

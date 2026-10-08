@@ -107,7 +107,7 @@ describe("LessonDraftGeneratorService.ensureTopicHasLesson — budget attributio
       ensureUnitGrounded: jest.fn().mockResolvedValue({ used: false }),
     };
 
-    const service = new LessonDraftGeneratorService(prisma as any, providerFactory as any, contextBuilder as any, usageService as any, publisher as any, unitGrounding as any);
+    const service = new LessonDraftGeneratorService(prisma as any, providerFactory as any, contextBuilder as any, usageService as any, publisher as any, unitGrounding as any, { assignGroundingForTopic: jest.fn() } as any);
 
     return { service, prisma, providerFactory, usageService, publisher, unitGrounding, generateSpy };
   }

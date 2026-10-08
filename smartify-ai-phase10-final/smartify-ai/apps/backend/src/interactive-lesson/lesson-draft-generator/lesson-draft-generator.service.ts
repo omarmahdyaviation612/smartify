@@ -13,6 +13,7 @@ import { resolveEffectiveSourceFile } from "../unit-grounding/unit-effective-sou
 import { evaluateTopicGroundingGate, TOPIC_GATE_INCLUDE, UNIT_GATE_SELECT, type TopicContentProvenance, type TopicGroundingGate } from "../../ai/context/topic-content-provenance.util";
 import { checkGroundingConsistency } from "../../ai/context/grounding-consistency-validator";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
+import { TopicGroundingAssignmentService } from "../../ai/context/topic-grounding-assignment.service";
 
 // Bumped only when buildAutoLessonGenerationPrompt's grounded-generation
 // instructions change in a way that would make previously-generated
@@ -80,6 +81,7 @@ export class LessonDraftGeneratorService {
     private readonly usageService: AIUsageService,
     private readonly publisher: LessonPublishService,
     private readonly unitGrounding: UnitGroundingService,
+    private readonly topicGroundingAssignments: TopicGroundingAssignmentService,
   ) {}
 
   /**
@@ -465,6 +467,12 @@ export class LessonDraftGeneratorService {
       await this.unitGrounding.ensureUnitGrounded(topic.unitId, CONTENT_AUTHORING_ACTOR_ID);
     }
 
+    // Repair the common publish-before-assignment case before grounded lesson
+    // authoring. This is deterministic and makes no provider/API call. Do not
+    // rewrite persisted BLOCKED/STALE/EMPTY decisions here: those still need
+    // the reviewed remediation path and must remain unavailable to students.
+    await this.prepareMissingTopicGroundingAssignment(topicId);
+
     // Legacy direct callers/tests may provide the pre-Phase-3 grounding stub;
     // the production service is prepared by InteractiveLessonService first.
     if (typeof (this.unitGrounding as any).prepareNextGroundingChunk !== "function") {
@@ -518,6 +526,19 @@ export class LessonDraftGeneratorService {
     const topic = await this.prisma.client.topic.findUnique({ where: { id: topicId }, select: { unitId: true } });
     if (!topic) throw new NotFoundException(`Topic ${topicId} not found.`);
     return this.unitGrounding.prepareNextGroundingChunk(topic.unitId, requestingActorId);
+  }
+
+  private async prepareMissingTopicGroundingAssignment(topicId: string) {
+    const topic = await this.prisma.client.topic.findUnique({
+      where: { id: topicId },
+      include: { ...TOPIC_GATE_INCLUDE, unit: { select: UNIT_GATE_SELECT } },
+    });
+    if (!topic?.unit?.groundingNotesJson || topic.groundingAssignment) return;
+
+    const result = await this.topicGroundingAssignments.assignGroundingForTopic(topicId);
+    if (result.outcome === "UNRESOLVED") {
+      this.logger.warn(`TOPIC_GROUNDING_LAZY_ASSIGNMENT_UNRESOLVED topicId=${topicId}`);
+    }
   }
 
   async getTopicGroundingPreparationStatus(topicId: string) {

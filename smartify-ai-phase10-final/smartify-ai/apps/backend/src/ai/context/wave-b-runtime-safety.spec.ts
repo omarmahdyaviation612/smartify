@@ -189,7 +189,7 @@ describe("D/F/G/I — lesson generation", () => {
     } as any;
     const usage = { assertWithinBudget: jest.fn().mockResolvedValue(undefined), estimateMaxChatCostUsd: jest.fn().mockResolvedValue(0.01), reserveBudget: jest.fn().mockResolvedValue({ ok: true, reservationId: "r" }), reconcileBudget: jest.fn().mockResolvedValue(undefined), releaseBudget: jest.fn().mockResolvedValue(undefined) };
     const providerFactory = { getActiveProvider: jest.fn().mockResolvedValue({ provider: { generate }, providerKey: "openai", model: "gpt-4o-mini" }), getCostRates: jest.fn().mockResolvedValue({ costPerInputToken: 0, costPerOutputToken: 0 }) };
-    const service = new LessonDraftGeneratorService(prisma, providerFactory as any, { buildAutoLessonGenerationPrompt: jest.fn().mockReturnValue("p") } as any, usage as any, { autoPublishIntoTopic: jest.fn() } as any, {} as any);
+    const service = new LessonDraftGeneratorService(prisma, providerFactory as any, { buildAutoLessonGenerationPrompt: jest.fn().mockReturnValue("p") } as any, usage as any, { autoPublishIntoTopic: jest.fn() } as any, {} as any, { assignGroundingForTopic: jest.fn() } as any);
     return { service, generate, usage, prisma };
   }
   it.each(["BLOCKED", "STALE", "EMPTY", "MISSING"] as const)("D/F/G: generateAutoDraft for a %s Topic of a mapped textbook refuses before any budget/provider call", async (state) => {
