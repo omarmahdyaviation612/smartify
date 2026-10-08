@@ -53,6 +53,8 @@ export interface QuestionDraftValidationContext {
    * approve() time, when required human-reviewed content must be present.
    */
   requireReviewedContent: boolean;
+  /** Lazy-published question batches need Arabic choice labels for Arabic-first subjects. */
+  requireArabicOptions?: boolean;
 }
 
 export interface QuestionDraftValidationResult {
@@ -105,6 +107,10 @@ export function validateQuestionDraft(raw: unknown, context: QuestionDraftValida
     }
   }
 
+  if (context.requireArabicOptions && (typeof draft.promptAr !== "string" || !/\p{Script=Arabic}/u.test(draft.promptAr))) {
+    errors.push("Automatically published question batches must include a real Arabic promptAr.");
+  }
+
   if (context.requireReviewedContent) {
     if (!isNonEmptyString(draft.promptAr)) {
       errors.push("Missing or empty human-reviewed promptAr — required bilingual prompts.");
@@ -124,13 +130,13 @@ export function validateQuestionDraft(raw: unknown, context: QuestionDraftValida
   // and piling on fabricated option/answer errors for it would obscure the
   // real problem rather than "fail safely".
   if (type && MVP_READY_TYPES.has(type)) {
-    validateOptionsAndAnswer(draft, type, errors);
+    validateOptionsAndAnswer(draft, type, errors, context.requireArabicOptions === true);
   }
 
   return { valid: errors.length === 0, errors };
 }
 
-function validateOptionsAndAnswer(draft: Record<string, unknown>, type: string, errors: string[]) {
+function validateOptionsAndAnswer(draft: Record<string, unknown>, type: string, errors: string[], requireArabicOptions: boolean) {
   const rawOptions = draft.optionsJson;
   if (!Array.isArray(rawOptions)) {
     errors.push("optionsJson must be an array for MULTIPLE_CHOICE/TRUE_FALSE.");
@@ -141,6 +147,18 @@ function validateOptionsAndAnswer(draft: Record<string, unknown>, type: string, 
     return;
   }
   const options = rawOptions as string[];
+
+  const rawOptionsAr = draft.optionsAr;
+  if (requireArabicOptions && !Array.isArray(rawOptionsAr)) {
+    errors.push("optionsAr must be an Arabic string array for automatically published question batches.");
+  } else if (rawOptionsAr !== undefined && rawOptionsAr !== null) {
+    if (!Array.isArray(rawOptionsAr) || !rawOptionsAr.every((option) => isNonEmptyString(option) &&
+      (/\p{Script=Arabic}/u.test(option) || /^[\d٠-٩۰-۹\s.,%+\-]+$/u.test(option)))) {
+      errors.push("All optionsAr entries must be non-empty strings.");
+    } else if (rawOptionsAr.length !== options.length) {
+      errors.push(`optionsAr must have the same number of entries as optionsJson (${options.length}).`);
+    }
+  }
 
   const seen = new Set<string>();
   const duplicates = options.filter((o) => (seen.has(o) ? true : (seen.add(o), false)));

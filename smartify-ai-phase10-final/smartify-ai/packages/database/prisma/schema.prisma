@@ -830,6 +830,7 @@ model Question {
   promptEn          String       @db.Text
   promptAr          String?      @db.Text
   optionsJson       Json? // choices for MCQ/matching
+  optionsAr         Json? // Arabic display labels in the same order; answers still grade against optionsJson
   correctAnswerJson Json
   explanationEn     String?      @db.Text
   explanationAr     String?      @db.Text
@@ -888,6 +889,7 @@ model QuestionDraft {
   // the draft. Never auto-trusted AI output.
   promptAr          String?      @db.Text
   optionsJson       Json? // choices for MULTIPLE_CHOICE/TRUE_FALSE
+  optionsAr         Json? // Arabic display labels in the same order; answers still grade against optionsJson
   correctAnswerJson Json
   explanationEn     String?      @db.Text
   explanationAr     String?      @db.Text

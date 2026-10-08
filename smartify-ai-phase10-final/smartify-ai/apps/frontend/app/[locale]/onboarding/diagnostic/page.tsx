@@ -19,6 +19,8 @@ interface DiagnosticQuestion {
   promptEn: string;
   promptAr: string | null;
   optionsJson: string[] | null;
+  optionsAr: string[] | null;
+  forceArabicOptions: boolean;
   isPlaceholder: boolean;
 }
 
@@ -122,7 +124,7 @@ export default function OnboardingDiagnosticPage() {
                     {i + 1}. {isAr && q.promptAr ? q.promptAr : q.promptEn}
                   </p>
                   <div className="mt-4 space-y-2">
-                    {(q.optionsJson ?? []).map((opt) => (
+                    {(q.optionsJson ?? []).map((opt, oi) => (
                       <label key={opt} className="flex items-center gap-3 text-sm text-neutral-700">
                         <input
                           type="radio"
@@ -131,7 +133,7 @@ export default function OnboardingDiagnosticPage() {
                           checked={answers[q.id] === opt}
                           onChange={() => setAnswers((prev) => ({ ...prev, [q.id]: opt }))}
                         />
-                        {getQuestionOptionLabel(opt, locale)}
+                        {(isAr || q.forceArabicOptions) && q.optionsAr?.[oi] ? q.optionsAr[oi] : getQuestionOptionLabel(opt, locale)}
                       </label>
                     ))}
                   </div>

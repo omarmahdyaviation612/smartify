@@ -58,6 +58,7 @@ interface LessonCheckQuestion {
   promptEn: string;
   promptAr: string | null;
   optionsJson: string[] | null;
+  optionsAr: string[] | null;
 }
 
 // This page teaches ONE lesson step at a time — the database/lesson map
@@ -646,7 +647,7 @@ export default function InteractiveLessonPage() {
                           {qi + 1}. {(isAr || state?.forceArabic) && q.promptAr ? q.promptAr : q.promptEn}
                         </legend>
                         <div className="space-y-1">
-                          {(q.optionsJson ?? []).map((option) => (
+                          {(q.optionsJson ?? []).map((option, oi) => (
                             <label key={option} className="flex items-center gap-2 text-sm text-neutral-600">
                               <input
                                 type="radio"
@@ -655,7 +656,7 @@ export default function InteractiveLessonPage() {
                                 checked={checkAnswers[q.id] === option}
                                 onChange={() => setCheckAnswers((prev) => ({ ...prev, [q.id]: option }))}
                               />
-                              {option}
+                              {(isAr || state?.forceArabic) && q.optionsAr?.[oi] ? q.optionsAr[oi] : option}
                             </label>
                           ))}
                         </div>

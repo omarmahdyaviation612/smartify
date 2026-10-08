@@ -12,6 +12,7 @@ import { evaluateTopicGroundingGate, isActiveCurrentQuestion, questionServabilit
 import { checkGroundingConsistency } from "../../ai/context/grounding-consistency-validator";
 import { checkArithmeticConsistency, type ArithmeticResult } from "./arithmetic-consistency";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
+import { hasArabicQuestionContent, isArabicOnlySubject } from "../../interactive-lesson/lesson-language.util";
 
 const AUTO_BATCH_MAX_ATTEMPTS = 2;
 
@@ -467,7 +468,7 @@ export class QuestionDraftGeneratorService {
       rawQuestions.forEach((q, index) => {
         const validation = validateQuestionDraft(
           { ...(q as Record<string, unknown>), topicId },
-          { topicExists: true, topicIsPlaceholder: false, requireReviewedContent: true },
+          { topicExists: true, topicIsPlaceholder: false, requireReviewedContent: true, requireArabicOptions: true },
         );
         if (!validation.valid) {
           perItemErrors.push(`questions[${index}]: ${validation.errors.join("; ")}`);
@@ -515,6 +516,7 @@ export class QuestionDraftGeneratorService {
                 promptEn: q.promptEn as string,
                 promptAr: q.promptAr as string,
                 optionsJson: (q.optionsJson ?? null) as any,
+                optionsAr: (q.optionsAr ?? null) as any,
                 correctAnswerJson: q.correctAnswerJson as any,
                 explanationEn: (q.explanationEn as string | undefined) ?? null,
                 explanationAr: (q.explanationAr as string | undefined) ?? null,
@@ -591,15 +593,20 @@ export class QuestionDraftGeneratorService {
     // topped up with current ones rather than leaving the student with none.
     const topic = await this.prisma.client.topic.findUnique({
       where: { id: topicId },
-      select: { id: true, ...TOPIC_GATE_INCLUDE, unit: { select: UNIT_GATE_SELECT } },
+      select: { id: true, ...TOPIC_GATE_INCLUDE, unit: { select: { ...UNIT_GATE_SELECT, subject: { select: { nameEn: true, nameAr: true } } } } },
     });
     if (!topic) return;
     if (evaluateTopicGroundingGate(topic as any).state !== "READY") {
       this.logger.log(`QUESTION_POOL_TOPUP_SKIPPED topicId=${topicId} reason=grounding-unavailable`);
       return;
     }
-    const pool = await this.prisma.client.question.findMany({ where: { topicId, isPlaceholder: false }, select: { topicId: true, isPlaceholder: true, ...QUESTION_PROVENANCE_SELECT } });
-    const existing = pool.filter(questionServabilityByTopic([topic as any], pool)).length;
+    const pool = await this.prisma.client.question.findMany({ where: { topicId, isPlaceholder: false }, select: { topicId: true, isPlaceholder: true, promptAr: true, optionsJson: true, optionsAr: true, ...QUESTION_PROVENANCE_SELECT } });
+    const subjectRequiresArabicOptions = isArabicOnlySubject(topic.unit.subject.nameEn, topic.unit.subject.nameAr);
+    const isServable = questionServabilityByTopic([topic as any], pool);
+    const existing = pool.filter((question) =>
+      isServable(question as any) &&
+      (!subjectRequiresArabicOptions || hasArabicQuestionContent(question.promptAr, question.optionsAr, question.optionsJson)),
+    ).length;
     if (existing >= targetCount) return;
 
     try {

@@ -9,6 +9,7 @@ import { TrialService } from "../trial/trial.service";
 import { AccessProfile, resolveSubjectAccess } from "../common/subject-access";
 import { questionServabilityByTopic, QUESTION_PROVENANCE_SELECT, TOPIC_GATE_INCLUDE, UNIT_GATE_SELECT } from "../ai/context/topic-content-provenance.util";
 import { ResultNotificationService } from "../notifications/result-notification.service";
+import { hasArabicQuestionContent, isArabicOnlySubject } from "../interactive-lesson/lesson-language.util";
 
 @Injectable()
 export class PracticeService {
@@ -85,6 +86,8 @@ export class PracticeService {
     // their free lesson was on) — an undifferentiated "any topic in this
     // subject" request (topicId undefined) is never trial-bypassable.
     const access = await this.assertSubjectAccessible(profile, subjectId, { topicId });
+    const useArabicOptions = isArabicOnlySubject(access.subject.nameEn, access.subject.nameAr) ||
+      isArabicOnlySubject(access.subject.sharedContentSubject?.nameEn, access.subject.sharedContentSubject?.nameAr);
 
     const contentSubjectId = access?.contentSubjectId ?? subjectId;
     const topicWhere = topicId ? { id: topicId, unit: { subjectId: contentSubjectId } } : { unit: { subjectId: contentSubjectId } };
@@ -122,6 +125,7 @@ export class PracticeService {
         promptEn: true,
         promptAr: true,
         optionsJson: true,
+        optionsAr: true,
         isPlaceholder: true,
         ...QUESTION_PROVENANCE_SELECT,
       },
@@ -132,7 +136,10 @@ export class PracticeService {
     // to practice yet" response), never its old Questions; a Topic with any
     // CURRENT Question never mixes in its LEGACY ones.
     const isServable = questionServabilityByTopic(topics as any, candidateQuestions);
-    const allQuestions = candidateQuestions.filter(isServable).map(({ groundingSourceFingerprint: _s, groundingAssignmentFingerprint: _a, retiredAt: _r, ...q }) => q);
+    const allQuestions = candidateQuestions
+      .filter(isServable)
+      .filter((q) => !useArabicOptions || hasArabicQuestionContent(q.promptAr, q.optionsAr, q.optionsJson))
+      .map(({ groundingSourceFingerprint: _s, groundingAssignmentFingerprint: _a, retiredAt: _r, ...q }) => q);
 
     // Weighted random sample without replacement, honoring difficulty weights loosely.
     const byDifficulty: Record<string, typeof allQuestions> = { EASY: [], MEDIUM: [], HARD: [] };
@@ -157,7 +164,7 @@ export class PracticeService {
       selected.push(fallbackPool[Math.floor(Math.random() * fallbackPool.length)]);
     }
 
-    return { averageAccuracy: avgAccuracy, questions: selected };
+    return { averageAccuracy: avgAccuracy, forceArabicOptions: useArabicOptions, questions: selected };
   }
 
   async submitPractice(userId: string, answers: Array<{ questionId: string; answer: unknown }>, idempotencyKey: string = randomUUID()) {

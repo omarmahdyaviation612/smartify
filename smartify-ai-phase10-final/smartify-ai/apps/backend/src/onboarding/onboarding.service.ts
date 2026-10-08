@@ -3,6 +3,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { QuestionDraftGeneratorService } from "../question-bank/question-draft-generator/question-draft-generator.service";
 import { questionServabilityByTopic, QUESTION_PROVENANCE_SELECT, TOPIC_GATE_INCLUDE } from "../ai/context/topic-content-provenance.util";
 import type { StudentOnboardingInput } from "@smartify/validation";
+import { hasArabicQuestionContent, isArabicOnlySubject } from "../interactive-lesson/lesson-language.util";
 
 @Injectable()
 export class OnboardingService {
@@ -167,6 +168,7 @@ export class OnboardingService {
         promptEn: true,
         promptAr: true,
         optionsJson: true,
+        optionsAr: true,
         isPlaceholder: true,
         ...QUESTION_PROVENANCE_SELECT,
         topic: { select: { unit: { select: { subject: { select: { id: true, nameEn: true, nameAr: true } } } } } },
@@ -176,7 +178,11 @@ export class OnboardingService {
       studentSubjects.flatMap((ss) => ss.subject.units.flatMap((u) => u.topics.map((t) => ({ ...t, unit: u })))) as any,
       candidates,
     );
-    const questions = candidates.filter(isServable).slice(0, 10);
+    const questions = candidates
+      .filter(isServable)
+      .filter((q) => !isArabicOnlySubject(q.topic.unit.subject.nameEn, q.topic.unit.subject.nameAr) ||
+        hasArabicQuestionContent(q.promptAr, q.optionsAr, q.optionsJson))
+      .slice(0, 10);
 
     // Correct answers are intentionally omitted from this response.
     return questions.map((q) => ({
@@ -189,6 +195,8 @@ export class OnboardingService {
       promptEn: q.promptEn,
       promptAr: q.promptAr,
       optionsJson: q.optionsJson,
+      optionsAr: q.optionsAr,
+      forceArabicOptions: isArabicOnlySubject(q.topic.unit.subject.nameEn, q.topic.unit.subject.nameAr),
       isPlaceholder: q.isPlaceholder,
     }));
   }

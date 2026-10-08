@@ -28,6 +28,8 @@ export interface LessonTeachingContext {
   studentFirstName: string;
   age: number;
   preferredLang: "ar" | "en";
+  /** Arabic-first curriculum subjects must stay in Arabic even if a student types English. */
+  forcePreferredLanguage?: boolean;
   subjectNameEn: string;
   lessonTitleEn: string;
   currentStep: LessonStepInfo;
@@ -307,7 +309,9 @@ export class AIContextBuilderService {
    */
   buildLessonTeachingPrompt(ctx: LessonTeachingContext): string {
     const languageInstruction =
-      ctx.preferredLang === "ar"
+      ctx.forcePreferredLanguage && ctx.preferredLang === "ar"
+        ? "Always speak in warm, simple, child-friendly Egyptian Arabic (عامية مصرية بسيطة وودودة), suitable for reading aloud. This subject is always taught in Arabic, even if the student writes in English. Keep correct educational terms clear and do not switch languages."
+        : ctx.preferredLang === "ar"
         ? "Speak in warm, simple, child-friendly Egyptian colloquial Arabic (عامية مصرية بسيطة وودودة), suitable for reading aloud. Keep correct mathematical/educational terms clear even while using colloquial phrasing — do not sacrifice correctness for casualness. If the student writes in English, answer in English instead."
         : "Speak in warm, simple, encouraging English suitable for a young child and for reading aloud. If the student writes in Arabic, answer in Arabic using gentle Egyptian colloquial Arabic instead.";
 
@@ -812,12 +816,13 @@ export class AIContextBuilderService {
       `TASK: draft ${count} DIFFERENT practice questions covering this topic, each in BOTH English and Arabic. Spread difficulty across the set — roughly a third EASY, a third MEDIUM, a third HARD (adjust by one if ${count} doesn't divide evenly). Vary what each question assesses within the topic — never generate near-duplicate questions.`,
       "",
       "Respond with ONLY a single JSON object, no other text, in exactly this shape:",
-      '{"questions": [ {"type": "MULTIPLE_CHOICE" | "TRUE_FALSE", "difficulty": "EASY" | "MEDIUM" | "HARD", "promptEn": "...", "promptAr": "...", "optionsJson": ["...", "..."], "correctAnswerJson": "<must exactly equal one entry of optionsJson>", "explanationEn": "...", "explanationAr": "..."}, ... ]}',
+      '{"questions": [ {"type": "MULTIPLE_CHOICE" | "TRUE_FALSE", "difficulty": "EASY" | "MEDIUM" | "HARD", "promptEn": "...", "promptAr": "...", "optionsJson": ["...", "..."], "optionsAr": ["...", "..."], "correctAnswerJson": "<must exactly equal one entry of optionsJson>", "explanationEn": "...", "explanationAr": "..."}, ... ]}',
       "",
       "RULES (each question):",
       '- "type" must be MULTIPLE_CHOICE or TRUE_FALSE only — no other type is supported by the current runtime.',
       '- MULTIPLE_CHOICE needs at least 3 distinct, non-empty options. TRUE_FALSE needs exactly 2 distinct options (e.g. "True"/"False" — Arabic options too if promptAr is the primary language for this student).',
       '- "correctAnswerJson" must be a plain string, character-for-character identical to exactly one entry in "optionsJson" — grading is exact-match with no normalization.',
+      '- "optionsAr" must contain a natural Arabic translation for every corresponding "optionsJson" choice, in exactly the same order and with the same number of entries. Keep "correctAnswerJson" in its original optionsJson form so grading remains stable.',
       '- "promptAr" and "explanationAr" must be real, natural Arabic — your own accurate translation/rendering of your own English content, never empty, never a transliteration.',
       '- "explanationEn"/"explanationAr" are shown to the student after they answer — briefly explain WHY the correct answer is correct.',
       "- Use original numbers/scenarios every time — never reuse a specific textbook exercise's wording or numbers.",

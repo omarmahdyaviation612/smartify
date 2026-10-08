@@ -12,6 +12,7 @@ export interface QuestionDraftReviewEdits {
   promptEn?: string;
   promptAr?: string;
   optionsJson?: string[];
+  optionsAr?: string[];
   correctAnswerJson?: unknown;
   explanationEn?: string;
   explanationAr?: string;
@@ -127,6 +128,7 @@ export class QuestionPublishService {
           promptEn: draft.promptEn,
           promptAr: draft.promptAr,
           optionsJson: draft.optionsJson as any,
+          optionsAr: draft.optionsAr as any,
           correctAnswerJson: draft.correctAnswerJson as any,
           explanationEn: draft.explanationEn,
           explanationAr: draft.explanationAr,
@@ -202,6 +204,7 @@ export async function installAutoQuestionDraft(tx: Prisma.TransactionClient, dra
       promptEn: draft.promptEn,
       promptAr: draft.promptAr,
       optionsJson: draft.optionsJson as any,
+      optionsAr: draft.optionsAr as any,
       correctAnswerJson: draft.correctAnswerJson as any,
       explanationEn: draft.explanationEn,
       explanationAr: draft.explanationAr,

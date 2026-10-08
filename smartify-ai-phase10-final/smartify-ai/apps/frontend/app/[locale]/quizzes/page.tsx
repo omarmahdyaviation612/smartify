@@ -29,6 +29,7 @@ interface Question {
   promptEn: string;
   promptAr: string | null;
   optionsJson: string[] | null;
+  optionsAr: string[] | null;
 }
 interface QuizResult {
   id: string;
@@ -46,6 +47,13 @@ interface QuizResult {
     explanationEn: string | null;
     explanationAr: string | null;
   }>;
+}
+
+function answerOptionLabel(question: Question | undefined, answer: unknown, forceArabic: boolean, locale: Locale) {
+  const index = question?.optionsJson?.indexOf(String(answer)) ?? -1;
+  return forceArabic && index >= 0 && question?.optionsAr?.[index]
+    ? question.optionsAr[index]
+    : getQuestionOptionLabel(String(answer), locale);
 }
 
 type QuizType = "topic_assessment" | "mock_exam";
@@ -74,6 +82,7 @@ export default function QuizzesPage() {
   const [notOnboarded, setNotOnboarded] = useState(false);
 
   const [questions, setQuestions] = useState<Question[] | null>(null);
+  const [forceArabicOptions, setForceArabicOptions] = useState(false);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [result, setResult] = useState<QuizResult | null>(null);
   const [assessmentMeta, setAssessmentMeta] = useState<{ requestedCount: number; returnedCount: number; isFullAssessment: boolean } | null>(null);
@@ -129,11 +138,12 @@ export default function QuizzesPage() {
     try {
     const query = new URLSearchParams({ subjectId, type: quizType });
     if (quizType === "topic_assessment") query.set("topicId", topicId);
-    const data = await apiFetch<{ questions: Question[]; requestedCount: number; returnedCount: number; isFullAssessment: boolean }>(
+    const data = await apiFetch<{ questions: Question[]; requestedCount: number; returnedCount: number; isFullAssessment: boolean; forceArabicOptions?: boolean }>(
       `/quizzes/questions?${query.toString()}`,
     );
     if (!data.questions.length) { setError(feedback.questionsUnavailable); return; }
     setQuestions(data.questions);
+    setForceArabicOptions(data.forceArabicOptions === true);
     setAssessmentMeta({ requestedCount: data.requestedCount, returnedCount: data.returnedCount, isFullAssessment: data.isFullAssessment });
     setAnswers({});
     setResult(null);
@@ -257,7 +267,7 @@ export default function QuizzesPage() {
                     {i + 1}. {isAr && q.promptAr ? q.promptAr : q.promptEn}
                   </p>
                   <div className="mt-4 space-y-2">
-                    {(q.optionsJson ?? []).map((opt) => (
+                    {(q.optionsJson ?? []).map((opt, oi) => (
                       <label key={opt} className="flex items-center gap-3 text-sm text-neutral-700">
                         <input
                           type="radio"
@@ -266,7 +276,7 @@ export default function QuizzesPage() {
                           checked={answers[q.id] === opt}
                           onChange={() => setAnswers((prev) => ({ ...prev, [q.id]: opt }))}
                         />
-                        {getQuestionOptionLabel(opt, locale)}
+                        {(isAr || forceArabicOptions) && q.optionsAr?.[oi] ? q.optionsAr[oi] : getQuestionOptionLabel(opt, locale)}
                       </label>
                     ))}
                   </div>
@@ -313,19 +323,21 @@ export default function QuizzesPage() {
                 </ul>
               </div>
 
-              {result.breakdown.map((b) => (
+              {result.breakdown.map((b) => {
+                const question = questions?.find((q) => q.id === b.questionId);
+                return (
                 <div key={b.questionId} className="rounded-sf-lg border border-neutral-200 bg-white p-6">
-                  <p className="font-medium text-navy-900">{b.promptEn}</p>
+                  <p className="font-medium text-navy-900">{(isAr || forceArabicOptions) && question?.promptAr ? question.promptAr : b.promptEn}</p>
                   <span
                     className={`mt-2 inline-block rounded-full px-3 py-1 text-xs font-medium ${
                       b.isCorrect ? "bg-success-100 text-success-500" : "bg-error-100 text-error-500"
                     }`}
                   >
-                    {b.isCorrect ? "✓" : "✗"} {copy.yourAnswer}: {getQuestionOptionLabel(String(b.yourAnswer), locale)}
+                    {b.isCorrect ? "✓" : "✗"} {copy.yourAnswer}: {answerOptionLabel(question, b.yourAnswer, forceArabicOptions, locale)}
                   </span>
                   {!b.isCorrect && (
                     <p className="mt-2 text-sm text-neutral-600">
-                      {copy.correctAnswer}: {getQuestionOptionLabel(String(b.correctAnswer), locale)}
+                      {copy.correctAnswer}: {answerOptionLabel(question, b.correctAnswer, forceArabicOptions, locale)}
                     </p>
                   )}
                   {getLocalizedExplanation(b.explanationEn, b.explanationAr, locale) && (
@@ -334,7 +346,8 @@ export default function QuizzesPage() {
                     </p>
                   )}
                 </div>
-              ))}
+                );
+              })}
 
               <SmartifyButton
                 variant="secondary"

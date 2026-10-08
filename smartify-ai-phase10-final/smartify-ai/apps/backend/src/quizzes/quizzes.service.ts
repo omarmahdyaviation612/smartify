@@ -9,6 +9,7 @@ import { TrialService } from "../trial/trial.service";
 import { AccessProfile, resolveSubjectAccess } from "../common/subject-access";
 import { questionServabilityByTopic, QUESTION_PROVENANCE_SELECT, TOPIC_GATE_INCLUDE, UNIT_GATE_SELECT } from "../ai/context/topic-content-provenance.util";
 import { ResultNotificationService } from "../notifications/result-notification.service";
+import { hasArabicQuestionContent, isArabicOnlySubject } from "../interactive-lesson/lesson-language.util";
 
 type QuizType = "quiz" | "topic_assessment" | "mock_exam" | "lesson_check";
 
@@ -90,6 +91,8 @@ export class QuizzesService {
     // mock_exam never carries a topicId, so it's never trial-bypassable —
     // assertSubjectAccessible's own topicId-required check enforces that.
     const access = await this.assertSubjectAccessible(profile, subjectId, topicId);
+    const useArabicOptions = isArabicOnlySubject(access.subject.nameEn, access.subject.nameAr) ||
+      isArabicOnlySubject(access.subject.sharedContentSubject?.nameEn, access.subject.sharedContentSubject?.nameAr);
 
     const contentSubjectId = access?.contentSubjectId ?? subjectId;
     const topicWhere = type === "mock_exam" ? { unit: { subjectId: contentSubjectId } } : { id: topicId, unit: { subjectId: contentSubjectId } };
@@ -114,6 +117,7 @@ export class QuizzesService {
         promptEn: true,
         promptAr: true,
         optionsJson: true,
+        optionsAr: true,
         isPlaceholder: true,
         ...QUESTION_PROVENANCE_SELECT,
       },
@@ -122,7 +126,10 @@ export class QuizzesService {
     // a BLOCKED Topic contributes no Questions to any quiz type, including a
     // whole-subject mock_exam, and no Topic mixes LEGACY with CURRENT.
     const isServable = questionServabilityByTopic(topics as any, candidates);
-    const eligible = candidates.filter(isServable).map(({ groundingSourceFingerprint: _s, groundingAssignmentFingerprint: _a, retiredAt: _r, ...q }) => q);
+    const eligible = candidates
+      .filter(isServable)
+      .filter((q) => !useArabicOptions || hasArabicQuestionContent(q.promptAr, q.optionsAr, q.optionsJson))
+      .map(({ groundingSourceFingerprint: _s, groundingAssignmentFingerprint: _a, retiredAt: _r, ...q }) => q);
 
     const questions = shuffleQuestionPool(eligible, rng).slice(0, requestedCount);
 
@@ -135,6 +142,7 @@ export class QuizzesService {
       availableCount: eligible.length,
       returnedCount: questions.length,
       isFullAssessment: questions.length === requestedCount,
+      forceArabicOptions: useArabicOptions,
     };
   }
 

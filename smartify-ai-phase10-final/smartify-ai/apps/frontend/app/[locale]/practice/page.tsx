@@ -31,6 +31,7 @@ interface Question {
   promptEn: string;
   promptAr: string | null;
   optionsJson: string[] | null;
+  optionsAr: string[] | null;
 }
 interface Feedback {
   questionId: string;
@@ -38,6 +39,13 @@ interface Feedback {
   correctAnswer: string;
   explanationEn: string | null;
   explanationAr: string | null;
+}
+
+function answerOptionLabel(question: Question | undefined, answer: unknown, forceArabic: boolean, locale: Locale) {
+  const index = question?.optionsJson?.indexOf(String(answer)) ?? -1;
+  return forceArabic && index >= 0 && question?.optionsAr?.[index]
+    ? question.optionsAr[index]
+    : getQuestionOptionLabel(String(answer), locale);
 }
 
 export default function PracticePage() {
@@ -63,6 +71,7 @@ export default function PracticePage() {
   const [notOnboarded, setNotOnboarded] = useState(false);
 
   const [questions, setQuestions] = useState<Question[] | null>(null);
+  const [forceArabicOptions, setForceArabicOptions] = useState(false);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [results, setResults] = useState<{ correctCount: number; total: number; feedback: Feedback[] } | null>(null);
   const [submissionKey, setSubmissionKey] = useState("");
@@ -113,9 +122,10 @@ export default function PracticePage() {
     setError(null);
     try {
     const query = topicId ? `subjectId=${subjectId}&topicId=${topicId}` : `subjectId=${subjectId}`;
-    const data = await apiFetch<{ questions: Question[] }>(`/practice/questions?${query}`);
+    const data = await apiFetch<{ questions: Question[]; forceArabicOptions?: boolean }>(`/practice/questions?${query}`);
     if (!data.questions.length) { setError(feedback.questionsUnavailable); return; }
     setQuestions(data.questions);
+    setForceArabicOptions(data.forceArabicOptions === true);
     setAnswers({});
     setResults(null);
     setSubmissionKey(window.crypto.randomUUID());
@@ -216,7 +226,7 @@ export default function PracticePage() {
                     {i + 1}. {isAr && q.promptAr ? q.promptAr : q.promptEn}
                   </p>
                   <div className="mt-4 space-y-2">
-                    {(q.optionsJson ?? []).map((opt) => (
+                    {(q.optionsJson ?? []).map((opt, oi) => (
                       <label key={opt} className="flex items-center gap-3 text-sm text-neutral-700">
                         <input
                           type="radio"
@@ -225,7 +235,7 @@ export default function PracticePage() {
                           checked={answers[q.id] === opt}
                           onChange={() => setAnswers((prev) => ({ ...prev, [q.id]: opt }))}
                         />
-                        {getQuestionOptionLabel(opt, locale)}
+                        {(isAr || forceArabicOptions) && q.optionsAr?.[oi] ? q.optionsAr[oi] : getQuestionOptionLabel(opt, locale)}
                       </label>
                     ))}
                   </div>
@@ -260,7 +270,7 @@ export default function PracticePage() {
                     </span>
                     {!f.isCorrect && (
                       <p className="mt-2 text-sm text-neutral-600">
-                        {copy.correctAnswer}: {getQuestionOptionLabel(String(f.correctAnswer), locale)}
+                        {copy.correctAnswer}: {answerOptionLabel(q, f.correctAnswer, forceArabicOptions, locale)}
                       </p>
                     )}
                     {getLocalizedExplanation(f.explanationEn, f.explanationAr, locale) && (
