@@ -1,5 +1,7 @@
+import { sharedSubjectKind } from "../common/shared-content-subject.util";
+
 export function isArabicOnlySubject(nameEn?: string | null, nameAr?: string | null): boolean {
-  return /arabic|social\s*studies/i.test(nameEn ?? "") || /اللغة العربية|الدراسات الاجتماعية/.test(nameAr ?? "");
+  return sharedSubjectKind(nameEn ?? "", nameAr) !== null;
 }
 
 export function hasArabicQuestionContent(promptAr: unknown, optionsAr: unknown, optionsJson: unknown): boolean {

@@ -264,7 +264,7 @@ export default function QuizzesPage() {
               {questions.map((q, i) => (
                 <div key={q.id} className="rounded-sf-lg border border-neutral-200 bg-white p-6">
                   <p className="font-medium text-navy-900">
-                    {i + 1}. {isAr && q.promptAr ? q.promptAr : q.promptEn}
+                    {i + 1}. {(isAr || forceArabicOptions) && q.promptAr ? q.promptAr : q.promptEn}
                   </p>
                   <div className="mt-4 space-y-2">
                     {(q.optionsJson ?? []).map((opt, oi) => (
@@ -340,9 +340,9 @@ export default function QuizzesPage() {
                       {copy.correctAnswer}: {answerOptionLabel(question, b.correctAnswer, forceArabicOptions, locale)}
                     </p>
                   )}
-                  {getLocalizedExplanation(b.explanationEn, b.explanationAr, locale) && (
+                  {getLocalizedExplanation(b.explanationEn, b.explanationAr, locale, forceArabicOptions) && (
                     <p className="mt-2 text-sm text-neutral-500">
-                      <strong>{copy.explanationLabel}:</strong> {getLocalizedExplanation(b.explanationEn, b.explanationAr, locale)}
+                      <strong>{copy.explanationLabel}:</strong> {getLocalizedExplanation(b.explanationEn, b.explanationAr, locale, forceArabicOptions)}
                     </p>
                   )}
                 </div>

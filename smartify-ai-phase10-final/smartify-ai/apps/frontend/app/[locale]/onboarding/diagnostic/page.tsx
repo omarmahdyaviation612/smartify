@@ -121,7 +121,7 @@ export default function OnboardingDiagnosticPage() {
                     {isAr ? q.subjectNameAr : q.subjectNameEn}
                   </span>
                   <p className="mt-2 font-medium text-navy-900">
-                    {i + 1}. {isAr && q.promptAr ? q.promptAr : q.promptEn}
+                    {i + 1}. {(isAr || q.forceArabicOptions) && q.promptAr ? q.promptAr : q.promptEn}
                   </p>
                   <div className="mt-4 space-y-2">
                     {(q.optionsJson ?? []).map((opt, oi) => (

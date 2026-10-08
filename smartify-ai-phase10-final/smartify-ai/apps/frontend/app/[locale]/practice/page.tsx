@@ -223,7 +223,7 @@ export default function PracticePage() {
               {questions.map((q, i) => (
                 <div key={q.id} className="rounded-sf-lg border border-neutral-200 bg-white p-6">
                   <p className="font-medium text-navy-900">
-                    {i + 1}. {isAr && q.promptAr ? q.promptAr : q.promptEn}
+                    {i + 1}. {(isAr || forceArabicOptions) && q.promptAr ? q.promptAr : q.promptEn}
                   </p>
                   <div className="mt-4 space-y-2">
                     {(q.optionsJson ?? []).map((opt, oi) => (
@@ -260,7 +260,7 @@ export default function PracticePage() {
                 const q = questions.find((qq) => qq.id === f.questionId);
                 return (
                   <div key={f.questionId} className="rounded-sf-lg border border-neutral-200 bg-white p-6">
-                    <p className="font-medium text-navy-900">{isAr && q?.promptAr ? q.promptAr : q?.promptEn}</p>
+                    <p className="font-medium text-navy-900">{(isAr || forceArabicOptions) && q?.promptAr ? q.promptAr : q?.promptEn}</p>
                     <span
                       className={`mt-2 inline-block rounded-full px-3 py-1 text-xs font-medium ${
                         f.isCorrect ? "bg-success-100 text-success-500" : "bg-error-100 text-error-500"
@@ -273,9 +273,9 @@ export default function PracticePage() {
                         {copy.correctAnswer}: {answerOptionLabel(q, f.correctAnswer, forceArabicOptions, locale)}
                       </p>
                     )}
-                    {getLocalizedExplanation(f.explanationEn, f.explanationAr, locale) && (
+                    {getLocalizedExplanation(f.explanationEn, f.explanationAr, locale, forceArabicOptions) && (
                       <p className="mt-2 text-sm text-neutral-500">
-                        <strong>{copy.explanationLabel}:</strong> {getLocalizedExplanation(f.explanationEn, f.explanationAr, locale)}
+                        <strong>{copy.explanationLabel}:</strong> {getLocalizedExplanation(f.explanationEn, f.explanationAr, locale, forceArabicOptions)}
                       </p>
                     )}
                   </div>
