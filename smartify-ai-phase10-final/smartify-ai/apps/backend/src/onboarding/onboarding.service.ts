@@ -4,6 +4,7 @@ import { QuestionDraftGeneratorService } from "../question-bank/question-draft-g
 import { questionServabilityByTopic, QUESTION_PROVENANCE_SELECT, TOPIC_GATE_INCLUDE } from "../ai/context/topic-content-provenance.util";
 import type { StudentOnboardingInput } from "@smartify/validation";
 import { hasArabicQuestionContent, isArabicOnlySubject } from "../interactive-lesson/lesson-language.util";
+import { DIAGNOSTIC_QUESTION_LIMIT, pickBalancedDiagnostic } from "./diagnostic-balance.util";
 
 @Injectable()
 export class OnboardingService {
@@ -178,11 +179,20 @@ export class OnboardingService {
       studentSubjects.flatMap((ss) => ss.subject.units.flatMap((u) => u.topics.map((t) => ({ ...t, unit: u })))) as any,
       candidates,
     );
-    const questions = candidates
+    const eligible = candidates
       .filter(isServable)
       .filter((q) => !isArabicOnlySubject(q.topic.unit.subject.nameEn, q.topic.unit.subject.nameAr) ||
-        hasArabicQuestionContent(q.promptAr, q.optionsAr, q.optionsJson))
-      .slice(0, 10);
+        hasArabicQuestionContent(q.promptAr, q.optionsAr, q.optionsJson));
+    // 2026-10-09: the 10 slots are shared fairly across the selected subjects. Before, the
+    // createdAt-ordered list was simply cut at 10, so the subject whose questions were created
+    // first filled every slot (a Grade 4 student with Arabic, Math, Science and English got
+    // 10 English questions and a score for English only).
+    const questions = pickBalancedDiagnostic(
+      eligible,
+      (q) => q.topic.unit.subject.id,
+      studentSubjects.map((ss) => ss.subject.id),
+      DIAGNOSTIC_QUESTION_LIMIT,
+    );
 
     // Correct answers are intentionally omitted from this response.
     return questions.map((q) => ({
