@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { Locale } from "@/content/marketing";
 import { StudentDashboardShortcut } from "@/components/StudentDashboardShortcut";
 import { ParentRouteGuard } from "@/components/ParentRouteGuard";
+import { StudentSupportShortcut } from "@/components/StudentSupportShortcut";
 
 export function generateStaticParams() {
   return [{ locale: "ar" }, { locale: "en" }];
@@ -26,6 +27,7 @@ export default async function LocaleLayout({
       <body className={`${fontClass} bg-[--sf-bg-page] text-[--sf-text-primary] antialiased`}>
         <ParentRouteGuard locale={locale}>{children}</ParentRouteGuard>
         <StudentDashboardShortcut locale={locale} />
+        <StudentSupportShortcut locale={locale} />
       </body>
     </html>
   );

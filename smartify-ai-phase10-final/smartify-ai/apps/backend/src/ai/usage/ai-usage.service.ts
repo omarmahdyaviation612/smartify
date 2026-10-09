@@ -16,7 +16,7 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 600;
 
 export type ReserveBudgetResult =
   | { ok: true; reservationId: string }
-  | { ok: false; reason: "misconfigured" | "global_exceeded" | "user_exceeded" | "platform_exceeded" };
+  | { ok: false; reason: "misconfigured" | "global_exceeded" | "user_exceeded" | "platform_exceeded" | "feature_exceeded" };
 
 /** Generic, student-safe message for BOTH platform-authoring failure cases (missing/invalid config, and cap exhausted) — never the per-user daily-limit wording, and never any internal budget/cost figure. */
 const PLATFORM_UNAVAILABLE_MESSAGE = "This lesson is temporarily unavailable. Please try again later.";
@@ -118,7 +118,7 @@ export class AIUsageService {
   async buildUsageRow(params: {
     userId: string;
     studentId: string;
-    subjectId: string;
+    subjectId?: string | null;
     providerKey: string;
     model: string;
     inputTokens: number;
@@ -136,7 +136,7 @@ export class AIUsageService {
   }): Promise<{
     userId: string;
     studentId: string;
-    subjectId: string;
+    subjectId: string | null;
     feature: string;
     provider: string;
     model: string;
@@ -151,7 +151,7 @@ export class AIUsageService {
     return {
       userId: params.userId,
       studentId: params.studentId,
-      subjectId: params.subjectId,
+      subjectId: params.subjectId ?? null,
       feature: params.feature ?? "tutor_chat",
       provider: params.providerKey,
       model: params.model,
@@ -371,7 +371,7 @@ export class AIUsageService {
     `;
   }
 
-  private async adjustBudgetCounters(userId: string, usageDate: Date, deltaUsd: number): Promise<void> {
+  private async adjustBudgetCounters(userId: string, usageDate: Date, deltaUsd: number, featureScope?: string | null, featureScopeKey?: string | null): Promise<void> {
     await this.adjustCounterRow("global", "global", usageDate, deltaUsd);
     // Mirrors reserveBudget()'s tiering exactly — a platform-attributed
     // reservation's reconcile/release adjusts the "platform" row, never
@@ -381,6 +381,7 @@ export class AIUsageService {
     } else {
       await this.adjustCounterRow("user", userId, usageDate, deltaUsd);
     }
+    if (featureScope && featureScopeKey) await this.adjustCounterRow(featureScope, featureScopeKey, usageDate, deltaUsd);
   }
 
   /**
@@ -401,13 +402,19 @@ export class AIUsageService {
    * On success, the caller MUST eventually call exactly one of
    * reconcileBudget()/releaseBudget() with the returned reservationId.
    */
-  async reserveBudget(userId: string, estimatedUsd: number): Promise<ReserveBudgetResult> {
+  async reserveBudget(userId: string, estimatedUsd: number, options?: { featureScope?: string; featureScopeKey?: string }): Promise<ReserveBudgetResult> {
     if (!Number.isFinite(estimatedUsd) || estimatedUsd <= 0) {
       throw new Error(`reserveBudget called with an invalid estimatedUsd: ${estimatedUsd}`);
     }
 
     const usageDate = this.startOfToday();
     const isPlatformAttribution = userId === CONTENT_AUTHORING_ACTOR_ID;
+    const featureConfigKey = options?.featureScope === "student_support" ? "student_support_daily_budget_usd" : null;
+    let featureLimit: number | null = null;
+    if (featureConfigKey) {
+      const config = await this.prisma.client.systemConfig.findUnique({ where: { key: featureConfigKey } });
+      featureLimit = parseBudgetUsd(config?.value);
+    }
 
     // Platform content-authoring hotfix (2026-09-25): only the limit this
     // specific call actually needs is fetched/validated — a missing
@@ -417,7 +424,7 @@ export class AIUsageService {
       this.getGlobalDailyBudgetUsd(),
       isPlatformAttribution ? this.getPlatformContentAuthoringDailyBudgetUsd() : this.getPerUserDailyBudgetUsd(),
     ]);
-    if (globalLimit === null || tierLimit === null) {
+    if (globalLimit === null || tierLimit === null || (featureConfigKey !== null && (featureLimit === null || !options?.featureScopeKey))) {
       this.logger.error(
         `AI budget misconfiguration: cannot reserve — "${GLOBAL_DAILY_AI_BUDGET_USD_KEY}" or "${isPlatformAttribution ? PLATFORM_CONTENT_AUTHORING_DAILY_AI_BUDGET_USD_KEY : PER_USER_DAILY_AI_BUDGET_USD_KEY}" is missing or invalid in SystemConfig.`,
       );
@@ -459,8 +466,18 @@ export class AIUsageService {
       return { ok: false, reason: "user_exceeded" };
     }
 
+    if (featureConfigKey && featureLimit !== null) {
+      const featureOk = await this.attemptReservation(options!.featureScope!, options!.featureScopeKey!, usageDate, estimatedUsd, featureLimit);
+      if (!featureOk) {
+        await this.adjustCounterRow(tierScope, tierKey, usageDate, -estimatedUsd);
+        await this.adjustCounterRow("global", "global", usageDate, -estimatedUsd);
+        this.logger.warn("Student support AI spend cap reached; escalation remains available.");
+        return { ok: false, reason: "feature_exceeded" };
+      }
+    }
+
     const reservation = await this.prisma.client.aIBudgetReservation.create({
-      data: { userId, usageDate, estimatedUsd, status: "RESERVED" },
+      data: { userId, usageDate, estimatedUsd, status: "RESERVED", featureScope: options?.featureScope ?? null, featureScopeKey: options?.featureScopeKey ?? null },
     });
 
     // Phase 9.4D, Objective 3: distinguishes "estimated reserved" from
@@ -487,21 +504,21 @@ export class AIUsageService {
   async reconcileBudget(reservationId: string, actualUsd: number): Promise<void> {
     const safeActualUsd = Number.isFinite(actualUsd) && actualUsd >= 0 ? actualUsd : 0;
 
-    const rows = await this.prisma.client.$queryRaw<Array<{ userId: string; usageDate: Date; estimatedUsd: unknown }>>`
+    const rows = await this.prisma.client.$queryRaw<Array<{ userId: string; usageDate: Date; estimatedUsd: unknown; featureScope: string | null; featureScopeKey: string | null }>>`
       UPDATE "AIBudgetReservation"
       SET "status" = 'RECONCILED', "reconciledUsd" = ${safeActualUsd}, "updatedAt" = now()
       WHERE "id" = ${reservationId} AND "status" = 'RESERVED'
-      RETURNING "userId", "usageDate", "estimatedUsd";
+      RETURNING "userId", "usageDate", "estimatedUsd", "featureScope", "featureScopeKey";
     `;
     if (rows.length === 0) {
       this.logger.debug(`reconcileBudget: reservation ${reservationId} was not RESERVED (already handled, or unknown) — no-op.`);
       return;
     }
 
-    const [{ userId, usageDate, estimatedUsd }] = rows;
+    const [{ userId, usageDate, estimatedUsd, featureScope, featureScopeKey }] = rows;
     const delta = safeActualUsd - Number(estimatedUsd);
     try {
-      await this.adjustBudgetCounters(userId, usageDate, delta);
+      await this.adjustBudgetCounters(userId, usageDate, delta, featureScope, featureScopeKey);
       // Phase 9.4D, Objective 3: the reservation row's status transition
       // (above) already succeeded by this point — this log marks the
       // accumulator delta as ALSO applied, so "reconciled" in the logs
@@ -532,20 +549,20 @@ export class AIUsageService {
    * reconciled reservation, is a safe no-op.
    */
   async releaseBudget(reservationId: string): Promise<void> {
-    const rows = await this.prisma.client.$queryRaw<Array<{ userId: string; usageDate: Date; estimatedUsd: unknown }>>`
+    const rows = await this.prisma.client.$queryRaw<Array<{ userId: string; usageDate: Date; estimatedUsd: unknown; featureScope: string | null; featureScopeKey: string | null }>>`
       UPDATE "AIBudgetReservation"
       SET "status" = 'RELEASED', "updatedAt" = now()
       WHERE "id" = ${reservationId} AND "status" = 'RESERVED'
-      RETURNING "userId", "usageDate", "estimatedUsd";
+      RETURNING "userId", "usageDate", "estimatedUsd", "featureScope", "featureScopeKey";
     `;
     if (rows.length === 0) {
       this.logger.debug(`releaseBudget: reservation ${reservationId} was not RESERVED (already handled, or unknown) — no-op.`);
       return;
     }
 
-    const [{ userId, usageDate, estimatedUsd }] = rows;
+    const [{ userId, usageDate, estimatedUsd, featureScope, featureScopeKey }] = rows;
     try {
-      await this.adjustBudgetCounters(userId, usageDate, -Number(estimatedUsd));
+      await this.adjustBudgetCounters(userId, usageDate, -Number(estimatedUsd), featureScope, featureScopeKey);
       // Phase 9.4D, Objective 3: distinguishes "released" (provider
       // failure, budget given back) from "reconciled" (provider
       // succeeded, budget corrected to actual) in the logs.

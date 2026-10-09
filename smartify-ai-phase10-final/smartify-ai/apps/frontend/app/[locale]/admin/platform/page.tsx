@@ -152,6 +152,7 @@ interface BudgetStatus {
   globalBudgetUsd: number | null;
   perUserBudgetUsd: number | null;
   platformContentAuthoringDailyBudgetUsd: number | null;
+  studentSupportDailyBudgetUsd: number | null;
   dailyQuestionsPerSubject: number;
   globalSpentTodayUsd: number;
   globalRemainingUsd: number | null;
@@ -172,6 +173,7 @@ function AISpendingControlsSection() {
   const [globalInput, setGlobalInput] = useState("");
   const [perUserInput, setPerUserInput] = useState("");
   const [platformInput, setPlatformInput] = useState("");
+  const [supportInput, setSupportInput] = useState("");
   const [dailyQuestionsInput, setDailyQuestionsInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -181,6 +183,7 @@ function AISpendingControlsSection() {
     setGlobalInput(s.globalBudgetUsd === null ? "" : String(s.globalBudgetUsd));
     setPerUserInput(s.perUserBudgetUsd === null ? "" : String(s.perUserBudgetUsd));
     setPlatformInput(s.platformContentAuthoringDailyBudgetUsd === null ? "" : String(s.platformContentAuthoringDailyBudgetUsd));
+    setSupportInput(s.studentSupportDailyBudgetUsd === null ? "" : String(s.studentSupportDailyBudgetUsd));
     setDailyQuestionsInput(String(s.dailyQuestionsPerSubject));
   }
 
@@ -194,6 +197,7 @@ function AISpendingControlsSection() {
     const globalDailyBudgetUsd = Number(globalInput);
     const perUserDailyBudgetUsd = Number(perUserInput);
     const platformContentAuthoringDailyBudgetUsd = Number(platformInput);
+    const studentSupportDailyBudgetUsd = Number(supportInput);
     const dailyQuestionsPerSubject = Number(dailyQuestionsInput);
 
     if (!Number.isFinite(globalDailyBudgetUsd) || globalDailyBudgetUsd <= 0) {
@@ -216,6 +220,7 @@ function AISpendingControlsSection() {
       setError("Platform content-authoring daily AI budget cannot exceed the global daily AI budget.");
       return;
     }
+    if (!Number.isFinite(studentSupportDailyBudgetUsd) || studentSupportDailyBudgetUsd <= 0 || studentSupportDailyBudgetUsd > globalDailyBudgetUsd) { setError("Student support AI budget must be positive and cannot exceed the global budget."); return; }
     if (!Number.isInteger(dailyQuestionsPerSubject) || dailyQuestionsPerSubject <= 0) {
       setError("Daily AI questions per subject must be a positive whole number.");
       return;
@@ -225,7 +230,7 @@ function AISpendingControlsSection() {
     try {
       const updated = await apiFetch<BudgetStatus>("/admin/ai-config/spending-controls", {
         method: "PATCH",
-        body: JSON.stringify({ globalDailyBudgetUsd, perUserDailyBudgetUsd, platformContentAuthoringDailyBudgetUsd, dailyQuestionsPerSubject }),
+        body: JSON.stringify({ globalDailyBudgetUsd, perUserDailyBudgetUsd, platformContentAuthoringDailyBudgetUsd, studentSupportDailyBudgetUsd, dailyQuestionsPerSubject }),
       });
       applyStatus(updated);
     } catch (err: any) {
@@ -284,6 +289,12 @@ function AISpendingControlsSection() {
             onChange={(e) => setPlatformInput(e.target.value)}
             className="w-full rounded-sf border border-neutral-300 px-3 py-2"
           />
+        </label>
+
+        <label className="block max-w-sm">
+          <span className="mb-1 block text-sm font-medium text-neutral-700">Student Technical Support Daily AI Budget (USD)</span>
+          <p className="mb-2 text-xs text-neutral-500">Independent feature cap; human escalation remains available when reached.</p>
+          <input type="number" step="0.01" min="0" value={supportInput} onChange={(e) => setSupportInput(e.target.value)} className="w-full rounded-sf border border-neutral-300 px-3 py-2" />
         </label>
 
         <label className="block max-w-sm">

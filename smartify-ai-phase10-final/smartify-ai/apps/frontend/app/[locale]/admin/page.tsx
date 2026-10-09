@@ -212,6 +212,7 @@ export default function AdminOverviewPage() {
             />
             <AdminNavCard href={`/${locale}/admin/parent-notifications`} title="Parent result notifications" body="Review failed result emails and retry delivery." />
             <AdminNavCard href={`/${locale}/admin/teacher-requests`} title="Teacher session requests" body="Review requests and confirm a booking after coordination." />
+            <AdminNavCard href={`/${locale}/admin/support`} title={locale === "ar" ? "الدعم الفني" : "Technical support"} body={locale === "ar" ? "مراجعة مشكلات الطلاب والرد عليها." : "Review student issues and reply to support requests."} />
             <AdminNavCard
               href={`/${locale}/admin/ai-usage`}
               title="AI Cost & Budget"

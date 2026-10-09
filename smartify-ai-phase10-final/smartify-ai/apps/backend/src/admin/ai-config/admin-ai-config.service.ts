@@ -7,6 +7,7 @@ import type { UpdateAISpendingControlsInput } from "@smartify/validation";
 const GLOBAL_BUDGET_KEY = GLOBAL_DAILY_AI_BUDGET_USD_KEY;
 const PER_USER_BUDGET_KEY = PER_USER_DAILY_AI_BUDGET_USD_KEY;
 const PLATFORM_BUDGET_KEY = PLATFORM_CONTENT_AUTHORING_DAILY_AI_BUDGET_USD_KEY;
+const STUDENT_SUPPORT_BUDGET_KEY = "student_support_daily_budget_usd";
 const DAILY_QUESTIONS_KEY = "default_daily_ai_questions_per_subject";
 const DEFAULT_DAILY_QUESTIONS = 10;
 
@@ -116,10 +117,11 @@ export class AdminAIConfigService {
    * window — this display must agree with what actually gates requests.
    */
   async getBudgetStatus() {
-    const [globalBudgetRow, perUserBudgetRow, platformBudgetRow, dailyQuestionsRow, globalSpentTodayUsd, globalCommittedUsdToday] = await Promise.all([
+    const [globalBudgetRow, perUserBudgetRow, platformBudgetRow, supportBudgetRow, dailyQuestionsRow, globalSpentTodayUsd, globalCommittedUsdToday] = await Promise.all([
       this.prisma.client.systemConfig.findUnique({ where: { key: GLOBAL_BUDGET_KEY } }),
       this.prisma.client.systemConfig.findUnique({ where: { key: PER_USER_BUDGET_KEY } }),
       this.prisma.client.systemConfig.findUnique({ where: { key: PLATFORM_BUDGET_KEY } }),
+      this.prisma.client.systemConfig.findUnique({ where: { key: STUDENT_SUPPORT_BUDGET_KEY } }),
       this.prisma.client.systemConfig.findUnique({ where: { key: DAILY_QUESTIONS_KEY } }),
       this.usageService.getGlobalSpendToday(),
       // Phase 9.4D, Objective 3: the LIVE reserved+actual total the
@@ -132,12 +134,14 @@ export class AdminAIConfigService {
     const globalBudgetUsd = parseBudgetUsd(globalBudgetRow?.value);
     const perUserBudgetUsd = parseBudgetUsd(perUserBudgetRow?.value);
     const platformContentAuthoringDailyBudgetUsd = parseBudgetUsd(platformBudgetRow?.value);
+    const studentSupportDailyBudgetUsd = parseBudgetUsd(supportBudgetRow?.value);
     const dailyQuestionsPerSubject = typeof dailyQuestionsRow?.value === "number" ? dailyQuestionsRow.value : DEFAULT_DAILY_QUESTIONS;
 
     return {
       globalBudgetUsd,
       perUserBudgetUsd,
       platformContentAuthoringDailyBudgetUsd,
+      studentSupportDailyBudgetUsd,
       dailyQuestionsPerSubject,
       globalSpentTodayUsd,
       globalCommittedUsdToday,
@@ -160,6 +164,7 @@ export class AdminAIConfigService {
     const nextGlobal = input.globalDailyBudgetUsd ?? current.globalBudgetUsd;
     const nextPerUser = input.perUserDailyBudgetUsd ?? current.perUserBudgetUsd;
     const nextPlatform = input.platformContentAuthoringDailyBudgetUsd ?? current.platformContentAuthoringDailyBudgetUsd;
+    const nextSupport = input.studentSupportDailyBudgetUsd ?? current.studentSupportDailyBudgetUsd;
 
     if (nextPerUser !== null && nextGlobal !== null && nextPerUser > nextGlobal) {
       throw new BadRequestException("Per-user daily AI budget cannot exceed the global daily AI budget.");
@@ -178,6 +183,8 @@ export class AdminAIConfigService {
     if (nextPlatform !== null && nextGlobal === null) {
       throw new BadRequestException("Set a global daily AI budget before setting a platform content-authoring daily AI budget.");
     }
+    if (nextSupport !== null && nextGlobal !== null && nextSupport > nextGlobal) throw new BadRequestException("Student support daily AI budget cannot exceed the global daily AI budget.");
+    if (nextSupport !== null && nextGlobal === null) throw new BadRequestException("Set a global daily AI budget before setting a student support daily AI budget.");
 
     const writes: Array<Promise<unknown>> = [];
     if (input.globalDailyBudgetUsd !== undefined) {
@@ -189,6 +196,7 @@ export class AdminAIConfigService {
     if (input.platformContentAuthoringDailyBudgetUsd !== undefined) {
       writes.push(this.updateSystemConfig(PLATFORM_BUDGET_KEY, input.platformContentAuthoringDailyBudgetUsd, "Maximum AI spend per day for shared platform content authoring (Unit grounding, lazy lesson/question generation) — independent of any single student's cap."));
     }
+    if (input.studentSupportDailyBudgetUsd !== undefined) writes.push(this.updateSystemConfig(STUDENT_SUPPORT_BUDGET_KEY, input.studentSupportDailyBudgetUsd, "Maximum AI spend per day for the dedicated student technical-support assistant."));
     if (input.dailyQuestionsPerSubject !== undefined) {
       writes.push(this.updateSystemConfig(DAILY_QUESTIONS_KEY, input.dailyQuestionsPerSubject, "Included AI questions per subject per student per day, before Question Packages/AI Credits apply."));
     }

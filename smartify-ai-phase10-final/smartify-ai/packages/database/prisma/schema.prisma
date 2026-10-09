@@ -37,6 +37,7 @@ model User {
   teacherProfile  TeacherProfile?
   auditLogs       AuditLog[]
   linkInvitations ParentLinkInvitation[]
+  supportTickets StudentSupportTicket[]
 
   @@index([role])
   @@index([clerkUserId])
@@ -1227,6 +1228,8 @@ model AIBudgetReservation {
   usageDate     DateTime // truncated to the day (00:00) — must match the AIDailyBudgetCounter rows this reservation touched
   estimatedUsd  Decimal
   reconciledUsd Decimal?
+  featureScope  String?
+  featureScopeKey String?
   status        AIBudgetReservationStatus @default(RESERVED)
   createdAt     DateTime                  @default(now())
   updatedAt     DateTime                  @updatedAt
@@ -1315,6 +1318,46 @@ model AIMessage {
   createdAt      DateTime       @default(now())
 
   @@index([conversationId])
+}
+
+enum StudentSupportStatus {
+  AI_ASSISTING
+  NEW
+  IN_PROGRESS
+  CLOSED
+}
+
+model StudentSupportTicket {
+  id             String               @id @default(cuid())
+  studentUserId  String
+  student        User                 @relation(fields: [studentUserId], references: [id], onDelete: Cascade)
+  title          String
+  status         StudentSupportStatus @default(AI_ASSISTING)
+  screenshotKey  String?
+  screenshotMime String?
+  route          String?
+  locale         String              @default("en")
+  assignedToId   String?
+  closedAt       DateTime?
+  contentDeletedAt DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  messages       StudentSupportMessage[]
+
+  @@index([studentUserId, updatedAt])
+  @@index([status, updatedAt])
+  @@index([closedAt])
+}
+
+model StudentSupportMessage {
+  id        String              @id @default(cuid())
+  ticketId  String
+  ticket    StudentSupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  role      String
+  content   String
+  createdAt DateTime            @default(now())
+
+  @@index([ticketId, createdAt])
 }
 
 model PracticeSubmission {

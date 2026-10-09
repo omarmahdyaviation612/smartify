@@ -33,6 +33,7 @@ import { SchoolsModule } from "./schools/schools.module";
 import { HomeworkModule } from "./homework/homework.module";
 import { AdminNotificationsModule } from "./admin/notifications/admin-notifications.module";
 import { TeacherRequestsModule } from "./teacher-requests/teacher-requests.module";
+import { StudentSupportModule } from "./student-support/student-support.module";
 
 @Module({
   imports: [
@@ -75,6 +76,7 @@ import { TeacherRequestsModule } from "./teacher-requests/teacher-requests.modul
     HomeworkModule,
     AdminNotificationsModule,
     TeacherRequestsModule,
+    StudentSupportModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

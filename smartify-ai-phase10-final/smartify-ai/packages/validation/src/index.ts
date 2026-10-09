@@ -161,6 +161,7 @@ export const updateAISpendingControlsSchema = z
     // — a separate cap from perUserDailyBudgetUsd, never reused. See
     // AIUsageService.assertWithinBudget/reserveBudget.
     platformContentAuthoringDailyBudgetUsd: z.number().positive().finite().optional(),
+    studentSupportDailyBudgetUsd: z.number().positive().finite().optional(),
     dailyQuestionsPerSubject: z.number().int().positive().optional(),
   })
   .strict()
