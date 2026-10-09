@@ -19,6 +19,9 @@ export const backendEnvSchema = z.object({
   STRIPE_SECRET_KEY: z.string().optional(), // optional until a real payment provider is activated (Phase 8)
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   FRONTEND_URL: z.string().url().default("http://localhost:3000"),
+  // Optional comma-separated list of addresses that get an email for every new InstaPay
+  // receipt; when unset the alert goes to every active SUPER_ADMIN / ADMIN user.
+  ADMIN_ALERT_EMAILS: z.string().optional(),
 
   // Manual InstaPay payment method: real money-routing details, so these
   // live in deploy-time env vars (not an admin-editable DB config) and are

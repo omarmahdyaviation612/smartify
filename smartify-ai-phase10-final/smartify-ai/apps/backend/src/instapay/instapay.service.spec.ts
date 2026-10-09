@@ -4,7 +4,7 @@ const JPEG_HEADER = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]);
 const PNG_HEADER = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
 const NOT_AN_IMAGE = Buffer.from("this is just text, not an image", "utf8");
 
-function setup() {
+function setup(adminAlert?: any) {
   const state = {
     profiles: { user1: { id: "profile1", userId: "user1" }, user2: { id: "profile2", userId: "user2" } } as Record<string, any>,
     subscriptions: [] as any[],
@@ -33,7 +33,7 @@ function setup() {
       },
     },
   } as any;
-  const service = new InstapayService(prisma, {} as any, {} as any);
+  const service = new InstapayService(prisma, {} as any, {} as any, adminAlert);
   return { service, state };
 }
 
@@ -101,6 +101,20 @@ describe("InstapayService.submitReceipt", () => {
     await expect(
       service.submitReceipt("user1", { referenceId: "SMAI-S-AAAAAAAA", submittedAmountEGP: 500 }, { mimetype: "image/jpeg", size: JPEG_HEADER.length, buffer: JPEG_HEADER }),
     ).rejects.toThrow("already been submitted");
+  });
+
+  it("alerts the admins once per accepted receipt, and not for a rejected one", async () => {
+    const alerts: any[] = [];
+    const { service, state } = setup({ notifyNewSubmission: async (x: any) => { alerts.push(x); } });
+    state.profiles.user1.fullName = "Omar";
+    state.subscriptions.push({ id: "sub1", studentId: "profile1", paymentProvider: "instapay", externalSubscriptionId: "SMAI-S-AAAAAAAA", monthlyTotalEGP: 500 });
+    await service.submitReceipt("user1", { referenceId: "SMAI-S-AAAAAAAA", submittedAmountEGP: 450, senderName: "O" }, { mimetype: "image/png", size: PNG_HEADER.length, buffer: PNG_HEADER });
+    await expect(
+      service.submitReceipt("user1", { referenceId: "SMAI-S-AAAAAAAA", submittedAmountEGP: 0 }, { mimetype: "image/png", size: PNG_HEADER.length, buffer: PNG_HEADER }),
+    ).rejects.toThrow();
+    expect(alerts).toEqual([
+      expect.objectContaining({ submissionId: "sub-1", kind: "SUBSCRIPTION", expectedAmountEGP: 500, submittedAmountEGP: 450, studentName: "Omar", senderName: "O" }),
+    ]);
   });
 
   it("rejects a missing file", async () => {

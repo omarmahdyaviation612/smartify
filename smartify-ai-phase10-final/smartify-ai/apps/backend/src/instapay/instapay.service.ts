@@ -1,8 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { BillingService } from "../billing/billing.service";
 import { TutorQuestionPacksService } from "../tutor-question-packs/tutor-question-packs.service";
 import { loadBackendEnv } from "@smartify/config";
+import { InstapayAdminAlertService } from "./instapay-admin-alert.service";
 
 const MAX_RECEIPT_BYTES = 5 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
@@ -32,6 +33,8 @@ export class InstapayService {
     private readonly prisma: PrismaService,
     private readonly billingService: BillingService,
     private readonly questionPacks: TutorQuestionPacksService,
+    // Optional so existing unit tests that build the service by hand keep working.
+    @Optional() private readonly adminAlert?: InstapayAdminAlertService,
   ) {}
 
   isConfigured() {
@@ -110,8 +113,9 @@ export class InstapayService {
       throw new BadRequestException("Unrecognized payment reference.");
     }
 
+    let created: { id: string; status: any; referenceId: string; createdAt: Date };
     try {
-      return await this.prisma.client.instapayPaymentSubmission.create({
+      created = await this.prisma.client.instapayPaymentSubmission.create({
         data: {
           studentId: profile.id,
           kind,
@@ -133,5 +137,16 @@ export class InstapayService {
       }
       throw err;
     }
+    // Fire-and-forget: the admin email must never slow down or fail the student's submit.
+    void this.adminAlert?.notifyNewSubmission({
+      submissionId: created.id,
+      kind,
+      referenceId,
+      expectedAmountEGP,
+      submittedAmountEGP: input.submittedAmountEGP,
+      studentName: (profile as any).fullName ?? null,
+      senderName: input.senderName ?? null,
+    });
+    return created;
   }
 }
