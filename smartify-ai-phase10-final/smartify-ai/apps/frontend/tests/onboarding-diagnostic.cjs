@@ -80,6 +80,7 @@ function makeRunner(apiFetch, locale, router) {
     flush,
     text: () => text(tree),
     find: (type, label) => nodes(tree).find((n) => n?.type === type && (!label || text(n).includes(label))),
+    findAll: (type) => nodes(tree).filter((n) => n?.type === type),
     async click(label) {
       const button = this.find('button', label);
       if (!button) throw new Error('Missing button: ' + label);
@@ -140,6 +141,37 @@ for (const locale of ['en', 'ar']) {
     // Submit was never called — no fake Assessment/QuestionAttempt/LearningPlan possible.
     assert.equal(calls.length, 1);
     assert.equal(calls[0], '/onboarding/diagnostic');
+  });
+
+  test(`${locale} Submit with an unanswered question is not a dead button: it explains and does not submit`, async () => {
+    const calls = [];
+    const { page, routerCalls } = await mount(async (url) => {
+      calls.push(url);
+      if (url === '/onboarding/diagnostic') return [REAL_QUESTION, { ...REAL_QUESTION, id: 'q2' }];
+      if (url === '/onboarding/diagnostic/submit') return {};
+      throw new Error('Unexpected request: ' + url);
+    }, locale);
+    const label = locale === 'ar' ? 'إرسال الإجابات' : 'Submit Answers';
+
+    // The button is pressable (not silently disabled) and the page says what is missing.
+    assert.equal(page.find('button', label).props.disabled, false);
+    assert.match(page.text(), locale === 'ar' ? /باقي 2 أسئلة بدون إجابة/ : /2 questions are still unanswered/);
+
+    // Answer only the first question, press Submit -> no request, hint now points at the last one.
+    page.find('input').props.onChange();
+    await page.flush();
+    await page.click(label);
+    assert.equal(calls.includes('/onboarding/diagnostic/submit'), false);
+    assert.deepEqual(routerCalls.push, []);
+    assert.match(page.text(), locale === 'ar' ? /باقي سؤال واحد بدون إجابة/ : /1 question is still unanswered/);
+
+    // Answer the second question -> Submit sends the answers and moves on.
+    const q2Input = page.findAll('input').find((n) => n.props.name === 'q2');
+    q2Input.props.onChange();
+    await page.flush();
+    await page.click(label);
+    assert.equal(calls.includes('/onboarding/diagnostic/submit'), true);
+    assert.deepEqual(routerCalls.push, [`/${locale}/onboarding/plan-ready`]);
   });
 
   test(`${locale} does not render a Continue fallback button while questions are still loading`, async () => {

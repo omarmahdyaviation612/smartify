@@ -36,6 +36,11 @@ export default function OnboardingDiagnosticPage() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Submit failures are shown next to the button: loadError renders at the top of a long page,
+  // out of view, so a failed submit looked like a dead button.
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  // Set when the student presses Submit with questions left: unanswered cards get highlighted.
+  const [showMissing, setShowMissing] = useState(false);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -60,9 +65,24 @@ export default function OnboardingDiagnosticPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoaded, isSignedIn, locale]);
 
+  const unanswered = questions ? questions.filter((q) => !answers[q.id]) : [];
+
   async function handleSubmit() {
-    if (!questions) return;
+    if (!questions || submitting) return;
+    // The button used to be silently disabled until every question was answered and looked
+    // exactly like an active button, so students pressed it and nothing happened. Now the press
+    // points them at the first unanswered question instead.
+    if (unanswered.length > 0) {
+      setShowMissing(true);
+      if (typeof document !== "undefined") {
+        document
+          .getElementById(`diagnostic-q-${unanswered[0].id}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      return;
+    }
     setSubmitting(true);
+    setSubmitError(null);
     try {
       await apiFetch("/onboarding/diagnostic/submit", {
         method: "POST",
@@ -72,12 +92,10 @@ export default function OnboardingDiagnosticPage() {
       });
       router.push(`/${locale}/onboarding/plan-ready`);
     } catch {
-      setLoadError(copy.diagnostic.error);
+      setSubmitError(copy.diagnostic.error);
       setSubmitting(false);
     }
   }
-
-  const allAnswered = questions ? questions.every((q) => answers[q.id]) : false;
 
   return (
     <>
@@ -116,7 +134,13 @@ export default function OnboardingDiagnosticPage() {
           {questions && questions.length > 0 && (
             <div className="mt-8 space-y-6">
               {questions.map((q, i) => (
-                <div key={q.id} className="rounded-sf-lg border border-neutral-200 bg-white p-6">
+                <div
+                  key={q.id}
+                  id={`diagnostic-q-${q.id}`}
+                  className={`rounded-sf-lg border bg-white p-6 ${
+                    showMissing && !answers[q.id] ? "border-error-500 ring-1 ring-error-500" : "border-neutral-200"
+                  }`}
+                >
                   <span className="text-xs font-medium uppercase tracking-wide text-sf-purple-600">
                     {isAr ? q.subjectNameAr : q.subjectNameEn}
                   </span>
@@ -143,11 +167,18 @@ export default function OnboardingDiagnosticPage() {
               <SmartifyButton
                 variant="ai"
                 className="w-full"
-                disabled={!allAnswered || submitting}
+                disabled={submitting}
+                aria-disabled={unanswered.length > 0 || submitting}
                 onClick={handleSubmit}
               >
-                {copy.diagnostic.submitLabel}
+                {submitting ? copy.diagnostic.submittingLabel : copy.diagnostic.submitLabel}
               </SmartifyButton>
+              {unanswered.length > 0 && (
+                <p className={`text-center text-sm ${showMissing ? "text-error-500" : "text-neutral-500"}`}>
+                  {copy.diagnostic.unansweredHint(unanswered.length)}
+                </p>
+              )}
+              {submitError && <p className="text-center text-sm text-error-500">{submitError}</p>}
             </div>
           )}
         </SmartifyContainer>

@@ -46,6 +46,9 @@ export interface OnboardingCopy {
     noQuestions: string;
     noQuestionsContinueLabel: string;
     error: string;
+    /** Shown under the submit button while some questions are unanswered. */
+    unansweredHint: (count: number) => string;
+    submittingLabel: string;
   };
   planReady: {
     title: string;
@@ -103,6 +106,9 @@ const en: OnboardingCopy = {
     noQuestions: "Your diagnostic assessment isn't available yet for these subjects. You can continue and start learning now.",
     noQuestionsContinueLabel: "Continue",
     error: "Something went wrong loading the diagnostic. Please try again.",
+    unansweredHint: (count) =>
+      count === 1 ? "1 question is still unanswered." : `${count} questions are still unanswered.`,
+    submittingLabel: "Submitting...",
   },
   planReady: {
     title: "Your learning profile is ready",
@@ -160,6 +166,9 @@ const ar: OnboardingCopy = {
     noQuestions: "التقييم التشخيصي لسه مش متاح للمواد دي. تقدر تكمل وتبدأ التعلّم دلوقتي.",
     noQuestionsContinueLabel: "متابعة",
     error: "حدث خطأ أثناء تحميل التقييم. حاول مرة أخرى.",
+    unansweredHint: (count) =>
+      count === 1 ? "باقي سؤال واحد بدون إجابة." : `باقي ${count} أسئلة بدون إجابة.`,
+    submittingLabel: "جاري الإرسال...",
   },
   planReady: {
     title: "ملفك التعليمي جاهز",

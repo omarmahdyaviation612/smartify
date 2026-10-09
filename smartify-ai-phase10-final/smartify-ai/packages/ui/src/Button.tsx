@@ -18,7 +18,7 @@ export interface SmartifyButtonProps extends ButtonHTMLAttributes<HTMLButtonElem
 export function SmartifyButton({ variant = "primary", className = "", children, ...props }: SmartifyButtonProps) {
   return (
     <button
-      className={`inline-flex items-center justify-center rounded-sf px-6 py-3 text-base font-semibold transition-colors duration-200 ${variantClasses[variant]} ${className}`}
+      className={`inline-flex items-center justify-center rounded-sf px-6 py-3 text-base font-semibold transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none ${variantClasses[variant]} ${className}`}
       {...props}
     >
       {children}
