@@ -19,6 +19,7 @@ import { AdminCurriculumModule } from "./admin/curriculum/admin-curriculum.modul
 import { AdminAIConfigModule } from "./admin/ai-config/admin-ai-config.module";
 import { AdminPaymentsModule } from "./admin/payments/admin-payments.module";
 import { AdminRevenueModule } from "./admin/revenue/admin-revenue.module";
+import { AdminStudentAnalyticsModule } from "./admin/student-analytics/admin-student-analytics.module";
 import { ParentModule } from "./parent/parent.module";
 import { TutorQuestionPacksModule } from "./tutor-question-packs/tutor-question-packs.module";
 import { HealthModule } from "./health/health.module";
@@ -63,6 +64,7 @@ import { StudentSupportModule } from "./student-support/student-support.module";
     AdminAIConfigModule,
     AdminPaymentsModule,
     AdminRevenueModule,
+    AdminStudentAnalyticsModule,
     ParentModule,
     TutorQuestionPacksModule,
     InstapayModule,

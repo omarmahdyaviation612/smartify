@@ -193,6 +193,8 @@ export default function AdminOverviewPage() {
           )}
 
           <div className="mt-10 grid gap-4 sm:grid-cols-3">
+            <AdminNavCard href={`/${locale}/admin/analytics`} title={locale === "ar" ? "تحليلات الطلاب" : "Student analytics"} body={locale === "ar" ? "لوحة تحليلية: التسجيل، النشاط، التحويل للدفع، المناهج والمدارس والمحافظات، واستهلاك الـ AI." : "Sign-ups, activity, funnel to paid, curricula, schools, governorates and AI consumption."} />
+            <AdminNavCard href={`/${locale}/admin/students`} title={locale === "ar" ? "الطلاب" : "Students"} body={locale === "ar" ? "كل طالب: مدرسته ومنطقته ومنهجه وموادّه، جرّب إيه وعمل إيه، واستهلك AI قد إيه — مع تصدير CSV." : "Every student: school, location, curriculum, subjects, what they tried and did, and AI cost — with CSV export."} />
             <AdminNavCard href={`/${locale}/admin/users`} title="Users" body="View accounts and manage roles." />
             <AdminNavCard
               href={`/${locale}/admin/curriculum`}
