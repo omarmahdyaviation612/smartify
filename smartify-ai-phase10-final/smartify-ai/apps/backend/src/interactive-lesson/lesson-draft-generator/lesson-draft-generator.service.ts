@@ -26,6 +26,12 @@ export { AUTO_LESSON_GENERATION_PROMPT_VERSION };
 // AI call like any other.
 const MAX_ATTEMPTS = 2;
 
+// 2026-10-10: a complete-coverage plan (one EXPLAIN per textbook concept, up to
+// 30 steps, each with a `concepts` array) is far longer than the provider's
+// 600-token default, which truncated the JSON mid-object ("invalid JSON" on
+// both attempts). Planning is one cheap call per Topic, cached forever.
+const AUTO_LESSON_PLAN_MAX_OUTPUT_TOKENS = 4000;
+
 // Topic-generation single-flight lock (ensureTopicHasLesson, 2026-09-19) —
 // same Postgres CAS pattern as UnitGroundingService.ensureUnitGrounded, one
 // tier shorter: a single lesson-draft generation call is a single AI call
@@ -329,6 +335,7 @@ export class LessonDraftGeneratorService {
       const estimatedUsd = await this.usageService.estimateMaxChatCostUsd({
         providerKey,
         inputText: systemPrompt + "Generate the lesson draft now.",
+        maxOutputTokens: AUTO_LESSON_PLAN_MAX_OUTPUT_TOKENS,
       });
       const reserveResult = await this.usageService.reserveBudget(requestingUserId, estimatedUsd);
       if (!reserveResult.ok) {
@@ -346,6 +353,7 @@ export class LessonDraftGeneratorService {
           systemPrompt,
           messages: [{ role: "user", content: "Generate the lesson draft now." }],
           responseFormat: "json_object",
+          maxOutputTokens: AUTO_LESSON_PLAN_MAX_OUTPUT_TOKENS,
         });
       } catch (err) {
         await this.usageService.releaseBudget(budgetReservationId).catch(() => undefined);
