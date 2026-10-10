@@ -664,7 +664,7 @@ export class AIContextBuilderService {
       `Curriculum: ${ctx.curriculumNameEn}. Grade: ${ctx.gradeNameEn}. Subject: ${ctx.subjectNameEn}. Unit: ${ctx.unitNameEn}.`,
       `Topic to plan: "${ctx.topicNameEn}" (${ctx.topicNameAr}). Student age range: ${ctx.studentAgeRange}.`,
       groundingSlice
-        ? "Propose 2 to 6 learning objectives yourself (enough to cover every textbook concept below), in BOTH English and Arabic, grounded in the textbook material below — your own original wording, but representing what the grounding actually covers, not invented from the topic title alone. Each Arabic translation must be your own accurate, natural rendering of your own English objective — never a placeholder, never left empty."
+        ? "Propose 2 to 8 learning objectives yourself (enough to cover every textbook concept below), in BOTH English and Arabic, grounded in the textbook material below — your own original wording, but representing what the grounding actually covers, not invented from the topic title alone. Each Arabic translation must be your own accurate, natural rendering of your own English objective — never a placeholder, never left empty."
         : "No learning objectives exist yet for this topic — propose 2 to 4 of your own, original, age-appropriate objectives yourself, in BOTH English and Arabic. Each Arabic translation must be your own accurate, natural rendering of your own English objective — never a placeholder, never left empty.",
       "",
       ...groundingSection,
@@ -678,7 +678,7 @@ export class AIContextBuilderService {
       "",
       "OBJECTIVE RULES:",
       groundingSlice
-        ? "- 2 to 6 objectives, each a complete sentence describing one concrete, checkable thing the student will be able to do; together they must span every textbook concept listed above."
+        ? "- 2 to 8 objectives, each a complete sentence describing one concrete, checkable thing the student will be able to do; together they must span every textbook concept listed above."
         : "- 2 to 4 objectives, each a complete sentence describing one concrete, checkable thing the student will be able to do.",
       "- objectiveAr must be a real, natural Arabic sentence — not a transliteration, not English, not empty.",
       "",

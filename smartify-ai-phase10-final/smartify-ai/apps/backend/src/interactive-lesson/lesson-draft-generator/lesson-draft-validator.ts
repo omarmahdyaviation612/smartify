@@ -153,7 +153,10 @@ export function validateLessonDraft(raw: unknown, expected: { topicNameEn: strin
 }
 
 const MIN_AUTO_OBJECTIVES = 2;
-const MAX_AUTO_OBJECTIVES = 6;
+// 10 (2026-10-10): complete-coverage lessons for concept-rich Topics naturally
+// carry more objectives; the prompt asks for 2-8, this leaves headroom so a
+// slightly larger set is not rejected outright.
+const MAX_AUTO_OBJECTIVES = 10;
 
 export interface AutoLessonValidationResult {
   valid: boolean;
