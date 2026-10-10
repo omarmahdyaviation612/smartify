@@ -25,6 +25,18 @@ export function normalizeConceptName(name: string): string {
   return name.normalize("NFKC").toLowerCase().replace(/[\s_\-]+/g, " ").replace(/[.,;:!?'"()]/g, "").trim();
 }
 
+/** At most this many EXPLAIN steps before concepts start sharing a step. */
+const MAX_TEACHING_STEPS = 10;
+
+/**
+ * How many concepts one EXPLAIN step teaches: 1 for normal Topics; for
+ * concept-rich Topics (more than 10 concepts) related concepts are grouped so
+ * the whole lesson stays a child-sized ~20 steps instead of 35-40.
+ */
+export function conceptsPerTeachingStep(conceptCount: number): number {
+  return Math.max(1, Math.ceil(conceptCount / MAX_TEACHING_STEPS));
+}
+
 /**
  * Upper bound on steps for a grounded lesson: intro + review + complete,
  * one teaching step per concept, roughly one check per two concepts, plus
@@ -87,25 +99,33 @@ export function ensureConceptCoverage(steps: TeachingStep[], slice: GroundingSli
     return id;
   };
 
+  // Missing concepts are taught `perStep` at a time (grouping only kicks in for
+  // concept-rich Topics), with a CHECK after every few inserted EXPLAIN steps.
+  const perStep = conceptsPerTeachingStep(slice.concepts.length);
+  const explainGroups: string[][] = [];
+  for (let i = 0; i < missing.length; i += perStep) explainGroups.push(missing.slice(i, i + perStep));
+
   const inserted: TeachingStep[] = [];
-  for (let i = 0; i < missing.length; i += STEPS_PER_INSERTED_CHECK) {
-    const group = missing.slice(i, i + STEPS_PER_INSERTED_CHECK);
-    for (const name of group) {
+  for (let i = 0; i < explainGroups.length; i += STEPS_PER_INSERTED_CHECK) {
+    const block = explainGroups.slice(i, i + STEPS_PER_INSERTED_CHECK);
+    for (const names of block) {
+      const label = names.map((n) => `"${n}"`).join(", ");
       inserted.push({
         id: nextId("cov"),
         type: "EXPLAIN",
         order: 0,
-        objective: `Teach the textbook concept "${name}" completely: what it is, its key facts and vocabulary from the reference notes, and one simple child-friendly example.`,
-        concepts: [name],
+        objective: `Teach the textbook concept${names.length > 1 ? "s" : ""} ${label} completely: what ${names.length > 1 ? "each one is" : "it is"}, the key facts and vocabulary from the reference notes, and one simple child-friendly example.`,
+        concepts: names,
       });
     }
+    const checked = block.flat();
     inserted.push({
       id: nextId("covcheck"),
       type: "CHECK",
       order: 0,
       checkType: "conceptual",
-      objective: `Ask one short conceptual question that checks the student understood ${group.map((n) => `"${n}"`).join(", ")}.`,
-      concepts: group,
+      objective: `Ask one short conceptual question that checks the student understood ${checked.map((n) => `"${n}"`).join(", ")}.`,
+      concepts: checked,
     });
   }
 

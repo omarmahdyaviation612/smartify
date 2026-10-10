@@ -1,6 +1,6 @@
 import type { TeachingStep } from "../interactive-lesson.types";
 import type { GroundingSlice } from "../unit-grounding/unit-grounding.types";
-import { ensureConceptCoverage, findUncoveredConcepts, maxStepsForConceptCount } from "./lesson-concept-coverage.util";
+import { conceptsPerTeachingStep, ensureConceptCoverage, findUncoveredConcepts, maxStepsForConceptCount } from "./lesson-concept-coverage.util";
 import { validateLessonDraft } from "./lesson-draft-validator";
 
 const concept = (name: string) => ({ name, description: `${name} description`, sourcePages: [1], importance: "core" as const });
@@ -49,6 +49,22 @@ describe("lesson concept coverage", () => {
   it("is a no-op without grounding", () => {
     const steps = baseSteps();
     expect(ensureConceptCoverage(steps, null)).toEqual({ steps, insertedConcepts: [] });
+  });
+
+  it("groups concepts per EXPLAIN step only for concept-rich topics", () => {
+    expect(conceptsPerTeachingStep(6)).toBe(1);
+    expect(conceptsPerTeachingStep(10)).toBe(1);
+    expect(conceptsPerTeachingStep(17)).toBe(2);
+    expect(conceptsPerTeachingStep(25)).toBe(3);
+  });
+
+  it("repairs a concept-rich topic within the step limit by grouping missing concepts", () => {
+    const names = Array.from({ length: 18 }, (_, i) => `Concept ${i + 1}`);
+    const { steps, insertedConcepts } = ensureConceptCoverage(baseSteps(), slice(["The Mouth", ...names]));
+    expect(insertedConcepts).toHaveLength(18);
+    expect(findUncoveredConcepts(steps, slice(["The Mouth", ...names]))).toEqual([]);
+    expect(steps.length).toBeLessThanOrEqual(maxStepsForConceptCount(19));
+    expect(validateLessonDraft({ topicNameEn: "T", steps }, { topicNameEn: "T", maxSteps: maxStepsForConceptCount(19) }).valid).toBe(true);
   });
 
   it("scales the step limit with concept count, bounded to [10, 30]", () => {

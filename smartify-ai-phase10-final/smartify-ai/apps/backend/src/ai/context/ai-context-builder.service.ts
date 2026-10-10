@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import type { GroundingSlice } from "../../interactive-lesson/unit-grounding/unit-grounding.types";
 import type { AdaptiveMathTeachingPlan } from "../../tutor/adaptive-math-teaching.util";
 import type { ActiveMathProblem } from "../../interactive-lesson/interactive-lesson.types";
+import { conceptsPerTeachingStep, maxStepsForConceptCount } from "../../interactive-lesson/lesson-draft-generator/lesson-concept-coverage.util";
 
 export interface TutorContext {
   studentFullName: string;
@@ -652,7 +653,9 @@ export class AIContextBuilderService {
           `- This topic has ${groundingSlice.concepts.length} textbook concept(s). EVERY one of them must be taught by at least one EXPLAIN or EXAMPLE step:`,
           ...groundingSlice.concepts.map((c) => `  * "${c.name}"`),
           '- On every EXPLAIN, EXAMPLE and CHECK step, include a "concepts" array listing the EXACT concept name(s) above (copied character-for-character) that the step teaches or checks.',
-          "- Give each concept its own EXPLAIN step; only combine two concepts in one step when they are inseparable. Use the concept's facts and vocabulary from the grounding in that step's objective plan.",
+          conceptsPerTeachingStep(groundingSlice.concepts.length) === 1
+            ? "- Give each concept its own EXPLAIN step; only combine two concepts in one step when they are inseparable. Use the concept's facts and vocabulary from the grounding in that step's objective plan."
+            : `- This topic has many concepts: group closely related ones into about ${Math.ceil(groundingSlice.concepts.length / conceptsPerTeachingStep(groundingSlice.concepts.length))} EXPLAIN steps of up to ${conceptsPerTeachingStep(groundingSlice.concepts.length)} concepts each — every concept still listed in its step's "concepts" array and fully taught. Use the concepts' facts and vocabulary from the grounding in each step's objective plan.`,
           "- Do not stop after the first one or two concepts — a lesson that leaves any listed concept untaught is rejected.",
           "",
         ]
@@ -688,7 +691,11 @@ export class AIContextBuilderService {
       '- "id" must be a short unique string per step (e.g. "s1", "s2", ...).',
       '- "objective" is a PLANNING INSTRUCTION describing WHAT that step must accomplish (one or two sentences) — NEVER the actual scripted teacher speech. The runtime teacher generates the real wording separately, per student, at lesson time.',
       groundingSlice
-        ? `- Structure: INTRO, then for EACH textbook concept an EXPLAIN step (add an EXAMPLE step where a worked example genuinely helps), with a CHECK step after every one or two concepts, then REVIEW (recapping ALL the concepts), then COMPLETE. With ${groundingSlice.concepts.length} concept(s) that is about ${Math.max(7, groundingSlice.concepts.length * 2 + 3)} steps — never more than ${Math.min(30, Math.max(10, groundingSlice.concepts.length * 2 + 6))}.`
+        ? (() => {
+            const explainSteps = Math.ceil(groundingSlice.concepts.length / conceptsPerTeachingStep(groundingSlice.concepts.length));
+            const target = Math.max(7, explainSteps + Math.ceil(explainSteps / 2) + 3);
+            return `- Structure: INTRO, then the EXPLAIN steps above (add an EXAMPLE step only where a worked example genuinely helps), with a CHECK step after every one or two EXPLAIN steps, then REVIEW (recapping ALL the concepts), then COMPLETE. That is about ${target} steps in total — NEVER more than ${maxStepsForConceptCount(groundingSlice.concepts.length)}.`;
+          })()
         : '- Target this approximate structure unless the topic genuinely needs otherwise: INTRO, EXPLAIN, CHECK, EXAMPLE, CHECK, REVIEW, COMPLETE (roughly 6-8 steps total).',
       '- At least one CHECK step is required; include a "checkType" of "conceptual" or "applied" on each CHECK step.',
       '- COMPLETE must always be the LAST step.',
