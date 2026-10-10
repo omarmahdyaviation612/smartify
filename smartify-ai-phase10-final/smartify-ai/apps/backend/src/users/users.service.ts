@@ -10,6 +10,17 @@ export class UsersService {
     return this.prisma.client.user.findUnique({ where: { id } });
   }
 
+  /** GET /users/me — the user row plus whether a student profile exists yet. */
+  async findMe(id: string) {
+    const user = await this.prisma.client.user.findUnique({
+      where: { id },
+      include: { studentProfile: { select: { id: true } } },
+    });
+    if (!user) return null;
+    const { studentProfile, ...rest } = user;
+    return { ...rest, hasStudentProfile: !!studentProfile };
+  }
+
   findAll() {
     return this.prisma.client.user.findMany({
       where: { deletedAt: null },

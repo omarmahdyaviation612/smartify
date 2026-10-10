@@ -235,6 +235,25 @@ describe("OnboardingService", () => {
     });
   });
 
+  describe("drop-off fixes (2026-10-11)", () => {
+    it("accepts curriculum codes added at runtime such as EG_LANGUAGE", () => {
+      const valid = { ...baseInput, gradeId: "clh1111111111111111111111", subjectIds: ["clh2222222222222222222222"] };
+      expect(studentOnboardingSchema.safeParse({ ...valid, curriculumCode: "EG_LANGUAGE" }).success).toBe(true);
+      expect(studentOnboardingSchema.safeParse({ ...valid, curriculumCode: "eg language" }).success).toBe(false);
+    });
+
+    it("records each onboarding step once per account and never throws", async () => {
+      const prisma: any = { client: { auditLog: { findFirst: jest.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "a" }), create: jest.fn() } } };
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
+      await expect(service.trackProgress("user-1", "curriculum")).resolves.toEqual({ ok: true });
+      await service.trackProgress("user-1", "curriculum");
+      expect(prisma.client.auditLog.create).toHaveBeenCalledTimes(1);
+      expect(prisma.client.auditLog.create).toHaveBeenCalledWith({ data: { userId: "user-1", action: "onboarding.step", entityType: "onboarding", entityId: "curriculum" } });
+      prisma.client.auditLog.findFirst.mockRejectedValueOnce(new Error("db down"));
+      await expect(service.trackProgress("user-1", "profile")).resolves.toEqual({ ok: true });
+    });
+  });
+
   describe("studentOnboardingSchema — school info shape", () => {
     // Uses real cuid-format ids — baseInput's "grade-1"/"subject-1" are
     // fine for the mocked service-level tests above (which never run them

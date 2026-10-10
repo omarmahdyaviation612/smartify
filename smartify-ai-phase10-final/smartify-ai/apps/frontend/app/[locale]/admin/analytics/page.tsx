@@ -17,6 +17,7 @@ interface Overview {
   windowDays: number;
   totals: { registeredAccounts: number; onboardedStudents: number; activeStudentsInWindow: number; payingStudents: number; mrrEGP: number; verifiedPaymentsEGPInWindow: number };
   funnel: Array<{ stage: string; count: number }>;
+  onboardingFunnel?: { trackedSince: string; steps: Array<{ stage: string; count: number }> };
   activity: { lessonsStarted: number; lessonsCompleted: number; quizzes: number; practiceAttempts: number; practiceAccuracy: number | null; homeworkSessions: number; supportTickets: number };
   ai: { totalUsd: number; studentUsd: number; platformContentUsd: number; tokens: number; calls: number; avgUsdPerActiveStudent: number; byFeature: Array<{ feature: string; calls: number; costUsd: number }>; topStudents: Array<{ studentId: string; fullName: string; aiCostUsd: number; aiCalls: number }> };
   daily: Array<{ day: string; signups: number; activeStudents: number; lessons: number; aiCostUsd: number }>;
@@ -74,6 +75,12 @@ function Dashboard() {
 
           <div className="grid gap-6 lg:grid-cols-2">
             <Panel title="Funnel (all time)"><Funnel steps={data.funnel} /></Panel>
+            {data.onboardingFunnel && (
+              <Panel title="Where new sign-ups stop (onboarding steps)">
+                <Funnel steps={data.onboardingFunnel.steps} />
+                <p className="mt-3 text-xs text-neutral-500">Accounts created since {new Date(data.onboardingFunnel.trackedSince).toLocaleDateString()}, when step tracking started.</p>
+              </Panel>
+            )}
             <Panel title={`Activity (last ${data.windowDays} days)`}>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 <Kpi label="Lessons started" value={data.activity.lessonsStarted} />

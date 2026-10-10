@@ -8,7 +8,7 @@ import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getOnboardingCopy } from "@/content/onboarding";
 import { OnboardingStepper } from "@/components/OnboardingStepper";
 import { ApiError, useApiClient } from "@/lib/api-client";
-import { clearDraft } from "@/lib/onboarding-draft";
+import { clearDraft, takeOnboardingNext, trackOnboardingStep } from "@/lib/onboarding-draft";
 import type { Locale } from "@/content/marketing";
 
 interface SubjectScore {
@@ -37,6 +37,8 @@ export default function OnboardingPlanReadyPage() {
 
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState(false);
+  // Where the student was heading before onboarding (e.g. the free trial).
+  const [nextPath, setNextPath] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -47,6 +49,9 @@ export default function OnboardingPlanReadyPage() {
     apiFetch<Summary>("/onboarding/summary")
       .then((data) => {
         setSummary(data);
+        trackOnboardingStep(apiFetch, "plan-ready");
+        const remembered = takeOnboardingNext();
+        setNextPath((current) => current ?? remembered);
         clearDraft(); // onboarding is complete — the backend is now the source of truth
       })
       .catch((loadError: unknown) => {
@@ -111,6 +116,15 @@ export default function OnboardingPlanReadyPage() {
 
               <p className="text-center text-sm text-neutral-500">{copy.planReady.dashboardComingSoon}</p>
 
+              {nextPath && nextPath !== "/dashboard" && (
+                <Link href={`/${locale}${nextPath}`} className="block text-center">
+                  <SmartifyButton variant="ai">
+                    {nextPath.startsWith("/free-trial")
+                      ? isAr ? "ابدأ تجربتك المجانية" : "Start your free trial"
+                      : isAr ? "تابع من حيث توقفت" : "Continue where you left off"}
+                  </SmartifyButton>
+                </Link>
+              )}
               <Link href={`/${locale}/dashboard`} className="block text-center">
                 <SmartifyButton variant="secondary">{copy.planReady.backHome}</SmartifyButton>
               </Link>

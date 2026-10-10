@@ -69,7 +69,10 @@ export const studentOnboardingSchema = z
     age: z.number().int().min(4).max(25),
     country: z.string().min(2),
     preferredLang: z.enum(["ar", "en"]),
-    curriculumCode: z.enum(["LOCAL", "EG_NATIONAL", "BRITISH_INTL", "AMERICAN_INTL"]),
+    // Any curriculum code from the published catalog (e.g. EG_LANGUAGE,
+    // which admins add at runtime). The backend checks it exists; a fixed
+    // enum here rejected every Languages-curriculum sign-up with a 400.
+    curriculumCode: z.string().trim().regex(/^[A-Z][A-Z0-9_]{1,39}$/),
     gradeId: z.string().cuid(),
     subjectIds: z.array(z.string().cuid()).min(1),
     weeklyStudyHours: z.number().int().min(0).max(60).optional(),
@@ -85,6 +88,12 @@ export const studentOnboardingSchema = z
     path: ["schoolId"],
   });
 export type StudentOnboardingInput = z.infer<typeof studentOnboardingSchema>;
+
+// Onboarding drop-off tracking (2026-10-11): the furthest wizard step a
+// signed-in account has opened, recorded before the profile exists.
+export const ONBOARDING_TRACKED_STEPS = ["welcome", "profile", "curriculum", "grade-subjects", "diagnostic", "plan-ready"] as const;
+export type OnboardingTrackedStep = (typeof ONBOARDING_TRACKED_STEPS)[number];
+export const onboardingProgressSchema = z.object({ step: z.enum(ONBOARDING_TRACKED_STEPS) }).strict();
 
 // Backend-only bounds for GET /schools?governorate=&area=&q= — shared here
 // so the controller's query validation and the service's take/limit stay

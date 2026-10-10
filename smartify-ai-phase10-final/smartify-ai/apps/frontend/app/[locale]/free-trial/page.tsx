@@ -33,7 +33,7 @@ export default function FreeTrialPage() {
   useEffect(() => {
     if (!isLoaded) return;
     if (!isSignedIn) {
-      router.replace(`/${locale}/sign-up`);
+      router.replace(`/${locale}/sign-up?next=${encodeURIComponent("/free-trial")}`);
       return;
     }
     if (userLoading) return;
@@ -92,7 +92,7 @@ export default function FreeTrialPage() {
                 {isAr ? "قم بتسجيل الدخول أو إنشاء حساب للمتابعة." : "Please sign in or create an account to continue."}
               </p>
               <div className="mt-6">
-                <SmartifyButton variant="ai" onClick={() => router.push(`/${locale}/sign-up`)}>
+                <SmartifyButton variant="ai" onClick={() => router.push(`/${locale}/sign-up?next=${encodeURIComponent("/free-trial")}`)}>
                   {isAr ? "تسجيل الدخول" : "Sign in"}
                 </SmartifyButton>
               </div>

@@ -26,7 +26,7 @@ export function SubscribeNowButton({ locale, label, notSignedInMessage = "يجب
 
     if (!isSignedIn) {
       alert(notSignedInMessage);
-      router.push(`/${locale}/sign-up`);
+      router.push(`/${locale}/sign-up?next=${encodeURIComponent("/billing")}`);
       return;
     }
 

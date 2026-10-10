@@ -20,7 +20,7 @@ const middleware = load('middleware.ts', {
     redirect: url => ({ kind: 'redirect', url: String(url) }),
   } },
 }).default;
-const { getOnboardingPrerequisite } = load('lib/onboarding-draft.ts', {});
+const { getOnboardingPrerequisite, sanitizeNextPath } = load('lib/onboarding-draft.ts', {});
 function request(route, cookie) {
   const url = new URL(route, 'http://localhost:3001');
   return { url: String(url), nextUrl: Object.assign(url, { clone: () => new URL(url) }), cookies: { get: () => cookie ? { value: cookie } : undefined } };
@@ -59,4 +59,13 @@ test('onboarding draft prerequisites preserve profile and curriculum ordering', 
   assert.equal(getOnboardingPrerequisite(profile, 'curriculum'), null);
   assert.equal(getOnboardingPrerequisite(profile, 'grade-subjects'), 'curriculum');
   assert.equal(getOnboardingPrerequisite({ ...profile, curriculumId: 'test', curriculumCode: 'LOCAL' }, 'grade-subjects'), null);
+});
+test('step 1 no longer requires a country (it defaults to Egypt later)', () => {
+  assert.equal(getOnboardingPrerequisite({ fullName: 'Test Student', age: 12 }, 'curriculum'), null);
+  assert.equal(getOnboardingPrerequisite({ fullName: 'Test Student' }, 'curriculum'), 'profile');
+});
+test('post-onboarding destination only accepts same-site app paths', () => {
+  assert.equal(sanitizeNextPath('/free-trial'), '/free-trial');
+  assert.equal(sanitizeNextPath('/billing'), '/billing');
+  for (const bad of ['https://evil.com', '//evil.com', '/\\evil.com', 'javascript:alert(1)', 'free-trial', '', null]) assert.equal(sanitizeNextPath(bad), null);
 });

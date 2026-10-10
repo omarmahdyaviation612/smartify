@@ -20,7 +20,7 @@ export function FreeTrialButton({ locale, label, notSignedInMessage = "يجب ع
 
     if (!isSignedIn) {
       alert(notSignedInMessage);
-      router.push(`/${locale}/sign-up`);
+      router.push(`/${locale}/sign-up?next=${encodeURIComponent("/free-trial")}`);
       return;
     }
 

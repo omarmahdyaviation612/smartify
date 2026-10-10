@@ -34,7 +34,9 @@ export function getOnboardingPrerequisite(
   draft: OnboardingDraft,
   step: "curriculum" | "grade-subjects",
 ): "profile" | "curriculum" | null {
-  if (!draft.fullName?.trim() || !draft.country?.trim() || !Number.isInteger(draft.age) || draft.age! < 4 || draft.age! > 25) {
+  // Country is no longer asked on step 1 (defaults to Egypt, editable on
+  // the grade & subjects step) — only name and age gate the next steps.
+  if (!draft.fullName?.trim() || !Number.isInteger(draft.age) || draft.age! < 4 || draft.age! > 25) {
     return "profile";
   }
   if (step === "grade-subjects" && (!draft.curriculumId || !draft.curriculumCode)) {
@@ -60,4 +62,68 @@ export function writeDraft(patch: Partial<OnboardingDraft>) {
 
 export function clearDraft() {
   window.localStorage.removeItem(KEY);
+}
+
+export const DEFAULT_COUNTRY = "Egypt";
+
+// ---------------------------------------------------------------------------
+// Onboarding drop-off fixes (2026-10-11)
+// ---------------------------------------------------------------------------
+
+const NEXT_KEY = "sf_onboarding_next";
+
+/**
+ * Only same-site, locale-relative app paths ("/free-trial", "/billing")
+ * are accepted as a post-onboarding destination — never a full URL or a
+ * protocol-relative "//host" that would turn this into an open redirect.
+ */
+export function sanitizeNextPath(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\") || value.includes(":")) return null;
+  if (value.length > 200) return null;
+  return value;
+}
+
+/** Remember where the student was heading (free trial, billing...) before onboarding. */
+export function rememberOnboardingNext(next: string | null | undefined) {
+  const safe = sanitizeNextPath(next);
+  if (!safe || safe.startsWith("/onboarding") || safe === "/welcome") return;
+  try {
+    window.localStorage.setItem(NEXT_KEY, safe);
+  } catch {
+    // storage disabled — the student simply lands on the dashboard
+  }
+}
+
+/** Read and clear the remembered destination. */
+export function takeOnboardingNext(): string | null {
+  try {
+    const value = sanitizeNextPath(window.localStorage.getItem(NEXT_KEY));
+    window.localStorage.removeItem(NEXT_KEY);
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+export type OnboardingTrackedStep = "welcome" | "profile" | "curriculum" | "grade-subjects" | "diagnostic" | "plan-ready";
+
+/**
+ * Fire-and-forget: tells the backend this account opened an onboarding
+ * step, so the admin funnel shows exactly where students stop. Sent once
+ * per step per browser session; failures are ignored.
+ */
+export function trackOnboardingStep(
+  apiFetch: (path: string, init?: RequestInit) => Promise<unknown>,
+  step: OnboardingTrackedStep,
+) {
+  if (typeof window === "undefined") return;
+  const key = `sf_onboarding_tracked_${step}`;
+  try {
+    if (window.sessionStorage.getItem(key)) return;
+    window.sessionStorage.setItem(key, "1");
+  } catch {
+    // ignore — tracking still fires, the backend de-duplicates anyway
+  }
+  apiFetch("/onboarding/progress", { method: "POST", body: JSON.stringify({ step }) }).catch(() => undefined);
 }

@@ -8,6 +8,8 @@ interface CurrentUser {
   id: string;
   email: string;
   role: string;
+  /** False until onboarding's grade & subjects step saves the StudentProfile. */
+  hasStudentProfile?: boolean;
 }
 
 /**

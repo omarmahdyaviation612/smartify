@@ -2,9 +2,11 @@ import { BadRequestException, Injectable, NotFoundException } from "@nestjs/comm
 import { PrismaService } from "../prisma/prisma.service";
 import { QuestionDraftGeneratorService } from "../question-bank/question-draft-generator/question-draft-generator.service";
 import { questionServabilityByTopic, QUESTION_PROVENANCE_SELECT, TOPIC_GATE_INCLUDE } from "../ai/context/topic-content-provenance.util";
-import type { StudentOnboardingInput } from "@smartify/validation";
+import type { OnboardingTrackedStep, StudentOnboardingInput } from "@smartify/validation";
 import { hasArabicQuestionContent, isArabicOnlySubject } from "../interactive-lesson/lesson-language.util";
 import { DIAGNOSTIC_QUESTION_LIMIT, pickBalancedDiagnostic } from "./diagnostic-balance.util";
+
+export const ONBOARDING_STEP_ACTION = "onboarding.step";
 
 @Injectable()
 export class OnboardingService {
@@ -99,6 +101,30 @@ export class OnboardingService {
     });
 
     return profile;
+  }
+
+  /**
+   * Onboarding drop-off tracking (2026-10-11). One AuditLog row per
+   * account per step (first visit only), so the admin funnel can show
+   * exactly where students stop — before this, nothing was recorded until
+   * the profile was saved at step 3. Never throws: analytics must not
+   * block the wizard.
+   */
+  async trackProgress(userId: string, step: OnboardingTrackedStep) {
+    try {
+      const existing = await this.prisma.client.auditLog.findFirst({
+        where: { userId, action: ONBOARDING_STEP_ACTION, entityId: step },
+        select: { id: true },
+      });
+      if (!existing) {
+        await this.prisma.client.auditLog.create({
+          data: { userId, action: ONBOARDING_STEP_ACTION, entityType: "onboarding", entityId: step },
+        });
+      }
+    } catch {
+      // best-effort
+    }
+    return { ok: true };
   }
 
   private async getProfileOrThrow(userId: string) {

@@ -2,12 +2,20 @@
 
 import { SignUp } from "@clerk/nextjs";
 import { useEffect } from "react";
-import { useSearchParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
+import { sanitizeNextPath } from "@/lib/onboarding-draft";
 
 const REFERRAL_CODE_STORAGE_KEY = "smartify_referral_code";
 
 export default function SignUpPage() {
   const searchParams = useSearchParams();
+  const { locale } = useParams<{ locale: string }>();
+  // Onboarding drop-off fix (2026-10-11): without an explicit target Clerk
+  // sent new accounts back to the home page, where nothing told them to
+  // finish setting up. /welcome routes them into onboarding (or wherever
+  // they were heading, e.g. ?next=/free-trial, once onboarding is done).
+  const next = sanitizeNextPath(searchParams.get("next"));
+  const afterSignUp = `/${locale}/welcome${next ? `?next=${encodeURIComponent(next)}` : ""}`;
 
   // Referral V1 (2026-09-20) — a referral must be attached "before/at
   // signup" (see spec), but a StudentProfile (Referral.referredStudentId)
@@ -31,7 +39,7 @@ export default function SignUpPage() {
     <div className="flex min-h-screen items-center justify-center bg-[--sf-bg-subtle] py-20">
       {/* Same RTL/bidi fix as sign-in — see that file's comment. */}
       <div dir="ltr">
-        <SignUp />
+        <SignUp forceRedirectUrl={afterSignUp} signInForceRedirectUrl={afterSignUp} />
       </div>
     </div>
   );

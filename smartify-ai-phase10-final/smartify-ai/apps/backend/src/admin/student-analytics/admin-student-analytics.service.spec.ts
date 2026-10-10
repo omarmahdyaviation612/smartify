@@ -49,9 +49,11 @@ function makePrisma() {
       ]),
     },
     instapayPaymentSubmission: { groupBy: g([]), findMany: g([{ submittedAmountEGP: 140 }]) },
-    user: { findMany: g([{ id: "u1", createdAt: daysAgo(6) }, { id: "u2", createdAt: daysAgo(6) }, { id: "u3", createdAt: daysAgo(6) }, { id: "u4", createdAt: daysAgo(2) }]) },
+    // u1-u3 signed up before onboarding step tracking existed; u4 after.
+    user: { findMany: g([{ id: "u1", createdAt: new Date("2026-09-01") }, { id: "u2", createdAt: new Date("2026-09-01") }, { id: "u3", createdAt: new Date("2026-09-01") }, { id: "u4", createdAt: now }]) },
     studentSubject: { findMany: g([{ subject: { nameEn: "Mathematics", grade: { nameEn: "Grade 4", curriculum: { nameEn: "Egyptian National Curriculum" } } } }]) },
     studentSupportTicket: { count: jest.fn().mockResolvedValue(1) },
+    auditLog: { findMany: g([{ userId: "u4", entityId: "profile" }, { userId: "u4", entityId: "curriculum" }]) },
   };
   return { client };
 }
@@ -85,6 +87,8 @@ describe("AdminStudentAnalyticsService", () => {
     expect(o.ai.platformContentUsd).toBeCloseTo(0.2);
     expect(o.totals).toMatchObject({ registeredAccounts: 4, onboardedStudents: 3, payingStudents: 1, mrrEGP: 140, verifiedPaymentsEGPInWindow: 140 });
     expect(o.daily).toHaveLength(30);
+    // Only u4 signed up after step tracking started; it reached step 2 and stopped.
+    expect(o.onboardingFunnel.steps.map((s) => s.count)).toEqual([1, 1, 1, 0, 0, 0]);
     expect(o.breakdowns.governorate[0]).toEqual({ key: "Cairo", count: 2 });
   });
 

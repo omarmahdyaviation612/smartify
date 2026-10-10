@@ -46,6 +46,9 @@ function countBy<T>(items: T[], key: (t: T) => string | null | undefined): Array
   return [...m.entries()].map(([k, count]) => ({ key: k, count })).sort((a, b) => b.count - a.count);
 }
 
+/** When onboarding step tracking (POST /onboarding/progress) went live. */
+export const ONBOARDING_TRACKING_SINCE = new Date("2026-10-10T23:00:00Z");
+
 @Injectable()
 export class AdminStudentAnalyticsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -197,6 +200,26 @@ export class AdminStudentAnalyticsService {
     const completedLesson = rows.filter((r) => r.lessonsCompleted > 0).length;
     const paid = rows.filter((r) => r.stage === "paid").length;
 
+    // Onboarding step funnel — only accounts created since step tracking
+    // shipped, so earlier sign-ups (never tracked) don't skew the drop-offs.
+    const trackedUsers = registeredUsers.filter((u) => u.createdAt >= ONBOARDING_TRACKING_SINCE);
+    const trackedIds = new Set(trackedUsers.map((u) => u.id));
+    const stepLogs = trackedIds.size
+      ? await this.db.auditLog.findMany({ where: { action: "onboarding.step", userId: { in: [...trackedIds] } }, select: { userId: true, entityId: true } })
+      : [];
+    const reached = (step: string) => new Set(stepLogs.filter((l: { userId: string | null; entityId: string | null }) => l.entityId === step && l.userId).map((l: { userId: string | null }) => l.userId)).size;
+    const onboardingFunnel = {
+      trackedSince: ONBOARDING_TRACKING_SINCE.toISOString(),
+      steps: [
+        { stage: "Signed up", count: trackedUsers.length },
+        { stage: "Opened onboarding", count: reached("profile") },
+        { stage: "Entered name & age", count: reached("curriculum") },
+        { stage: "Chose curriculum", count: reached("grade-subjects") },
+        { stage: "Saved grade & subjects", count: rows.filter((r) => trackedIds.has(r.userId)).length },
+        { stage: "Finished placement test", count: reached("plan-ready") },
+      ],
+    };
+
     const ages = countBy(rows, (r) => (r.age <= 6 ? "≤6" : r.age >= 13 ? "13+" : String(r.age)));
 
     return {
@@ -218,6 +241,7 @@ export class AdminStudentAnalyticsService {
         { stage: "Completed a lesson", count: completedLesson },
         { stage: "Paid", count: paid },
       ],
+      onboardingFunnel,
       activity: {
         lessonsStarted: lessonsInWindow.length,
         lessonsCompleted: lessonsInWindow.filter((l) => l.completedAt).length,

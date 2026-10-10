@@ -15,7 +15,7 @@ export class UsersController {
   /** Any authenticated user can read their own profile. */
   @Get("me")
   me(@CurrentUser() user: any) {
-    return this.usersService.findById(user.id);
+    return this.usersService.findMe(user.id);
   }
 
   /** Only admins can list all users — proves RolesGuard end to end. */

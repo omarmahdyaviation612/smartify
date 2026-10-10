@@ -62,7 +62,7 @@ export default async function ForParentsPage({ params }: { params: Promise<{ loc
           <SmartifyContainer className="flex flex-col items-center gap-4">
             <h2 className="text-3xl font-bold text-navy-900">{copy.cta.title}</h2>
             <p className="max-w-xl text-neutral-600">{copy.cta.body}</p>
-            <Link href={`/${locale}/sign-up`}>
+            <Link href={`/${locale}/sign-up?next=${encodeURIComponent("/parent")}`}>
               <SmartifyButton variant="ai">{copy.cta.buttonLabel}</SmartifyButton>
             </Link>
             <p className="max-w-md text-xs text-neutral-400">{copy.cta.disclaimer}</p>

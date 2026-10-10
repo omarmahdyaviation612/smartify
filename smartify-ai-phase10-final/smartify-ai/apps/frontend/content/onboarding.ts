@@ -19,6 +19,8 @@ export interface OnboardingCopy {
     schoolManualLabel: string;
     schoolBackToSearchLabel: string;
     schoolNoResults: string;
+    /** Collapsible optional section on the grade & subjects step. */
+    schoolSectionLabel: string;
   };
   curriculum: {
     title: string;
@@ -65,7 +67,7 @@ const en: OnboardingCopy = {
   steps: ["Profile", "Curriculum", "Grade & Subjects", "Diagnostic", "Your Plan"],
   profile: {
     title: "Let's set up your profile",
-    body: "A few quick details so we can personalize everything that follows.",
+    body: "Just three quick details — it takes less than a minute.",
     fullNameLabel: "Full name",
     ageLabel: "Age",
     countryLabel: "Country",
@@ -79,6 +81,7 @@ const en: OnboardingCopy = {
     schoolManualLabel: "Enter your school name",
     schoolBackToSearchLabel: "Search for my school instead",
     schoolNoResults: "No matching schools found. Try a different search, or enter it manually.",
+    schoolSectionLabel: "School & location (optional)",
   },
   curriculum: {
     title: "Choose your curriculum",
@@ -125,7 +128,7 @@ const ar: OnboardingCopy = {
   steps: ["الملف الشخصي", "المنهج", "الصف والمواد", "التقييم", "خطتك"],
   profile: {
     title: "لنجهز ملفك الشخصي",
-    body: "بعض التفاصيل السريعة حتى نتمكن من تخصيص كل ما يليها.",
+    body: "ثلاث معلومات سريعة فقط — أقل من دقيقة.",
     fullNameLabel: "الاسم الكامل",
     ageLabel: "العمر",
     countryLabel: "الدولة",
@@ -139,6 +142,7 @@ const ar: OnboardingCopy = {
     schoolManualLabel: "اكتب اسم مدرستك",
     schoolBackToSearchLabel: "البحث عن مدرستي بدلاً من ذلك",
     schoolNoResults: "لم يتم العثور على مدارس مطابقة. جرّب بحثًا مختلفًا أو أدخل الاسم يدويًا.",
+    schoolSectionLabel: "المدرسة ومكان السكن (اختياري)",
   },
   curriculum: {
     title: "اختر منهجك الدراسي",

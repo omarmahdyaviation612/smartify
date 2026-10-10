@@ -8,6 +8,7 @@ import { getOnboardingCopy } from "@/content/onboarding";
 import { OnboardingStepper } from "@/components/OnboardingStepper";
 import { ApiError, useApiClient } from "@/lib/api-client";
 import { getQuestionOptionLabel } from "@/lib/question-option-label";
+import { trackOnboardingStep } from "@/lib/onboarding-draft";
 import type { Locale } from "@/content/marketing";
 
 interface DiagnosticQuestion {
@@ -49,6 +50,7 @@ export default function OnboardingDiagnosticPage() {
       return;
     }
 
+    trackOnboardingStep(apiFetch, "diagnostic");
     apiFetch<DiagnosticQuestion[]>("/onboarding/diagnostic")
       .then(setQuestions)
       .catch((error: unknown) => {
