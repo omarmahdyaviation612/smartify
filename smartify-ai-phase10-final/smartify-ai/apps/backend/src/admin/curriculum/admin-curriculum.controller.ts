@@ -5,7 +5,7 @@ import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { UserRole } from "@smartify/shared-types";
 import { AdminCurriculumService } from "./admin-curriculum.service";
-import { assignUnassignedUnitsTermSchema, confirmExtraBookStructureSchema, confirmSubjectStructureSchema, createSharedSubjectAliasSchema, sharedSubjectContentSchema, updateCurriculumSchema, updateGradeSchema, updatePricingPlanSchema, updateSubjectSchema, updateUnitTermSchema } from "@smartify/validation";
+import { assignUnassignedUnitsTermSchema, confirmExtraBookStructureSchema, confirmSubjectStructureSchema, createCurriculumSchema, createSharedSubjectAliasSchema, sharedSubjectContentSchema, updateCurriculumSchema, updateGradeSchema, updatePricingPlanSchema, updateSubjectSchema, updateUnitTermSchema } from "@smartify/validation";
 import { parseBody } from "../../common/validation/parse-body";
 import { uploadOptions, textbookUploadOptions } from "./upload-options";
 
@@ -30,6 +30,11 @@ export class AdminCurriculumController {
   @Get("status")
   getStatus() {
     return this.service.getCurriculumStatus();
+  }
+
+  @Post("curricula")
+  createCurriculum(@Body() body: unknown) {
+    return this.service.createCurriculum(parseBody(createCurriculumSchema, body));
   }
 
   @Patch("curricula/:id")

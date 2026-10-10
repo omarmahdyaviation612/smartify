@@ -118,6 +118,17 @@ export const updateCurriculumSchema = z.object({
   isActive: z.boolean().optional(),
 }).strict();
 
+// Admin "Add curriculum" (2026-10-10) — e.g. Egyptian Languages (لغات),
+// Experimental (تجريبي), American. `code` is optional: when omitted the
+// service derives it from nameEn. `gradeCount` pre-creates Grade 1..N so
+// the new curriculum is usable straight away.
+export const createCurriculumSchema = z.object({
+  nameEn: z.string().trim().min(1).max(200),
+  nameAr: z.string().trim().min(1).max(200),
+  code: z.string().trim().regex(/^[A-Z][A-Z0-9_]{1,39}$/, "Code must be UPPER_SNAKE_CASE, e.g. EG_LANGUAGES").optional(),
+  gradeCount: z.number().int().min(0).max(12).optional(),
+}).strict();
+
 export const updateGradeSchema = z.object({
   nameEn: z.string().trim().min(1).max(200).optional(),
   nameAr: z.string().trim().min(1).max(200).optional(),

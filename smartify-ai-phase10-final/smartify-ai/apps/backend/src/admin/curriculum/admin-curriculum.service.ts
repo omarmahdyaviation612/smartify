@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { ConflictException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AIProviderFactory } from "../../ai/ai-provider.factory";
 import { BadRequestException } from "@nestjs/common";
@@ -13,6 +13,14 @@ import type { ConfirmExtraBookStructureInput, ConfirmSubjectStructureInput } fro
 import { UnitGroundingService } from "../../interactive-lesson/unit-grounding/unit-grounding.service";
 import { isSharedLaunchSubject, sharedSubjectKind } from "../../common/shared-content-subject.util";
 import type { Term } from "@smartify/database";
+
+const ARABIC_GRADE_ORDINALS = ["الأول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس", "السابع", "الثامن", "التاسع", "العاشر", "الحادي عشر", "الثاني عشر"];
+
+/** "Egyptian Languages Curriculum" -> "EGYPTIAN_LANGUAGES_CURRICULUM". Returns "" when nothing usable remains (e.g. an all-Arabic name). */
+export function curriculumCodeFromName(nameEn: string): string {
+  const code = nameEn.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40).replace(/_+$/, "");
+  return /^[A-Z][A-Z0-9_]{1,39}$/.test(code) ? code : "";
+}
 
 @Injectable()
 export class AdminCurriculumService {
@@ -469,6 +477,37 @@ export class AdminCurriculumService {
   // ---- Curricula ----
   listCurricula() {
     return this.prisma.client.curriculum.findMany({ orderBy: { code: "asc" } });
+  }
+
+  /**
+   * Admin "Add curriculum" (2026-10-10). The new curriculum starts HIDDEN
+   * (isActive: false): the public catalog lists any active curriculum that
+   * has an active grade, so showing it before subjects exist would put a
+   * dead-end option in front of students. The admin reveals it with the
+   * existing "Show curriculum to students" button once content is ready.
+   */
+  async createCurriculum(data: { nameEn: string; nameAr: string; code?: string; gradeCount?: number }) {
+    const code = data.code ?? curriculumCodeFromName(data.nameEn);
+    if (!code) throw new BadRequestException("Could not derive a code from the English name — please enter a code like EG_LANGUAGES.");
+    const existing = await this.prisma.client.curriculum.findUnique({ where: { code } });
+    if (existing) throw new ConflictException(`A curriculum with code ${code} already exists.`);
+
+    const gradeCount = data.gradeCount ?? 0;
+    return this.prisma.client.curriculum.create({
+      data: {
+        code,
+        nameEn: data.nameEn,
+        nameAr: data.nameAr,
+        isActive: false,
+        grades: {
+          create: Array.from({ length: gradeCount }, (_, i) => ({
+            nameEn: `Grade ${i + 1}`,
+            nameAr: `الصف ${ARABIC_GRADE_ORDINALS[i] ?? i + 1}`,
+            level: i + 1,
+          })),
+        },
+      },
+    });
   }
 
   updateCurriculum(id: string, data: { nameEn?: string; nameAr?: string; isActive?: boolean }) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { SmartifyContainer } from "@smartify/ui";
 import { AdminGuard } from "@/components/AdminGuard";
 import { ApiError, useApiClient } from "@/lib/api-client";
@@ -1310,6 +1310,79 @@ function SubjectGroundingControl({ subjectId, units, unitCount, onDone }: { subj
   );
 }
 
+// Admin "Add curriculum" (2026-10-10). New curricula are created hidden
+// from students (backend sets isActive: false) so admins can add subjects
+// first, then use "Show curriculum to students".
+function AddCurriculumForm({ onCreated, onCancel }: { onCreated: (c: Curriculum) => void; onCancel: () => void }) {
+  const { apiFetch } = useApiClient();
+  const [nameEn, setNameEn] = useState("");
+  const [nameAr, setNameAr] = useState("");
+  const [code, setCode] = useState("");
+  const [gradeCount, setGradeCount] = useState(6);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!nameEn.trim() || !nameAr.trim()) {
+      setError("English and Arabic names are both required.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const created = await apiFetch<Curriculum>("/admin/curriculum/curricula", {
+        method: "POST",
+        body: JSON.stringify({
+          nameEn: nameEn.trim(),
+          nameAr: nameAr.trim(),
+          gradeCount,
+          ...(code.trim() ? { code: code.trim().toUpperCase() } : {}),
+        }),
+      });
+      onCreated(created);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not create the curriculum.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const inputClass = "w-full rounded-sf border border-neutral-300 px-3 py-2 text-sm";
+  return (
+    <form onSubmit={submit} className="mb-5 space-y-3 rounded-sf border border-neutral-200 bg-[--sf-bg-subtle] p-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="text-sm text-neutral-700">
+          Name (English)
+          <input value={nameEn} onChange={(e) => setNameEn(e.target.value)} placeholder="Egyptian Languages Curriculum" className={inputClass} />
+        </label>
+        <label className="text-sm text-neutral-700">
+          Name (Arabic)
+          <input value={nameAr} onChange={(e) => setNameAr(e.target.value)} placeholder="منهج اللغات" dir="rtl" className={inputClass} />
+        </label>
+        <label className="text-sm text-neutral-700">
+          Code (optional)
+          <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="EG_LANGUAGES" className={`${inputClass} font-mono uppercase`} />
+        </label>
+        <label className="text-sm text-neutral-700">
+          Create grades 1 to
+          <input type="number" min={0} max={12} value={gradeCount} onChange={(e) => setGradeCount(Math.max(0, Math.min(12, Number(e.target.value) || 0)))} className={inputClass} />
+        </label>
+      </div>
+      <p className="text-xs text-neutral-500">The curriculum starts hidden from students. Add its subjects, then click “Show curriculum to students”.</p>
+      {error && <p className="text-sm text-error-600" role="alert">{error}</p>}
+      <div className="flex gap-2">
+        <button type="submit" disabled={busy} className="rounded-sf bg-sf-blue-500 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
+          {busy ? "Creating…" : "Create curriculum"}
+        </button>
+        <button type="button" onClick={onCancel} disabled={busy} className="rounded-sf border border-neutral-300 px-3 py-2 text-sm">
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function CurriculaSection() {
   const { apiFetch } = useApiClient();
   const [curricula, setCurricula] = useState<Curriculum[]>([]);
@@ -1317,6 +1390,7 @@ function CurriculaSection() {
   const [grades, setGrades] = useState<Grade[]>([]);
   const [curriculumActionBusy, setCurriculumActionBusy] = useState(false);
   const [curriculumActionError, setCurriculumActionError] = useState("");
+  const [showAddForm, setShowAddForm] = useState(false);
 
   useEffect(() => {
     apiFetch<Curriculum[]>("/admin/curriculum/curricula").then((data) => {
@@ -1350,9 +1424,23 @@ function CurriculaSection() {
     setGrades((prev) => prev.map((x) => (x.id === g.id ? { ...x, isActive: !x.isActive } : x)));
   }
 
+  function handleCurriculumCreated(created: Curriculum) {
+    setCurricula((prev) => [...prev, created]);
+    setSelectedId(created.id);
+    setShowAddForm(false);
+  }
+
   return (
     <div className="rounded-sf-lg border border-neutral-200 bg-white p-6">
-      <h2 className="mb-4 font-semibold text-navy-900">Curricula</h2>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="font-semibold text-navy-900">Curricula</h2>
+        {!showAddForm && (
+          <button onClick={() => setShowAddForm(true)} className="rounded-sf bg-sf-blue-500 px-3 py-2 text-sm font-medium text-white">
+            + Add curriculum
+          </button>
+        )}
+      </div>
+      {showAddForm && <AddCurriculumForm onCreated={handleCurriculumCreated} onCancel={() => setShowAddForm(false)} />}
       <div className="flex flex-wrap gap-2">
         {curricula.map((c) => (
           <button
