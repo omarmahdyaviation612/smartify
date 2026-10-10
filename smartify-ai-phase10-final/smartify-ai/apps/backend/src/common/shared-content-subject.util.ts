@@ -1,5 +1,26 @@
 export type SharedContentSubjectKind = "ARABIC" | "SOCIAL_STUDIES" | null;
 
+/**
+ * Curricula whose Arabic / Social Studies subjects may reuse the canonical
+ * Egyptian MOE (EG_NATIONAL) content instead of having their own.
+ * EG_LANGUAGE (2026-10-11): Egyptian Language schools study the national
+ * Arabic and Social Studies books.
+ */
+export const SHARED_TARGET_CURRICULUM_CODES = ["BRITISH_INTL", "AMERICAN_INTL", "EG_LANGUAGE"] as const;
+
+export function isSharedTargetCurriculum(code: string | null | undefined): boolean {
+  return (SHARED_TARGET_CURRICULUM_CODES as readonly string[]).includes(code ?? "");
+}
+
+/**
+ * EG_LANGUAGE sells the shared subjects at the same price as Egyptian
+ * National, so a newly linked subject starts with the MOE subject's price.
+ * British/American keep their own prices (new links start unpriced).
+ */
+export function linksAtMoePrice(code: string | null | undefined): boolean {
+  return code === "EG_LANGUAGE";
+}
+
 function normalizedName(value: string | null | undefined): string {
   return (value ?? "")
     .normalize("NFKD")

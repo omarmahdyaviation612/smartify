@@ -6,6 +6,9 @@ import { AdminGuard } from "@/components/AdminGuard";
 import { ApiError, useApiClient } from "@/lib/api-client";
 import { useCurrentUser } from "@/lib/use-current-user";
 
+// Curricula whose Arabic / Social Studies may reuse Egyptian MOE content (mirrors backend shared-content-subject.util.ts).
+const SHARED_TARGET_CURRICULUM_CODES = ["BRITISH_INTL", "AMERICAN_INTL", "EG_LANGUAGE"];
+
 interface Curriculum {
   id: string;
   code: string;
@@ -847,7 +850,7 @@ function SharedContentEditor({
     .flatMap((curriculum) => curriculum.grades.filter((grade) => grade.isActive && grade.level === gradeLevel).flatMap((grade) => grade.subjects))
     .filter((candidate) => candidate.isActive && candidate.units.length > 0 && candidate.shareEligible && subjectKindForShare(candidate.nameEn, candidate.nameAr) === subjectKindForShare(subject.nameEn, subject.nameAr));
 
-  if (!subject.shareEligible || !["BRITISH_INTL", "AMERICAN_INTL"].includes(curriculumCode)) return null;
+  if (!subject.shareEligible || !SHARED_TARGET_CURRICULUM_CODES.includes(curriculumCode)) return null;
 
   async function save() {
     setBusy(true);
@@ -911,7 +914,7 @@ function AddSharedSubjectControl({
     .flatMap((curriculum) => curriculum.grades.filter((sourceGrade) => sourceGrade.isActive && sourceGrade.level === grade.level).flatMap((sourceGrade) => sourceGrade.subjects.filter((source) => source.isActive && source.units.length > 0 && source.shareEligible)))
     .filter((source) => !grade.subjects.some((current) => subjectKindForShare(current.nameEn, current.nameAr) === subjectKindForShare(source.nameEn, source.nameAr)));
 
-  if (!grade.isActive || !["BRITISH_INTL", "AMERICAN_INTL"].includes(curriculumCode) || eligibleSources.length === 0) return null;
+  if (!grade.isActive || !SHARED_TARGET_CURRICULUM_CODES.includes(curriculumCode) || eligibleSources.length === 0) return null;
 
   async function create() {
     if (!sourceId) return;

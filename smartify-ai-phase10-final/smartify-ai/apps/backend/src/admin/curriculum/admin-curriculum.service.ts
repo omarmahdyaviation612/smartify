@@ -11,7 +11,7 @@ import { validateTocExtraction } from "./subject-ingestion/toc-extraction-valida
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
 import type { ConfirmExtraBookStructureInput, ConfirmSubjectStructureInput } from "@smartify/validation";
 import { UnitGroundingService } from "../../interactive-lesson/unit-grounding/unit-grounding.service";
-import { isSharedLaunchSubject, sharedSubjectKind } from "../../common/shared-content-subject.util";
+import { isSharedLaunchSubject, sharedSubjectKind, SHARED_TARGET_CURRICULUM_CODES, isSharedTargetCurriculum, linksAtMoePrice } from "../../common/shared-content-subject.util";
 import type { Term } from "@smartify/database";
 
 const ARABIC_GRADE_ORDINALS = ["الأول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس", "السابع", "الثامن", "التاسع", "العاشر", "الحادي عشر", "الثاني عشر"];
@@ -657,8 +657,10 @@ export class AdminCurriculumService {
       return this.prisma.client.subject.update({ where: { id: targetSubjectId }, data: { sharedContentSubjectId: null }, select: { id: true, sharedContentSubjectId: true } });
     }
     if (input.sharedContentSubjectId === targetSubjectId) throw new BadRequestException("A subject cannot share content with itself.");
-    if (!target.isActive || !target.grade.isActive || !target.grade.curriculum.isActive || !["BRITISH_INTL", "AMERICAN_INTL"].includes(target.grade.curriculum.code)) {
-      throw new BadRequestException("Shared MOE content can only be configured for active British or American subjects.");
+    // The target curriculum itself may still be hidden from students (e.g. an
+    // EG_LANGUAGE curriculum being prepared); its grade and subject must be active.
+    if (!target.isActive || !target.grade.isActive || !isSharedTargetCurriculum(target.grade.curriculum.code)) {
+      throw new BadRequestException("Shared MOE content can only be configured for active British, American or Egyptian Language subjects.");
     }
     if (!isSharedLaunchSubject(target.nameEn, target.nameAr)) throw new BadRequestException("Only Arabic and Social Studies can share MOE content.");
     if (target.sourceFile || target._count.units > 0) throw new BadRequestException("Remove the target textbook and curriculum structure before sharing canonical content.");
@@ -686,8 +688,8 @@ export class AdminCurriculumService {
 
   async createSharedSubjectAlias(targetGradeId: string, sourceSubjectId: string) {
     const grade = await this.prisma.client.grade.findUnique({ where: { id: targetGradeId }, include: { curriculum: true } });
-    if (!grade || !grade.isActive || !grade.curriculum.isActive || !["BRITISH_INTL", "AMERICAN_INTL"].includes(grade.curriculum.code)) {
-      throw new BadRequestException("Choose an active British or American grade.");
+    if (!grade || !grade.isActive || !isSharedTargetCurriculum(grade.curriculum.code)) {
+      throw new BadRequestException("Choose an active British, American or Egyptian Language grade.");
     }
     const source = await this.getCanonicalMoeSubject(sourceSubjectId);
     if (source.grade.level !== grade.level) throw new BadRequestException("Target and MOE source grades must have the same grade level.");
@@ -697,7 +699,7 @@ export class AdminCurriculumService {
       throw new BadRequestException("This grade already has an Arabic or Social Studies subject. Link that subject instead.");
     }
     return this.prisma.client.subject.create({
-      data: { gradeId: targetGradeId, nameEn: source.nameEn, nameAr: source.nameAr, isActive: true, sourceFile: null, priceEGP: null, sharedContentSubjectId: source.id },
+      data: { gradeId: targetGradeId, nameEn: source.nameEn, nameAr: source.nameAr, isActive: true, sourceFile: null, priceEGP: linksAtMoePrice(grade.curriculum.code) ? source.priceEGP : null, sharedContentSubjectId: source.id },
       select: { id: true, gradeId: true, nameEn: true, nameAr: true, sharedContentSubjectId: true },
     });
   }
@@ -715,11 +717,12 @@ export class AdminCurriculumService {
         where: { isActive: true, curriculum: { code: "EG_NATIONAL", isActive: true } },
         select: { id: true, level: true, subjects: {
           where: { isActive: true, sharedContentSubjectId: null },
-          select: { id: true, nameEn: true, nameAr: true, _count: { select: { units: true } } },
+          select: { id: true, nameEn: true, nameAr: true, priceEGP: true, _count: { select: { units: true } } },
         } },
       });
       const targetGrades = await tx.grade.findMany({
-        where: { isActive: true, curriculum: { code: { in: ["BRITISH_INTL", "AMERICAN_INTL"] }, isActive: true } },
+        // Target curricula may still be hidden from students while being prepared.
+        where: { isActive: true, curriculum: { code: { in: [...SHARED_TARGET_CURRICULUM_CODES] } } },
         select: { id: true, level: true, curriculum: { select: { code: true } }, subjects: {
           select: { id: true, nameEn: true, nameAr: true, isActive: true, sourceFile: true, sharedContentSubjectId: true, _count: { select: { units: true } } },
         } },
@@ -755,7 +758,7 @@ export class AdminCurriculumService {
           if (!target) {
             await tx.subject.create({ data: {
               gradeId: targetGrade.id, nameEn: source.nameEn, nameAr: source.nameAr, isActive: true,
-              sourceFile: null, priceEGP: null, sharedContentSubjectId: source.id,
+              sourceFile: null, priceEGP: linksAtMoePrice(targetGrade.curriculum.code) ? source.priceEGP : null, sharedContentSubjectId: source.id,
             } });
             report.created++;
             continue;
