@@ -1,4 +1,4 @@
-export type SharedContentSubjectKind = "ARABIC" | "SOCIAL_STUDIES" | null;
+export type SharedContentSubjectKind = "ARABIC" | "SOCIAL_STUDIES" | "ENGLISH" | null;
 
 /**
  * Curricula whose Arabic / Social Studies subjects may reuse the canonical
@@ -34,11 +34,40 @@ export function sharedSubjectKind(nameEn: string, nameAr?: string | null): Share
   const names = `${normalizedName(nameEn)} ${normalizedName(nameAr)}`;
   if (names.includes("arabic") || names.includes("العربية") || names.includes("عربي")) return "ARABIC";
   if ((names.includes("social") && names.includes("studies")) || names.includes("الدراسات الاجتماعية")) return "SOCIAL_STUDIES";
+  // NFKD splits the hamza off "إ", so match the stable part of "الإنجليزية".
+  if (names.includes("english") || names.includes("نجليزي")) return "ENGLISH";
   return null;
 }
 
-export function isSharedLaunchSubject(nameEn: string, nameAr?: string | null): boolean {
-  return sharedSubjectKind(nameEn, nameAr) !== null;
+type SharedKind = Exclude<SharedContentSubjectKind, null>;
+const ALL_SHARED_KINDS: readonly SharedKind[] = ["ARABIC", "SOCIAL_STUDIES", "ENGLISH"];
+
+/**
+ * Which subjects each curriculum may reuse from Egyptian MOE. English
+ * (2026-10-11) is shared only with Egyptian Language schools — British and
+ * American keep their own English textbooks.
+ */
+const SHARED_KINDS_BY_TARGET: Record<string, readonly SharedKind[]> = {
+  BRITISH_INTL: ["ARABIC", "SOCIAL_STUDIES"],
+  AMERICAN_INTL: ["ARABIC", "SOCIAL_STUDIES"],
+  EG_LANGUAGE: ["ARABIC", "SOCIAL_STUDIES", "ENGLISH"],
+};
+
+/** Shareable subject kinds for a curriculum: every kind for the EG_NATIONAL source, the allowed list for a target. */
+export function sharedKindsForCurriculum(code: string | null | undefined): readonly SharedKind[] {
+  if (code === "EG_NATIONAL") return ALL_SHARED_KINDS;
+  return SHARED_KINDS_BY_TARGET[code ?? ""] ?? [];
+}
+
+/**
+ * Whether a subject can take part in MOE content sharing. Without a
+ * curriculum code this keeps the original meaning (Arabic / Social Studies).
+ */
+export function isSharedLaunchSubject(nameEn: string, nameAr?: string | null, curriculumCode?: string | null): boolean {
+  const kind = sharedSubjectKind(nameEn, nameAr);
+  if (!kind) return false;
+  if (curriculumCode === undefined) return kind !== "ENGLISH";
+  return sharedKindsForCurriculum(curriculumCode).includes(kind);
 }
 
 export function canonicalContentSubjectId(subject: {

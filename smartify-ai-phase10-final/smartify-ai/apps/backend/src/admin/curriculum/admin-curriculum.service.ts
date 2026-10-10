@@ -11,7 +11,7 @@ import { validateTocExtraction } from "./subject-ingestion/toc-extraction-valida
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
 import type { ConfirmExtraBookStructureInput, ConfirmSubjectStructureInput } from "@smartify/validation";
 import { UnitGroundingService } from "../../interactive-lesson/unit-grounding/unit-grounding.service";
-import { isSharedLaunchSubject, sharedSubjectKind, SHARED_TARGET_CURRICULUM_CODES, isSharedTargetCurriculum, linksAtMoePrice } from "../../common/shared-content-subject.util";
+import { isSharedLaunchSubject, sharedSubjectKind, sharedKindsForCurriculum, SHARED_TARGET_CURRICULUM_CODES, isSharedTargetCurriculum, linksAtMoePrice } from "../../common/shared-content-subject.util";
 import type { Term } from "@smartify/database";
 
 const ARABIC_GRADE_ORDINALS = ["الأول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس", "السابع", "الثامن", "التاسع", "العاشر", "الحادي عشر", "الثاني عشر"];
@@ -408,7 +408,7 @@ export class AdminCurriculumService {
             sourceFile: subject.sourceFile,
             sharedContentSubjectId: subject.sharedContentSubjectId,
             sharedContentSubject: subject.sharedContentSubject,
-            shareEligible: isSharedLaunchSubject(subject.nameEn, subject.nameAr),
+            shareEligible: isSharedLaunchSubject(subject.nameEn, subject.nameAr, curriculum.code),
             textbookMapped: subject.sourceFile != null,
             // Subject-based pricing (2026-09-20) — null means "not yet priced by an admin", never a fabricated default.
             priceEGP: subject.priceEGP != null ? Number(subject.priceEGP) : null,
@@ -662,12 +662,12 @@ export class AdminCurriculumService {
     if (!target.isActive || !target.grade.isActive || !isSharedTargetCurriculum(target.grade.curriculum.code)) {
       throw new BadRequestException("Shared MOE content can only be configured for active British, American or Egyptian Language subjects.");
     }
-    if (!isSharedLaunchSubject(target.nameEn, target.nameAr)) throw new BadRequestException("Only Arabic and Social Studies can share MOE content.");
+    if (!isSharedLaunchSubject(target.nameEn, target.nameAr, target.grade.curriculum.code)) throw new BadRequestException("This subject cannot share MOE content in this curriculum.");
     if (target.sourceFile || target._count.units > 0) throw new BadRequestException("Remove the target textbook and curriculum structure before sharing canonical content.");
 
     const source = await this.getCanonicalMoeSubject(input.sharedContentSubjectId);
     if (source.grade.level !== target.grade.level) throw new BadRequestException("Target and MOE source grades must have the same grade level.");
-    if (!isSharedLaunchSubject(source.nameEn, source.nameAr) || sharedSubjectKind(target.nameEn, target.nameAr) !== sharedSubjectKind(source.nameEn, source.nameAr)) {
+    if (!isSharedLaunchSubject(source.nameEn, source.nameAr, target.grade.curriculum.code) || sharedSubjectKind(target.nameEn, target.nameAr) !== sharedSubjectKind(source.nameEn, source.nameAr)) {
       throw new BadRequestException("The target and MOE source must be the same supported subject.");
     }
     return this.prisma.client.subject.update({ where: { id: targetSubjectId }, data: { sharedContentSubjectId: source.id }, select: { id: true, sharedContentSubjectId: true } });
@@ -682,7 +682,7 @@ export class AdminCurriculumService {
       throw new BadRequestException("Choose an active canonical subject in the Egyptian MOE curriculum.");
     }
     if (source._count.units === 0) throw new BadRequestException("The Egyptian MOE subject has no curriculum content to share.");
-    if (!isSharedLaunchSubject(source.nameEn, source.nameAr)) throw new BadRequestException("Only Arabic and Social Studies can be shared.");
+    if (!isSharedLaunchSubject(source.nameEn, source.nameAr, "EG_NATIONAL")) throw new BadRequestException("Only Arabic, Social Studies and English can be shared.");
     return source;
   }
 
@@ -693,6 +693,7 @@ export class AdminCurriculumService {
     }
     const source = await this.getCanonicalMoeSubject(sourceSubjectId);
     if (source.grade.level !== grade.level) throw new BadRequestException("Target and MOE source grades must have the same grade level.");
+    if (!isSharedLaunchSubject(source.nameEn, source.nameAr, grade.curriculum.code)) throw new BadRequestException("This subject cannot be shared with this curriculum.");
 
     const existingSubjects = await this.prisma.client.subject.findMany({ where: { gradeId: targetGradeId }, select: { nameEn: true, nameAr: true } });
     if (existingSubjects.some((item) => sharedSubjectKind(item.nameEn, item.nameAr) === sharedSubjectKind(source.nameEn, source.nameAr))) {
@@ -731,14 +732,15 @@ export class AdminCurriculumService {
 
       for (const targetGrade of targetGrades) {
         const matchingSourceGrades = sourceGrades.filter((grade) => grade.level === targetGrade.level);
+        const kinds = sharedKindsForCurriculum(targetGrade.curriculum.code);
         if (matchingSourceGrades.length > 1) {
-          for (const kind of ["ARABIC", "SOCIAL_STUDIES"] as const) {
+          for (const kind of kinds) {
             report.conflicts.push({ gradeId: targetGrade.id, curriculumCode: targetGrade.curriculum.code, kind, reason: "MULTIPLE_MOE_GRADES" });
           }
           continue;
         }
         const sourceGrade = matchingSourceGrades[0];
-        for (const kind of ["ARABIC", "SOCIAL_STUDIES"] as const) {
+        for (const kind of kinds) {
           const sources = sourceGrade?.subjects.filter((subject) => sharedSubjectKind(subject.nameEn, subject.nameAr) === kind && subject._count.units > 0) ?? [];
           if (sources.length > 1) {
             report.conflicts.push({ gradeId: targetGrade.id, curriculumCode: targetGrade.curriculum.code, kind, reason: "MULTIPLE_MOE_SOURCES" });

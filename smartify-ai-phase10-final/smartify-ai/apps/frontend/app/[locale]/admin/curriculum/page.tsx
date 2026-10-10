@@ -8,6 +8,12 @@ import { useCurrentUser } from "@/lib/use-current-user";
 
 // Curricula whose Arabic / Social Studies may reuse Egyptian MOE content (mirrors backend shared-content-subject.util.ts).
 const SHARED_TARGET_CURRICULUM_CODES = ["BRITISH_INTL", "AMERICAN_INTL", "EG_LANGUAGE"];
+// English is shared only with Egyptian Language schools (mirrors sharedKindsForCurriculum).
+const SHARED_KINDS_BY_CURRICULUM: Record<string, string[]> = {
+  BRITISH_INTL: ["ARABIC", "SOCIAL_STUDIES"],
+  AMERICAN_INTL: ["ARABIC", "SOCIAL_STUDIES"],
+  EG_LANGUAGE: ["ARABIC", "SOCIAL_STUDIES", "ENGLISH"],
+};
 
 interface Curriculum {
   id: string;
@@ -887,10 +893,11 @@ function SharedContentEditor({
   );
 }
 
-function subjectKindForShare(nameEn: string, nameAr: string): "ARABIC" | "SOCIAL_STUDIES" | null {
+function subjectKindForShare(nameEn: string, nameAr: string): "ARABIC" | "SOCIAL_STUDIES" | "ENGLISH" | null {
   const value = `${nameEn} ${nameAr}`.toLocaleLowerCase();
   if (value.includes("arabic") || value.includes("عربي") || value.includes("العربية")) return "ARABIC";
   if ((value.includes("social") && value.includes("studies")) || value.includes("الدراسات الاجتماعية")) return "SOCIAL_STUDIES";
+  if (value.includes("english") || value.includes("نجليزي")) return "ENGLISH";
   return null;
 }
 
@@ -912,6 +919,7 @@ function AddSharedSubjectControl({
   const eligibleSources = curricula
     .filter((curriculum) => curriculum.code === "EG_NATIONAL" && curriculum.isActive)
     .flatMap((curriculum) => curriculum.grades.filter((sourceGrade) => sourceGrade.isActive && sourceGrade.level === grade.level).flatMap((sourceGrade) => sourceGrade.subjects.filter((source) => source.isActive && source.units.length > 0 && source.shareEligible)))
+    .filter((source) => (SHARED_KINDS_BY_CURRICULUM[curriculumCode] ?? []).includes(subjectKindForShare(source.nameEn, source.nameAr) ?? ""))
     .filter((source) => !grade.subjects.some((current) => subjectKindForShare(current.nameEn, current.nameAr) === subjectKindForShare(source.nameEn, source.nameAr)));
 
   if (!grade.isActive || !SHARED_TARGET_CURRICULUM_CODES.includes(curriculumCode) || eligibleSources.length === 0) return null;

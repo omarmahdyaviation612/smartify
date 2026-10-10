@@ -10,8 +10,14 @@ describe("shared content subject classification", () => {
     expect(isSharedLaunchSubject(nameEn, nameAr)).toBe(true);
   });
 
+  it("classifies English but never shares it without a curriculum that allows it", () => {
+    expect(sharedSubjectKind("English", "اللغة الإنجليزية")).toBe("ENGLISH");
+    expect(isSharedLaunchSubject("English", "اللغة الإنجليزية")).toBe(false);
+    expect(isSharedLaunchSubject("English", "اللغة الإنجليزية", "BRITISH_INTL")).toBe(false);
+    expect(isSharedLaunchSubject("English", "اللغة الإنجليزية", "EG_LANGUAGE")).toBe(true);
+  });
+
   it("does not classify other subjects", () => {
-    expect(sharedSubjectKind("English", "اللغة الإنجليزية")).toBeNull();
     expect(isSharedLaunchSubject("Mathematics", "الرياضيات")).toBe(false);
   });
 });
