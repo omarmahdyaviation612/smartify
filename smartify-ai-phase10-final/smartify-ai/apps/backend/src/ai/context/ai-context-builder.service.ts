@@ -22,6 +22,8 @@ export interface LessonStepInfo {
   objective: string;
   conceptKey?: string;
   checkType?: string;
+  /** The textbook concepts (resolved from the grounding slice) this step must fully teach/check. */
+  concepts?: Array<{ name: string; description: string }>;
 }
 
 export interface LessonTeachingContext {
@@ -56,6 +58,8 @@ export interface LessonTeachingContext {
    * contradict it. Plain spoken-friendly text output, no JSON.
    */
   mode: "deliver" | "evaluate_check" | "interrupt" | "narrate_check_result";
+  /** interrupt mode only: the lesson is finished and the student is reviewing it (2026-10-10). */
+  lessonCompleted?: boolean;
   /**
    * Topic-scoped grounding (see grounding-selector.util.ts), already
    * selected once per topic with zero extra AI/DB calls — the SAME slice
@@ -327,7 +331,9 @@ export class AIContextBuilderService {
       "- NEVER ask filler questions such as \"How are you?\", \"Are you ready?\", \"Shall we begin?\", \"Are you excited?\", \"Do you understand?\", or ask for permission just to continue. This applies in EVERY language you respond in — in Arabic this specifically means never writing things like \"إزيك؟\", \"أخبارك إيه؟\", \"جاهز؟\" / \"جاهزة؟\", \"تمام؟\", \"يلا نبدأ؟\", or \"فهمتِ؟\" / \"فاهم؟\". Never end a teaching turn with a permission-seeking or comprehension-checking question at all — end on the content itself, or (for a CHECK step only) on the actual check question.",
       "- Do not greet more than once per lesson. If this is the very first step (an INTRO step), one brief greeting merged directly into starting the teaching is fine; for every other step, skip greetings entirely and continue teaching.",
       "- Every message must have real educational value — no purely social turns.",
-      "- Keep each turn concise: a few short sentences at most, never a long monologue or a textbook-style paragraph.",
+      ctx.currentStep.concepts?.length && ["EXPLAIN", "EXAMPLE", "REVIEW"].includes(ctx.currentStep.type) && ctx.mode === "deliver"
+        ? "- Use short, simple sentences, but say as much as needed to teach EVERY concept listed for this step completely (typically 2-5 short sentences per concept) — never skip or merely name a listed concept. No textbook-style paragraphs."
+        : "- Keep each turn concise: a few short sentences at most, never a long monologue or a textbook-style paragraph.",
     ];
 
     const stepInstruction = [
@@ -335,6 +341,14 @@ export class AIContextBuilderService {
       `- Step type: ${ctx.currentStep.type}`,
       `- What this step must accomplish: ${ctx.currentStep.objective}`,
       ctx.currentStep.conceptKey ? `- Concept: ${ctx.currentStep.conceptKey}` : "",
+      ctx.currentStep.concepts?.length
+        ? [
+            ctx.currentStep.type === "CHECK"
+              ? "- Textbook concepts this check covers:"
+              : "- Textbook concepts this step MUST fully teach (every one, with its key facts and vocabulary from the reference notes):",
+            ...ctx.currentStep.concepts.map((c) => `  * ${c.name}: ${c.description}`),
+          ].join("\n")
+        : "",
       ctx.teachingStrategy
         ? `- Current teaching strategy: ${ctx.teachingStrategy}\n- Strategy instruction: ${ctx.teachingStrategyGuidance ?? ""}\n- STRATEGY OVERRIDE RULE: "What this step must accomplish" above defines WHAT concept/question to teach — it never dictates HOW to represent it. The strategy instruction above defines HOW. If the objective's own wording or example (e.g. a specific countable-object scenario) conflicts with the current teaching strategy, the teaching strategy instruction ALWAYS wins: keep the same underlying question/numbers, but restate them using the required representation instead of the objective's literal example.`
         : "",
@@ -390,7 +404,9 @@ export class AIContextBuilderService {
       return [
         `You are the Smartify AI Teacher, teaching ${ctx.studentFirstName} (age ${ctx.age}) a ${ctx.subjectNameEn} lesson: "${ctx.lessonTitleEn}".`,
         "",
-        "The student just interrupted the current teaching step with a question, unrelated to answering any check (no check is currently pending). Answer it concisely and correctly, then briefly note you'll continue the lesson — do NOT restart the lesson, do NOT re-teach the whole step from scratch, and do NOT advance to a different step than the one below.",
+        ctx.lessonCompleted
+          ? "This lesson is already COMPLETE — the student came back to review it and is asking a question about it. Answer clearly and correctly, using what this lesson teaches (and the reference notes, if provided). Re-explain a concept more simply if they ask. Do NOT say the lesson will continue, do NOT start new lesson steps, and do NOT ask a quiz question unless they ask to be tested."
+          : "The student just interrupted the current teaching step with a question, unrelated to answering any check (no check is currently pending). Answer it concisely and correctly, then briefly note you'll continue the lesson — do NOT restart the lesson, do NOT re-teach the whole step from scratch, and do NOT advance to a different step than the one below.",
         "",
         ...stepInstruction,
         ...groundingSection,
@@ -632,6 +648,13 @@ export class AIContextBuilderService {
           "",
           "The grounding above is the PRIMARY source for what this lesson must teach — its concepts, facts, and terminology define the curriculum scope for this Topic. You may add a LIMITED amount of reliable general knowledge only to improve explanation (a simple analogy, a child-friendly example, a short clarification, a prerequisite reminder) — never to invent a substantially different curriculum or introduce a major concept the grounding does not cover. As a rough guide (a judgment call, not a token count): roughly 80-90% of the planned content should be directed by the grounding above, at most 10-20% general supporting enrichment.",
           "",
+          "COMPLETE COVERAGE (mandatory — the lesson must teach the WHOLE topic, not a sample of it):",
+          `- This topic has ${groundingSlice.concepts.length} textbook concept(s). EVERY one of them must be taught by at least one EXPLAIN or EXAMPLE step:`,
+          ...groundingSlice.concepts.map((c) => `  * "${c.name}"`),
+          '- On every EXPLAIN, EXAMPLE and CHECK step, include a "concepts" array listing the EXACT concept name(s) above (copied character-for-character) that the step teaches or checks.',
+          "- Give each concept its own EXPLAIN step; only combine two concepts in one step when they are inseparable. Use the concept's facts and vocabulary from the grounding in that step's objective plan.",
+          "- Do not stop after the first one or two concepts — a lesson that leaves any listed concept untaught is rejected.",
+          "",
         ]
       : [];
 
@@ -641,7 +664,7 @@ export class AIContextBuilderService {
       `Curriculum: ${ctx.curriculumNameEn}. Grade: ${ctx.gradeNameEn}. Subject: ${ctx.subjectNameEn}. Unit: ${ctx.unitNameEn}.`,
       `Topic to plan: "${ctx.topicNameEn}" (${ctx.topicNameAr}). Student age range: ${ctx.studentAgeRange}.`,
       groundingSlice
-        ? "Propose 2 to 4 learning objectives yourself, in BOTH English and Arabic, grounded in the textbook material above — your own original wording, but representing what the grounding actually covers, not invented from the topic title alone. Each Arabic translation must be your own accurate, natural rendering of your own English objective — never a placeholder, never left empty."
+        ? "Propose 2 to 6 learning objectives yourself (enough to cover every textbook concept below), in BOTH English and Arabic, grounded in the textbook material below — your own original wording, but representing what the grounding actually covers, not invented from the topic title alone. Each Arabic translation must be your own accurate, natural rendering of your own English objective — never a placeholder, never left empty."
         : "No learning objectives exist yet for this topic — propose 2 to 4 of your own, original, age-appropriate objectives yourself, in BOTH English and Arabic. Each Arabic translation must be your own accurate, natural rendering of your own English objective — never a placeholder, never left empty.",
       "",
       ...groundingSection,
@@ -649,10 +672,14 @@ export class AIContextBuilderService {
       "TASK: produce (1) this lesson's learning objectives and (2) an ordered array of teaching steps compatible with the Interactive Lesson engine's teachingStepsJson format — the SAME format already used for every published lesson in this curriculum.",
       "",
       "Respond with ONLY a single JSON object, no other text, in exactly this shape:",
-      '{"topicNameEn": "<must exactly match the topic given above>", "learningObjectives": [ { "objectiveEn": "...", "objectiveAr": "..." }, ... ], "steps": [ { "id": "s1", "type": "INTRO", "order": 1, "objective": "...", "conceptKey": "..." }, ... ]}',
+      groundingSlice
+        ? '{"topicNameEn": "<must exactly match the topic given above>", "learningObjectives": [ { "objectiveEn": "...", "objectiveAr": "..." }, ... ], "steps": [ { "id": "s1", "type": "INTRO", "order": 1, "objective": "..." }, { "id": "s2", "type": "EXPLAIN", "order": 2, "objective": "...", "conceptKey": "...", "concepts": ["<exact concept name>"] }, ... ]}'
+        : '{"topicNameEn": "<must exactly match the topic given above>", "learningObjectives": [ { "objectiveEn": "...", "objectiveAr": "..." }, ... ], "steps": [ { "id": "s1", "type": "INTRO", "order": 1, "objective": "...", "conceptKey": "..." }, ... ]}',
       "",
       "OBJECTIVE RULES:",
-      "- 2 to 4 objectives, each a complete sentence describing one concrete, checkable thing the student will be able to do.",
+      groundingSlice
+        ? "- 2 to 6 objectives, each a complete sentence describing one concrete, checkable thing the student will be able to do; together they must span every textbook concept listed above."
+        : "- 2 to 4 objectives, each a complete sentence describing one concrete, checkable thing the student will be able to do.",
       "- objectiveAr must be a real, natural Arabic sentence — not a transliteration, not English, not empty.",
       "",
       "STEP RULES:",
@@ -660,7 +687,9 @@ export class AIContextBuilderService {
       '- "order" must equal the step\'s 1-based position in the array (the engine progresses by array order, not by this field, but they must always agree).',
       '- "id" must be a short unique string per step (e.g. "s1", "s2", ...).',
       '- "objective" is a PLANNING INSTRUCTION describing WHAT that step must accomplish (one or two sentences) — NEVER the actual scripted teacher speech. The runtime teacher generates the real wording separately, per student, at lesson time.',
-      '- Target this approximate structure unless the topic genuinely needs otherwise: INTRO, EXPLAIN, CHECK, EXAMPLE, CHECK, REVIEW, COMPLETE (roughly 6-8 steps total).',
+      groundingSlice
+        ? `- Structure: INTRO, then for EACH textbook concept an EXPLAIN step (add an EXAMPLE step where a worked example genuinely helps), with a CHECK step after every one or two concepts, then REVIEW (recapping ALL the concepts), then COMPLETE. With ${groundingSlice.concepts.length} concept(s) that is about ${Math.max(7, groundingSlice.concepts.length * 2 + 3)} steps — never more than ${Math.min(30, Math.max(10, groundingSlice.concepts.length * 2 + 6))}.`
+        : '- Target this approximate structure unless the topic genuinely needs otherwise: INTRO, EXPLAIN, CHECK, EXAMPLE, CHECK, REVIEW, COMPLETE (roughly 6-8 steps total).',
       '- At least one CHECK step is required; include a "checkType" of "conceptual" or "applied" on each CHECK step.',
       '- COMPLETE must always be the LAST step.',
       '- Include "conceptKey" (a short snake_case label) on steps where it clarifies what specific idea that step targets.',

@@ -13,6 +13,14 @@ export interface TeachingStep {
   order: number;
   objective: string;
   conceptKey?: string;
+  /**
+   * 2026-10-10 (lesson completeness): the EXACT names of the Topic's
+   * textbook grounding concepts this step teaches/checks. Lets code verify
+   * every grounded concept is actually taught (lesson-concept-coverage.util.ts)
+   * and lets the runtime teacher be told precisely what each step must
+   * cover. Optional — lessons generated before this field existed omit it.
+   */
+  concepts?: string[];
   required?: boolean;
   checkType?: string;
   visual?: LessonVisualRef;

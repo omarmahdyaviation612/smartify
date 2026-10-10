@@ -271,11 +271,21 @@ export async function installAutoDraftIntoTopic(
   // rows other code (e.g. question generation's own-lesson-objectives
   // lookup) would then read alongside the new one.
   await tx.lessonDraft.updateMany({ where: { publishedTopicId: topicId }, data: { publishedTopicId: null } });
+  // 2026-10-10 (safe regeneration): the previous AI Lesson row is REUSED, not
+  // deleted. StudentProgress references Lesson by FK, so deleting it made any
+  // regeneration of a Topic students had already studied fail (the documented
+  // KNOWN LIMITATION in regenerate-topic-content.ts). Its objectives are
+  // replaced below; any older duplicate rows are removed only when no
+  // StudentProgress points at them.
   const staleLessons = await tx.lesson.findMany({ where: { topicId, isAiGenerated: true }, select: { id: true } });
+  const [keptLesson, ...duplicateLessons] = staleLessons;
   if (staleLessons.length > 0) {
-    const staleLessonIds = staleLessons.map((l) => l.id);
-    await tx.learningObjective.deleteMany({ where: { lessonId: { in: staleLessonIds } } });
-    await tx.lesson.deleteMany({ where: { id: { in: staleLessonIds } } });
+    await tx.learningObjective.deleteMany({ where: { lessonId: { in: staleLessons.map((l) => l.id) } } });
+  }
+  for (const duplicate of duplicateLessons) {
+    if ((await tx.studentProgress.count({ where: { lessonId: duplicate.id } })) === 0) {
+      await tx.lesson.delete({ where: { id: duplicate.id } });
+    }
   }
 
   const topic = await tx.topic.update({
@@ -298,17 +308,24 @@ export async function installAutoDraftIntoTopic(
     },
   });
 
-  const lesson = await tx.lesson.create({
-    data: {
-      topicId: topic.id,
-      nameEn: draft.topicNameEn,
-      nameAr: draft.topicNameAr,
-      order: 1,
-      isAiGenerated: true,
-      needsReview: true, // AI-authored objectives, never human-reviewed — see this method's doc comment
-      isPlaceholder: false,
-    },
-  });
+  const lessonData = {
+    nameEn: draft.topicNameEn,
+    nameAr: draft.topicNameAr,
+    order: 1,
+    isAiGenerated: true,
+    needsReview: true, // AI-authored objectives, never human-reviewed — see this method's doc comment
+    isPlaceholder: false,
+  };
+  const lesson = keptLesson
+    ? await tx.lesson.update({ where: { id: keptLesson.id }, data: lessonData })
+    : await tx.lesson.create({ data: { topicId: topic.id, ...lessonData } });
+
+  // Steps were just replaced: an IN_PROGRESS session's currentStepIndex and
+  // stepResults point into the OLD step list. Restart those sessions on the new
+  // lesson (fresh conversation; the old one is kept as history). COMPLETED
+  // sessions are untouched — the student keeps "Completed" and can open the
+  // updated lesson from review mode.
+  if (keptLesson) await restartInFlightLessonSessions(tx, topicId);
 
   const createdObjectives = [];
   for (const objective of objectives) {
@@ -325,4 +342,26 @@ export async function installAutoDraftIntoTopic(
   });
 
   return { topic, lesson, createdObjectives };
+}
+
+/**
+ * Restarts every IN_PROGRESS LessonSession of a Topic whose teachingSteps were
+ * replaced, so no session keeps an index into a step list that no longer
+ * exists. Returns how many sessions were restarted.
+ */
+export async function restartInFlightLessonSessions(tx: Prisma.TransactionClient, topicId: string): Promise<number> {
+  const sessions = await tx.lessonSession.findMany({
+    where: { topicId, status: "IN_PROGRESS" },
+    select: { id: true, studentId: true, conversation: { select: { subjectId: true, title: true } } },
+  });
+  for (const session of sessions) {
+    const conversation = await tx.aIConversation.create({
+      data: { studentId: session.studentId, subjectId: session.conversation?.subjectId ?? null, topicId, title: session.conversation?.title ?? null },
+    });
+    await tx.lessonSession.update({
+      where: { id: session.id },
+      data: { conversationId: conversation.id, currentStepIndex: 0, stepResultsJson: [], nonProgressTurns: 0 },
+    });
+  }
+  return sessions.length;
 }

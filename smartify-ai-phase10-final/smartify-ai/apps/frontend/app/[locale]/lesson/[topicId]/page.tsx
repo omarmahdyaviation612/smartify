@@ -46,6 +46,10 @@ interface LessonState {
   readyToContinue?: boolean;
   content?: string | null;
   completed?: boolean;
+  /** Review mode: every teacher turn of a completed lesson, oldest first (getState only). */
+  transcript?: string[];
+  /** Review mode: the lesson's content was regenerated after this student completed it. */
+  lessonUpdated?: boolean;
   visual?: { type: string; status: "NOT_GENERATED" | "GENERATED"; url: string | null } | null;
   responseVisual?: VisualInstruction | null;
   preparation?: { status: "PREPARING" | "READY" | "CONFIGURATION_ERROR"; retryAfterMs?: number; stage?: "grounding" | "authoring" };
@@ -304,7 +308,11 @@ export default function InteractiveLessonPage() {
           schedulePreparation(run, 0);
           return;
         }
-        if (data.started && data.content) {
+        if (data.started && data.completed && data.transcript && data.transcript.length > 0) {
+          // Review mode: show the whole finished lesson, not just its last turn.
+          setResumed(false);
+          setTurns(data.transcript.map((content) => ({ role: "teacher" as const, content })));
+        } else if (data.started && data.content) {
           setResumed(!data.completed);
           setTurns([{ role: "teacher", content: data.content }]);
           if (autoPlay && !data.completed) playTurn(0, data.content, data.conversationId);
@@ -407,6 +415,32 @@ export default function InteractiveLessonPage() {
       setCheckError(copy.checkError);
     } finally {
       setCheckSubmitting(false);
+    }
+  }
+
+  // Review mode: study a completed lesson again from step one (it stays
+  // "Completed"). The server restarts the session and delivers the first step.
+  async function handleRestart() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await apiFetch<LessonState>(`/lesson/topics/${topicId}/restart`, { method: "POST" });
+      Object.values(audioElements.current).forEach((audio) => audio.pause());
+      audioElements.current = {};
+      audioUrls.current = {};
+      setPlayback({});
+      setResumed(false);
+      setCheckQuestions(null);
+      setCheckAnswers({});
+      setCheckResult(null);
+      setState(result);
+      setTurns(result.content ? [{ role: "teacher", content: result.content }] : []);
+      if (autoPlay && result.content) playTurn(0, result.content, result.conversationId);
+    } catch (err: any) {
+      setError(displayableErrorMessage(err, copy.genericError));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -534,6 +568,7 @@ export default function InteractiveLessonPage() {
           </div>
 
           {resumed && !completed && <p className="mb-3 text-xs text-neutral-400">{copy.resumedNotice}</p>}
+          {completed && turns.length > 1 && <p className="mb-3 text-xs text-sf-purple-600">{copy.reviewNotice}</p>}
 
           <div className="flex-1 space-y-4 overflow-y-auto rounded-sf-lg border border-neutral-200 bg-white p-6">
             {turns.length === 0 && !started && (
@@ -626,6 +661,17 @@ export default function InteractiveLessonPage() {
               <div className="rounded-sf-lg bg-[--sf-bg-subtle] p-5 text-center">
                 <p className="font-semibold text-navy-900">{copy.completedTitle}</p>
                 <p className="mt-1 text-sm text-neutral-600">{copy.completedBody}</p>
+                {state?.lessonUpdated && (
+                  <div className="mx-auto mt-4 max-w-md rounded-sf-lg border border-sf-purple-100 bg-white p-4">
+                    <p className="font-semibold text-sf-purple-600">{copy.lessonUpdatedTitle}</p>
+                    <p className="mt-1 text-sm text-neutral-600">{copy.lessonUpdatedBody}</p>
+                  </div>
+                )}
+                <div className="mt-4 flex justify-center">
+                  <SmartifyButton type="button" variant="ai" onClick={handleRestart} disabled={busy}>
+                    {busy ? copy.restarting : state?.lessonUpdated ? copy.studyUpdatedLesson : copy.restartLesson}
+                  </SmartifyButton>
+                </div>
               </div>
             )}
 
@@ -681,9 +727,9 @@ export default function InteractiveLessonPage() {
           {micError && <p className="mt-3 text-sm text-error-500">{micError}</p>}
           {error && <p className="mt-3 text-sm text-error-500">{error}</p>}
 
-          {started && !completed && (
+          {started && (
             <div className="mt-4 flex flex-col gap-3">
-              {state?.readyToContinue && (
+              {!completed && state?.readyToContinue && (
                 <SmartifyButton type="button" variant="ai" className="w-full" onClick={handleContinue} disabled={busy}>
                   {copy.continueLabel}
                 </SmartifyButton>
@@ -710,7 +756,7 @@ export default function InteractiveLessonPage() {
                 <input
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder={state?.readyToContinue ? copy.askPlaceholder : copy.answerPlaceholder}
+                  placeholder={completed ? copy.reviewPlaceholder : state?.readyToContinue ? copy.askPlaceholder : copy.answerPlaceholder}
                   className="flex-1 rounded-sf border border-neutral-300 px-4 py-3"
                   disabled={busy}
                 />

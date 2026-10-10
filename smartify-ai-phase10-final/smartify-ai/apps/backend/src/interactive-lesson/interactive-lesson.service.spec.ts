@@ -116,6 +116,9 @@ describe("InteractiveLessonService", () => {
             return data;
           }),
           findFirst: jest.fn().mockImplementation(async () => [...state.messages].reverse()[0] ?? null),
+          findMany: jest.fn().mockImplementation(async ({ where }: any) =>
+            state.messages.filter((m: any) => m.conversationId === where.conversationId && (!where.role || m.role === where.role)),
+          ),
         },
         aIUsage: { create: jest.fn().mockImplementation(async ({ data }: any) => { state.usage.push(data); return data; }) },
         // Subject entitlement fix (2026-09-20): reserveEntitlement now
@@ -623,6 +626,90 @@ describe("InteractiveLessonService", () => {
     expect(finalState.completed).toBe(true);
     const again = await h.service.advance("user-1", "topic-1");
     expect(again.status).toBe("COMPLETED");
+  });
+
+  it("L2 (review mode): a completed lesson returns its full teacher transcript, oldest first", async () => {
+    const h = makeHarness({
+      generateImpl: async () => ({ content: JSON.stringify({ intent: "answer", isCorrect: true, say: "yes" }), inputTokens: 5, outputTokens: 5, model: "gpt-4o-mini" }),
+    });
+    for (let i = 0; i <= STEPS.length; i++) {
+      await h.service.advance("user-1", "topic-1");
+      const state = await h.service.getState("user-1", "topic-1") as any;
+      if (state.stepType === "CHECK" && !state.completed) await h.service.respond("user-1", "topic-1", "answer");
+    }
+    const state = await h.service.getState("user-1", "topic-1") as any;
+    expect(state.completed).toBe(true);
+    const expected = h.state.messages.filter((m: any) => m.role === "assistant" && m.conversationId === state.conversationId).map((m: any) => m.content);
+    expect(expected.length).toBeGreaterThan(1);
+    expect(state.transcript).toEqual(expected);
+  });
+
+  it("L3 (review mode): a question after completion is answered without reopening or advancing the lesson", async () => {
+    const h = makeHarness({
+      generateImpl: async () => ({ content: JSON.stringify({ intent: "answer", isCorrect: true, say: "yes" }), inputTokens: 5, outputTokens: 5, model: "gpt-4o-mini" }),
+    });
+    for (let i = 0; i <= STEPS.length; i++) {
+      await h.service.advance("user-1", "topic-1");
+      const state = await h.service.getState("user-1", "topic-1") as any;
+      if (state.stepType === "CHECK" && !state.completed) await h.service.respond("user-1", "topic-1", "answer");
+    }
+    const before = await h.service.getState("user-1", "topic-1") as any;
+    expect(before.completed).toBe(true);
+    const callsBefore = h.state.usage.length;
+    const reply = await h.service.respond("user-1", "topic-1", "Can you explain the first part again?") as any;
+    expect(reply.completed).toBe(true);
+    expect(reply.status).toBe("COMPLETED");
+    expect(reply.currentStepIndex).toBe(before.currentStepIndex);
+    expect(typeof reply.content).toBe("string");
+    expect(h.state.usage.length).toBe(callsBefore + 1);
+  });
+
+  async function finishLesson(h: any) {
+    for (let i = 0; i <= STEPS.length; i++) {
+      await h.service.advance("user-1", "topic-1");
+      const state = await h.service.getState("user-1", "topic-1") as any;
+      if (state.stepType === "CHECK" && !state.completed) await h.service.respond("user-1", "topic-1", "answer");
+    }
+    return h.service.getState("user-1", "topic-1") as any;
+  }
+
+  it("L4 (review mode): restart re-teaches a completed lesson from step one on a fresh conversation and keeps completedAt", async () => {
+    const h = makeHarness({
+      generateImpl: async () => ({ content: JSON.stringify({ intent: "answer", isCorrect: true, say: "yes" }), inputTokens: 5, outputTokens: 5, model: "gpt-4o-mini" }),
+    });
+    const done = await finishLesson(h);
+    expect(done.completed).toBe(true);
+    const session = h.state.sessions["student-1:topic-1"];
+    const completedAt = session.completedAt;
+    const oldConversationId = session.conversationId;
+    expect(completedAt).toBeTruthy();
+
+    const restarted = await h.service.restart("user-1", "topic-1") as any;
+    expect(restarted.completed).toBe(false);
+    expect(restarted.status).toBe("IN_PROGRESS");
+    expect(restarted.currentStepIndex).toBe(0);
+    expect(typeof restarted.content).toBe("string");
+    const after = h.state.sessions["student-1:topic-1"];
+    expect(after.conversationId).not.toBe(oldConversationId);
+    expect(after.completedAt).toBe(completedAt);
+    expect(after.nonProgressTurns).toBe(0);
+  });
+
+  it("L5 (review mode): restart refuses a lesson that is not completed", async () => {
+    const h = makeHarness();
+    await h.service.advance("user-1", "topic-1");
+    await expect(h.service.restart("user-1", "topic-1")).rejects.toThrow("Only a completed lesson can be restarted.");
+  });
+
+  it("L6 (review mode): flags a lesson regenerated after the student completed it", async () => {
+    const h = makeHarness({
+      generateImpl: async () => ({ content: JSON.stringify({ intent: "answer", isCorrect: true, say: "yes" }), inputTokens: 5, outputTokens: 5, model: "gpt-4o-mini" }),
+    });
+    const done = await finishLesson(h);
+    expect(done.lessonUpdated).toBe(false);
+    h.state.topics["topic-1"].contentGeneratedAt = new Date(new Date(h.state.sessions["student-1:topic-1"].completedAt).getTime() + 60_000);
+    const later = await h.service.getState("user-1", "topic-1") as any;
+    expect(later.lessonUpdated).toBe(true);
   });
 
   it("M: a student cannot access another student's LessonSession", async () => {

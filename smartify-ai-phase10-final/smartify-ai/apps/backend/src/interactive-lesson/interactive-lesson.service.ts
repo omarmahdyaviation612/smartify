@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { normalizeConceptName } from "./lesson-draft-generator/lesson-concept-coverage.util";
 import { PrismaService } from "../prisma/prisma.service";
 import { AIProviderFactory } from "../ai/ai-provider.factory";
 import { AIContextBuilderService, LessonTeachingContext } from "../ai/context/ai-context-builder.service";
@@ -503,7 +504,7 @@ export class InteractiveLessonService {
       forcePreferredLanguage: isArabicOnlySubject(topic.unit.subject.nameEn, topic.unit.subject.nameAr),
       subjectNameEn: topic.unit.subject.nameEn,
       lessonTitleEn: topic.nameEn,
-      currentStep: { type: step.type, objective: step.objective, conceptKey: step.conceptKey, checkType: step.checkType },
+      currentStep: { type: step.type, objective: step.objective, conceptKey: step.conceptKey, checkType: step.checkType, concepts: this.stepConcepts(step, topic) },
       groundingSlice: this.topicGroundingSlice(topic),
       mode: "deliver",
       teachingStrategy: currentStrategy,
@@ -760,9 +761,25 @@ export class InteractiveLessonService {
     const steps = this.getSteps(topic);
     const session = await this.getOwnSession(profile, topicId);
     if (!session) throw new NotFoundException("Start the lesson before responding.");
-    if (session.status === "COMPLETED") return this.toPublicState(topic, session, steps, null, true);
-
     const stepResults = this.stepResultsOf(session);
+
+    // Review mode (2026-10-10): a finished lesson stays open for questions.
+    // Same per-session non-progress spend guard as mid-lesson interruptions;
+    // never changes status or step index.
+    if (session.status === "COMPLETED") {
+      if (!(await this.consumeNonProgressBudget(session))) {
+        return this.toPublicState(topic, session, steps, this.reviewLimitMessage(profile, topic), true, stepResults);
+      }
+      const reviewStep: TeachingStep = {
+        id: "review-question",
+        type: "REVIEW",
+        order: steps.length + 1,
+        objective: `The student has finished the lesson "${topic.nameEn}" and is reviewing it. Answer their question about anything this lesson teaches.`,
+      };
+      const content = await this.runInterruption(profile, topic, session, reviewStep, trimmed, undefined, true);
+      return this.toPublicState(topic, session, steps, content, true, stepResults);
+    }
+
     const currentStep = steps[session.currentStepIndex];
     if (!currentStep) throw new NotFoundException("Lesson step not found.");
 
@@ -808,7 +825,13 @@ export class InteractiveLessonService {
       : "You've asked quite a few questions in this lesson — let's continue with the lesson steps for now. You can ask more next time.";
   }
 
-  private async runInterruption(profile: { id: string }, topic: any, session: any, step: TeachingStep, message: string, activeMathProblem?: ActiveMathProblem) {
+  private reviewLimitMessage(profile: { preferredLang?: string }, topic?: any): string {
+    return this.preferredLessonLanguage(profile, topic) === "ar"
+      ? "سألت أسئلة كتير على الدرس ده — تقدر تراجع الشرح اللي فوق، أو تسأل المدرس الذكي (AI Tutor) أي سؤال تاني."
+      : "You've asked quite a few questions on this lesson — you can re-read the lesson above, or ask the AI Tutor anything else.";
+  }
+
+  private async runInterruption(profile: { id: string }, topic: any, session: any, step: TeachingStep, message: string, activeMathProblem?: ActiveMathProblem, lessonCompleted = false) {
     const ctx: LessonTeachingContext = {
       studentFirstName: (profile as any).fullName?.split(" ")[0] ?? "there",
       age: (profile as any).age ?? 7,
@@ -820,6 +843,7 @@ export class InteractiveLessonService {
       activeMathProblem,
       groundingSlice: this.topicGroundingSlice(topic),
       mode: "interrupt",
+      lessonCompleted,
       studentMessage: message,
     };
     const systemPrompt = this.contextBuilder.buildLessonTeachingPrompt(ctx) + (activeMathProblem ? `\nACTIVE MATH PROBLEM LOCK: ${JSON.stringify(activeMathProblem)}. Explain the SAME problem; preserve operands, operation, and answer; do not substitute another problem such as 6 ÷ 2.` : "");
@@ -988,6 +1012,14 @@ export class InteractiveLessonService {
     try {
       const lesson = await this.prisma.client.lesson.findFirst({ where: { topicId: topic.id } });
       if (!lesson) return;
+      // Never downgrade: re-studying a completed lesson (restart) keeps it completed.
+      if (status === "in_progress") {
+        const existing = await this.prisma.client.studentProgress.findUnique({
+          where: { studentId_lessonId: { studentId, lessonId: lesson.id } },
+          select: { status: true },
+        });
+        if (existing?.status === "completed") return;
+      }
       await this.prisma.client.studentProgress.upsert({
         where: { studentId_lessonId: { studentId, lessonId: lesson.id } },
         create: { studentId, lessonId: lesson.id, status },
@@ -1009,6 +1041,38 @@ export class InteractiveLessonService {
     if (!asset || !canServeTopicSteps(asset.topic as any)) throw new NotFoundException("Visual not found.");
     const { topic: _topic, ...visual } = asset;
     return visual;
+  }
+
+  /**
+   * Lesson completeness (2026-10-10): resolves a step's `concepts` names to
+   * the Topic's CURRENT grounding slice so the teacher is told exactly what
+   * the step must cover. Names no longer in the slice are dropped; steps
+   * from lessons generated before this field existed get undefined.
+   */
+  private stepConcepts(step: TeachingStep, topic: any): Array<{ name: string; description: string }> | undefined {
+    if (!step.concepts?.length) return undefined;
+    const slice = this.topicGroundingSlice(topic);
+    if (!slice) return undefined;
+    const byNorm = new Map(slice.concepts.map((c) => [normalizeConceptName(c.name), c]));
+    const resolved = step.concepts
+      .map((n) => byNorm.get(normalizeConceptName(n)))
+      .filter((c): c is NonNullable<typeof c> => !!c)
+      .map((c) => ({ name: c.name, description: c.description }));
+    return resolved.length > 0 ? resolved : undefined;
+  }
+
+  /**
+   * Review mode (2026-10-10): every teacher turn of a lesson, oldest first,
+   * so a finished lesson can be re-read (and replayed via TTS — persisted
+   * text matches what was spoken) instead of showing only the final message.
+   */
+  private async lessonTranscript(conversationId: string): Promise<string[]> {
+    const messages = await this.prisma.client.aIMessage.findMany({
+      where: { conversationId, role: "assistant" },
+      orderBy: { createdAt: "asc" },
+      select: { content: true },
+    });
+    return messages.map((m) => m.content).filter((c) => !!c?.trim());
   }
 
   /**
@@ -1057,7 +1121,38 @@ export class InteractiveLessonService {
       where: { conversationId: session.conversationId, role: "assistant" },
       orderBy: { createdAt: "desc" },
     });
-    return { started: true, ...this.toPublicState(topic, session, steps, lastMessage?.content ?? null, session.status === "COMPLETED", stepResults), stepResults };
+    const completed = session.status === "COMPLETED";
+    const transcript = completed ? await this.lessonTranscript(session.conversationId) : undefined;
+    // The Topic's content was regenerated (e.g. a fuller lesson) after this
+    // student finished it — review mode offers to study the updated version.
+    const lessonUpdated =
+      completed && !!session.completedAt && !!(topic as any).contentGeneratedAt && new Date((topic as any).contentGeneratedAt) > new Date(session.completedAt);
+    return { started: true, ...this.toPublicState(topic, session, steps, lastMessage?.content ?? null, completed, stepResults), stepResults, transcript, lessonUpdated };
+  }
+
+  /**
+   * Review mode (2026-10-10): study a COMPLETED lesson again from the first
+   * step — e.g. after its content was regenerated with fuller coverage. The
+   * session restarts on a fresh conversation (the finished run is kept as
+   * history), `completedAt` is preserved so the lesson stays "Completed" on
+   * the dashboard and parent report, and no new entitlement is consumed.
+   * Delivers the first step immediately, exactly like a first advance().
+   */
+  async restart(userId: string, topicId: string) {
+    const profile = await this.getProfileOrThrow(userId);
+    const topic = await this.getTopicOrThrow(topicId);
+    await this.assertSubjectAccessible(profile, topic.unit.subjectId);
+    const session = await this.getOwnSession(profile, topicId);
+    if (!session) throw new NotFoundException("Start the lesson before restarting it.");
+    if (session.status !== "COMPLETED") throw new BadRequestException("Only a completed lesson can be restarted.");
+    const conversation = await this.prisma.client.aIConversation.create({
+      data: { studentId: profile.id, subjectId: session.conversation?.subjectId ?? topic.unit.subjectId, topicId, title: topic.nameEn },
+    });
+    await this.prisma.client.lessonSession.update({
+      where: { id: session.id },
+      data: { status: "IN_PROGRESS", conversationId: conversation.id, currentStepIndex: 0, stepResultsJson: [], nonProgressTurns: 0 },
+    });
+    return this.advance(userId, topicId);
   }
 
   private async assertSubjectAccessible(profile: AccessProfile, subjectId: string) {

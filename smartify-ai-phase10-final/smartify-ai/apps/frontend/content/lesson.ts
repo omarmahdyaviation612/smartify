@@ -36,6 +36,13 @@ export interface LessonCopy {
   completedTitle: string;
   completedBody: string;
   resumedNotice: string;
+  reviewNotice: string;
+  reviewPlaceholder: string;
+  restartLesson: string;
+  restarting: string;
+  lessonUpdatedTitle: string;
+  lessonUpdatedBody: string;
+  studyUpdatedLesson: string;
   genericError: string;
   notAvailable: string;
   backToDashboard: string;
@@ -90,6 +97,13 @@ const en: LessonCopy = {
   completedTitle: "Lesson complete! 🎉",
   completedBody: "Great work — you've finished this lesson.",
   resumedNotice: "Picking up where you left off.",
+  reviewNotice: "Review mode — the whole lesson is below. Replay any part, or ask a question about it.",
+  reviewPlaceholder: "Ask anything about this lesson...",
+  restartLesson: "Study the lesson again from the start",
+  restarting: "Starting...",
+  lessonUpdatedTitle: "This lesson has been updated ✨",
+  lessonUpdatedBody: "It now explains more of the topic than when you finished it. Your lesson stays completed.",
+  studyUpdatedLesson: "Study the updated lesson",
   genericError: "Something went wrong. Please try again.",
   notAvailable: "This lesson isn't available yet.",
   backToDashboard: "Back to Dashboard",
@@ -144,6 +158,13 @@ const ar: LessonCopy = {
   completedTitle: "أتممت الدرس! 🎉",
   completedBody: "أحسنت — لقد أنهيت هذا الدرس.",
   resumedNotice: "أكمل من حيث توقفت.",
+  reviewNotice: "وضع المراجعة — الدرس كله موجود تحت. تقدر تعيد سماع أي جزء أو تسأل أي سؤال عنه.",
+  reviewPlaceholder: "اسأل أي سؤال عن الدرس ده...",
+  restartLesson: "ذاكر الدرس من الأول",
+  restarting: "جاري البدء...",
+  lessonUpdatedTitle: "الدرس ده اتحدّث ✨",
+  lessonUpdatedBody: "بقى بيشرح أجزاء أكتر من الموضوع من ساعة ما خلّصته. الدرس هيفضل مكتمل عندك.",
+  studyUpdatedLesson: "ذاكر الدرس المحدّث",
   genericError: "حدث خطأ ما. حاول مرة أخرى.",
   notAvailable: "هذا الدرس غير متاح بعد.",
   backToDashboard: "العودة إلى لوحة التحكم",

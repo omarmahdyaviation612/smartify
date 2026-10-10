@@ -69,9 +69,15 @@ function store(state: { s: State }, hooks: { failOnQuestionCreate?: number; fail
     },
     lesson: {
       findMany: async ({ where }: any) => clone(s.lessons.filter((l: any) => match(l, where))),
+      // 2026-10-10 safe regeneration: the previous AI Lesson row is updated in place.
+      update: async ({ where, data }: any) => { if (hooks.failLesson) throw new Error("simulated lesson install failure"); const l = s.lessons.find((x: any) => x.id === where.id); Object.assign(l, data); return clone(l); },
+      delete: async ({ where }: any) => { s.lessons = s.lessons.filter((l: any) => l.id !== where.id); return { id: where.id }; },
       deleteMany: async ({ where }: any) => { const n = s.lessons.length; s.lessons = s.lessons.filter((l: any) => !match(l, where)); return { count: n - s.lessons.length }; },
       create: async ({ data }: any) => { if (hooks.failLesson) throw new Error("simulated lesson install failure"); const l = { id: `lesson-${++s.seq}`, ...data }; s.lessons.push(l); return clone(l); },
     },
+    studentProgress: { count: async () => 0 },
+    lessonSession: { findMany: async () => [], update: async () => ({}) },
+    aIConversation: { create: async ({ data }: any) => ({ id: `conv-${++s.seq}`, ...data }) },
     learningObjective: {
       deleteMany: async ({ where }: any) => { s.objectives = s.objectives.filter((o: any) => !match(o, where)); return { count: 0 }; },
       create: async ({ data }: any) => { const o = { id: `obj-${++s.seq}`, ...data }; s.objectives.push(o); return clone(o); },

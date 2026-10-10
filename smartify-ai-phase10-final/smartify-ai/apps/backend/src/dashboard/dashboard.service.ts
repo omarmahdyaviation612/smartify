@@ -117,7 +117,9 @@ export class DashboardService {
       unitNameEn: t.unit.nameEn,
       unitNameAr: t.unit.nameAr,
       term: t.unit.term,
-      status: sessionByTopic.get(t.id)?.status ?? "NOT_STARTED",
+      // Once finished, a lesson stays COMPLETED even while the student
+      // re-studies it after a restart (completedAt is preserved).
+      status: sessionByTopic.get(t.id)?.completedAt ? "COMPLETED" : sessionByTopic.get(t.id)?.status ?? "NOT_STARTED",
     }));
 
     return {

@@ -262,9 +262,18 @@ export default function DashboardPage() {
                                 <p className="text-xs text-neutral-400">{isAr ? lesson.unitNameAr : lesson.unitNameEn}</p>
                               </div>
                               {lesson.status === "COMPLETED" ? (
-                                <span className="rounded-full bg-success-100 px-3 py-1 text-xs font-medium text-success-500">
-                                  {copy.sections.pilotLessons.completed}
-                                </span>
+                                // A finished lesson stays open for review (2026-10-10).
+                                <div className="flex shrink-0 items-center gap-2">
+                                  <span className="rounded-full bg-success-100 px-3 py-1 text-xs font-medium text-success-500">
+                                    {copy.sections.pilotLessons.completed}
+                                  </span>
+                                  <Link
+                                    href={`/${locale}/lesson/${lesson.topicId}`}
+                                    className="rounded-full border border-sf-purple-600 px-3 py-1 text-xs font-medium text-sf-purple-600 hover:bg-sf-purple-50"
+                                  >
+                                    {copy.sections.pilotLessons.review}
+                                  </Link>
+                                </div>
                               ) : (
                                 <Link href={`/${locale}/lesson/${lesson.topicId}`}>
                                   <SmartifyButton variant="ai">

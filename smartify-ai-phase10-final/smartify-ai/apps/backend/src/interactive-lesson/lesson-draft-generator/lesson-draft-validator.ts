@@ -12,10 +12,12 @@ import type { TeachingStep, TeachingStepType } from "../interactive-lesson.types
 const VALID_STEP_TYPES: TeachingStepType[] = ["INTRO", "EXPLAIN", "EXAMPLE", "CHECK", "REVIEW", "COMPLETE"];
 const VALID_CHECK_TYPES = ["conceptual", "applied"];
 const VALID_VISUAL_TYPES = ["VISUALIZE_LEARNING", "QUIZ", "COMIC", "VERSUS", "CYCLE"];
-const ALLOWED_STEP_KEYS = new Set(["id", "type", "order", "objective", "conceptKey", "checkType", "required", "visual"]);
+const ALLOWED_STEP_KEYS = new Set(["id", "type", "order", "objective", "conceptKey", "concepts", "checkType", "required", "visual"]);
 const ALLOWED_VISUAL_KEYS = new Set(["type", "status", "prompt", "url"]);
 const MIN_STEPS = 4;
 const MAX_STEPS = 10;
+/** Hard ceiling for grounded auto lessons whose limit scales with concept count (see maxStepsForConceptCount). */
+export const ABSOLUTE_MAX_STEPS = 30;
 
 export interface LessonDraftValidationResult {
   valid: boolean;
@@ -23,7 +25,8 @@ export interface LessonDraftValidationResult {
   errors: string[];
 }
 
-export function validateLessonDraft(raw: unknown, expected: { topicNameEn: string }): LessonDraftValidationResult {
+export function validateLessonDraft(raw: unknown, expected: { topicNameEn: string; maxSteps?: number }): LessonDraftValidationResult {
+  const maxSteps = Math.min(Math.max(expected.maxSteps ?? MAX_STEPS, MAX_STEPS), ABSOLUTE_MAX_STEPS);
   const errors: string[] = [];
 
   if (!raw || typeof raw !== "object") {
@@ -43,8 +46,8 @@ export function validateLessonDraft(raw: unknown, expected: { topicNameEn: strin
   }
   const rawSteps = obj.steps as unknown[];
 
-  if (rawSteps.length < MIN_STEPS || rawSteps.length > MAX_STEPS) {
-    errors.push(`Step count ${rawSteps.length} outside allowed range [${MIN_STEPS}, ${MAX_STEPS}].`);
+  if (rawSteps.length < MIN_STEPS || rawSteps.length > maxSteps) {
+    errors.push(`Step count ${rawSteps.length} outside allowed range [${MIN_STEPS}, ${maxSteps}].`);
   }
 
   const seenIds = new Set<string>();
@@ -89,6 +92,13 @@ export function validateLessonDraft(raw: unknown, expected: { topicNameEn: strin
 
     if (step.conceptKey !== undefined && (typeof step.conceptKey !== "string" || !step.conceptKey.trim())) {
       errors.push(`Step at index ${index} has an invalid conceptKey.`);
+    }
+
+    if (
+      step.concepts !== undefined &&
+      (!Array.isArray(step.concepts) || step.concepts.some((c) => typeof c !== "string" || !c.trim()))
+    ) {
+      errors.push(`Step at index ${index} has an invalid concepts field (must be an array of non-empty concept names).`);
     }
 
     if (step.checkType !== undefined && !VALID_CHECK_TYPES.includes(step.checkType as string)) {
@@ -143,7 +153,7 @@ export function validateLessonDraft(raw: unknown, expected: { topicNameEn: strin
 }
 
 const MIN_AUTO_OBJECTIVES = 2;
-const MAX_AUTO_OBJECTIVES = 4;
+const MAX_AUTO_OBJECTIVES = 6;
 
 export interface AutoLessonValidationResult {
   valid: boolean;
@@ -161,7 +171,7 @@ export interface AutoLessonValidationResult {
  * original, heavily-relied-on validator's behavior can never be
  * accidentally changed by this addition.
  */
-export function validateAutoLessonDraft(raw: unknown, expected: { topicNameEn: string }): AutoLessonValidationResult {
+export function validateAutoLessonDraft(raw: unknown, expected: { topicNameEn: string; maxSteps?: number }): AutoLessonValidationResult {
   const stepResult = validateLessonDraft(raw, expected);
   const errors = [...stepResult.errors];
 

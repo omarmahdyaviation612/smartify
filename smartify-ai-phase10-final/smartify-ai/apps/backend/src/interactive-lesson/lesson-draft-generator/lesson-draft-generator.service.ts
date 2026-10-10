@@ -7,6 +7,7 @@ import { validateAutoLessonDraft, validateLessonDraft } from "./lesson-draft-val
 import { LessonPublishService } from "./lesson-publish.service";
 import type { LessonGenerationInput, ResolvedUnitContext } from "./lesson-draft.types";
 import { toUnreviewedBilingualObjectives } from "./lesson-objectives.util";
+import { ensureConceptCoverage, maxStepsForConceptCount } from "./lesson-concept-coverage.util";
 import type { GroundingNotes } from "../unit-grounding/unit-grounding.types";
 import { UnitGroundingService } from "../unit-grounding/unit-grounding.service";
 import { resolveEffectiveSourceFile } from "../unit-grounding/unit-effective-source.util";
@@ -15,10 +16,9 @@ import { checkGroundingConsistency } from "../../ai/context/grounding-consistenc
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
 import { TopicGroundingAssignmentService } from "../../ai/context/topic-grounding-assignment.service";
 
-// Bumped only when buildAutoLessonGenerationPrompt's grounded-generation
-// instructions change in a way that would make previously-generated
-// TEXTBOOK_GROUNDED content stale — never touched by ungrounded generation.
-export const AUTO_LESSON_GENERATION_PROMPT_VERSION = "auto-lesson-v1";
+import { AUTO_LESSON_GENERATION_PROMPT_VERSION } from "./lesson-prompt-version.const";
+// Re-exported: existing importers read the version from this module.
+export { AUTO_LESSON_GENERATION_PROMPT_VERSION };
 
 // One initial attempt + one corrective retry if validation fails — never an
 // uncontrolled loop. A retry re-sends the exact validation errors so the
@@ -365,7 +365,10 @@ export class LessonDraftGeneratorService {
         continue;
       }
 
-      const validation = validateAutoLessonDraft(parsed, { topicNameEn: topic.nameEn });
+      const validation = validateAutoLessonDraft(parsed, {
+        topicNameEn: topic.nameEn,
+        maxSteps: groundingSlice ? maxStepsForConceptCount(groundingSlice.concepts.length) : undefined,
+      });
       if (validation.valid && validation.steps && validation.objectives) {
         // §10: grounding-consistency check — only when grounding was
         // actually supplied; feeds the SAME retry loop as structural
@@ -377,13 +380,27 @@ export class LessonDraftGeneratorService {
           continue;
         }
 
+        // Lesson completeness: every grounding concept must be taught. Missing
+        // ones are inserted deterministically — never a partial lesson, never
+        // an extra AI call (lesson-concept-coverage.util.ts).
+        const coverage = ensureConceptCoverage(validation.steps, groundingSlice);
+        if (coverage.insertedConcepts.length > 0) {
+          this.logger.warn(JSON.stringify({
+            event: "LESSON_CONCEPT_COVERAGE_REPAIRED",
+            topicId: topic.id,
+            attempt,
+            groundingConceptCount,
+            insertedConcepts: coverage.insertedConcepts,
+          }));
+        }
+
         const draft = await this.prisma.client.lessonDraft.create({
           data: {
             targetUnitId: topic.unitId,
             topicNameEn: topic.nameEn,
             topicNameAr: topic.nameAr,
             learningObjectivesJson: validation.objectives as any,
-            teachingStepsJson: validation.steps as any,
+            teachingStepsJson: coverage.steps as any,
             status: "pending_review",
             aiProvider: providerKey,
             aiModel: model,

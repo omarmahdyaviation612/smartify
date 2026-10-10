@@ -32,14 +32,22 @@
  *   - Explicit --topicIds only, at most MAX_TOPICS_PER_RUN per invocation —
  *     never a whole Unit/Subject sweep.
  *
- * KNOWN LIMITATION (unchanged): autoPublishIntoTopic deletes the Topic's
- * previous AI Lesson row; real StudentProgress rows against it make that fail
- * on the foreign key rather than silently discarding progress.
+ *   - 2026-10-10: steps generated with an OLDER lesson prompt version
+ *     (Topic.generationPromptVersion !== AUTO_LESSON_GENERATION_PROMPT_VERSION)
+ *     are regenerated even when their provenance is CURRENT — auto-lesson-v1
+ *     lessons could teach only part of a Topic (lesson-concept-coverage.util.ts).
+ *   - 2026-10-10: student-safe. The previous AI Lesson row is reused (its
+ *     StudentProgress survives), IN_PROGRESS sessions restart on the new
+ *     steps, and COMPLETED sessions stay completed — the student can study
+ *     the updated lesson from review mode. (Formerly a KNOWN LIMITATION: the
+ *     old Lesson row was deleted, failing on the StudentProgress foreign key.)
  *
  * Usage (via the root `content:regenerate` script — see root package.json):
+ *   pnpm content:regenerate --list-outdated                (read-only: Topics whose lesson predates the current prompt)
  *   pnpm content:regenerate --topicIds=<id>[,<id>] [--apply] [--lesson-only | --questions-only]
  */
 import { classifyContentProvenance, evaluateTopicGroundingGate, isRetired, topicStepsProvenance, type ContentProvenanceState, type GateTopic, type StoredProvenance, type TopicStepsProvenanceFields } from "../ai/context/topic-content-provenance.util";
+import { AUTO_LESSON_GENERATION_PROMPT_VERSION } from "../interactive-lesson/lesson-draft-generator/lesson-prompt-version.const";
 
 export const MAX_TOPICS_PER_RUN = 25;
 export const POOL_TARGET = 8;
@@ -49,9 +57,13 @@ export const POOL_TARGET = 8;
 export const MAX_QUESTION_BATCHES_PER_TOPIC = 2;
 const ID = /^[a-z0-9]{20,40}$/;
 
-export interface RegenerationArgs { topicIds: string[]; apply: boolean; lesson: boolean; questions: boolean }
+export interface RegenerationArgs { topicIds: string[]; apply: boolean; lesson: boolean; questions: boolean; listOutdated?: boolean }
 
 export function parseArgs(argv: string[]): RegenerationArgs {
+  if (argv.includes("--list-outdated")) {
+    if (argv.length !== 1) throw new Error("--list-outdated takes no other arguments");
+    return { topicIds: [], apply: false, lesson: true, questions: false, listOutdated: true };
+  }
   const flags = ["--apply", "--lesson-only", "--questions-only"];
   for (const a of argv) if (!/^--topicIds=.+$/.test(a) && !flags.includes(a)) throw new Error(`unexpected argument: ${a}`);
   for (const f of flags) if (argv.filter((a) => a === f).length > 1) throw new Error(`${f} given more than once`);
@@ -68,6 +80,8 @@ export function parseArgs(argv: string[]): RegenerationArgs {
 
 export type RegenerationTopic = GateTopic & TopicStepsProvenanceFields & {
   id: string;
+  generationSource?: string | null;
+  generationPromptVersion?: string | null;
   nameEn: string;
   nameAr: string;
   unitId: string;
@@ -81,6 +95,8 @@ export interface TopicPlan {
   steps: "NONE" | ContentProvenanceState;
   questions: Record<ContentProvenanceState, number>;
   lessonAction: "REGENERATE" | "SKIP_CURRENT" | "SKIP_NOT_REQUESTED" | "REFUSE";
+  /** Why a lesson is regenerated: its provenance is not CURRENT, or it predates the current lesson prompt. */
+  lessonReason?: "NOT_CURRENT" | "OUTDATED_PROMPT";
   questionsToGenerate: number;
 }
 
@@ -94,8 +110,19 @@ export function planTopic(topic: RegenerationTopic, args: Pick<RegenerationArgs,
   // Retired Questions are historical: they never count toward any pool (topic-content-provenance.util.ts).
   for (const q of topic.questions.filter((x) => !x.isPlaceholder && !isRetired(x))) questions[classifyContentProvenance(q, gate.provenance)]++;
   const steps = topic.teachingStepsJson ? classifyContentProvenance(topicStepsProvenance(topic), gate.provenance) : "NONE";
-  const lessonAction = !args.lesson ? "SKIP_NOT_REQUESTED" : steps === "CURRENT" ? "SKIP_CURRENT" : "REGENERATE";
-  return { topicId: topic.id, gate: "READY", steps, questions, lessonAction, questionsToGenerate: args.questions ? Math.max(0, POOL_TARGET - questions.CURRENT) : 0 };
+  const outdatedPrompt = steps === "CURRENT" && isLessonPromptOutdated(topic);
+  const lessonAction = !args.lesson ? "SKIP_NOT_REQUESTED" : steps === "CURRENT" && !outdatedPrompt ? "SKIP_CURRENT" : "REGENERATE";
+  const lessonReason = lessonAction !== "REGENERATE" ? undefined : outdatedPrompt ? "OUTDATED_PROMPT" : "NOT_CURRENT";
+  return { topicId: topic.id, gate: "READY", steps, questions, lessonAction, lessonReason, questionsToGenerate: args.questions ? Math.max(0, POOL_TARGET - questions.CURRENT) : 0 };
+}
+
+/**
+ * Pure: AUTO-generated steps (generationSource is only ever set by the auto
+ * pipeline) produced by an older lesson prompt than the one deployed now.
+ * Human-reviewed lessons (no generationSource) are never considered outdated.
+ */
+export function isLessonPromptOutdated(topic: { teachingStepsJson: unknown; generationSource?: string | null; generationPromptVersion?: string | null }): boolean {
+  return !!topic.teachingStepsJson && !!topic.generationSource && topic.generationPromptVersion !== AUTO_LESSON_GENERATION_PROMPT_VERSION;
 }
 
 export interface RegenerationDeps {
@@ -179,6 +206,32 @@ export function currentPoolQuestionGenerator(
   };
 }
 
+/**
+ * Read-only: every Topic whose lesson was generated by an older prompt than
+ * the current one, busiest first (number of students who opened it), so the
+ * output can be fed to --topicIds in batches of MAX_TOPICS_PER_RUN.
+ */
+async function listOutdated(prisma: { client: any }, gateInclude: { topic: object; unit: object }) {
+  const topics: Array<RegenerationTopic & { generationPromptVersion: string | null; _count: { lessonSessions: number } }> =
+    await prisma.client.topic.findMany({
+      where: { generationSource: { not: null }, OR: [{ generationPromptVersion: null }, { generationPromptVersion: { not: AUTO_LESSON_GENERATION_PROMPT_VERSION } }] },
+      include: { ...gateInclude.topic, unit: { select: gateInclude.unit }, _count: { select: { lessonSessions: true } } },
+    });
+  const stale = topics.filter((t) => isLessonPromptOutdated(t));
+  // Only READY Topics can be regenerated (runRegeneration refuses the rest), so
+  // they are reported separately instead of breaking a batch.
+  const notReady = stale.filter((t) => evaluateTopicGroundingGate(t).state !== "READY").map((t) => ({ topicId: t.id, nameEn: t.nameEn, gate: (evaluateTopicGroundingGate(t) as any).reason }));
+  const outdated = stale
+    .filter((t) => evaluateTopicGroundingGate(t).state === "READY")
+    .sort((a, b) => b._count.lessonSessions - a._count.lessonSessions)
+    .map((t) => ({ topicId: t.id, nameEn: t.nameEn, promptVersion: t.generationPromptVersion, students: t._count.lessonSessions }));
+  const batches: string[] = [];
+  for (let i = 0; i < outdated.length; i += MAX_TOPICS_PER_RUN) {
+    batches.push(`--topicIds=${outdated.slice(i, i + MAX_TOPICS_PER_RUN).map((t) => t.topicId).join(",")}`);
+  }
+  return { currentPromptVersion: AUTO_LESSON_GENERATION_PROMPT_VERSION, outdatedCount: outdated.length, outdated, batches, notReadyCount: notReady.length, notReady };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   await import("reflect-metadata");
@@ -196,6 +249,10 @@ async function main() {
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ["error", "warn", "log"] });
   try {
     const prisma = app.get(PrismaService);
+    if (args.listOutdated) {
+      console.log(JSON.stringify(await listOutdated(prisma, { topic: TOPIC_GATE_INCLUDE, unit: UNIT_GATE_SELECT }), null, 2));
+      return;
+    }
     const lessonGenerator = app.get(LessonDraftGeneratorService);
     const lessonPublisher = app.get(LessonPublishService);
     const questionGenerator = app.get(QuestionDraftGeneratorService);

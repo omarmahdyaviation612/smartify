@@ -19,7 +19,7 @@ export interface DashboardCopy {
     recentActivity: { title: string; empty: string; correct: string; incorrect: string };
     achievements: { title: string; body: string };
     upcomingExams: { title: string; body: string };
-    pilotLessons: { title: string; empty: string; start: string; continueLabel: string; completed: string };
+    pilotLessons: { title: string; empty: string; start: string; continueLabel: string; completed: string; review: string };
   };
 }
 
@@ -52,6 +52,7 @@ const en: DashboardCopy = {
       start: "Start",
       continueLabel: "Continue",
       completed: "Completed",
+      review: "Review",
     },
   },
 };
@@ -85,6 +86,7 @@ const ar: DashboardCopy = {
       start: "ابدأ",
       continueLabel: "متابعة",
       completed: "مكتمل",
+      review: "مراجعة",
     },
   },
 };

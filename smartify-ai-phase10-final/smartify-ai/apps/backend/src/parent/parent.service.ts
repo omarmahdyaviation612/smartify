@@ -146,9 +146,11 @@ export class ParentService {
           select: { isCorrect: true, attemptedAt: true },
         });
         const [completedLessonsCount, completedLessons, examResults] = await Promise.all([
-          this.db.lessonSession.count({ where: { studentId: link.studentId, status: "COMPLETED" } }),
+          // completedAt, not status: a completed lesson the student is
+          // re-studying (restart) still counts as completed.
+          this.db.lessonSession.count({ where: { studentId: link.studentId, completedAt: { not: null } } }),
           this.db.lessonSession.findMany({
-            where: { studentId: link.studentId, status: "COMPLETED" },
+            where: { studentId: link.studentId, completedAt: { not: null } },
             orderBy: { completedAt: "desc" },
             take: 10,
             select: {

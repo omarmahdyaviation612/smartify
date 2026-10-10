@@ -35,6 +35,12 @@ export class InteractiveLessonController {
     return this.service.advance(user.id, topicId);
   }
 
+  /** Review mode: study a completed lesson again from the first step (keeps it marked completed). */
+  @Post("topics/:topicId/restart")
+  restart(@CurrentUser() user: any, @Param("topicId") topicId: string) {
+    return this.service.restart(user.id, topicId);
+  }
+
   /** A student message while a step is showing — either an answer to a pending check or an interruption question. */
   @Post("topics/:topicId/respond")
   respond(@CurrentUser() user: any, @Param("topicId") topicId: string, @Body() body: { message: string }) {

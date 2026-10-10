@@ -108,6 +108,15 @@ describe("LessonPublishService.autoPublishIntoTopic — regeneration (2026-09-19
             state.lessons[lesson.id] = lesson;
             return lesson;
           },
+          // 2026-10-10 safe regeneration: the previous AI Lesson row is updated in place.
+          update: async ({ where: { id }, data }: any) => {
+            Object.assign(state.lessons[id], data);
+            return state.lessons[id];
+          },
+          delete: async ({ where: { id } }: any) => {
+            delete state.lessons[id];
+            return { id };
+          },
           deleteMany: async ({ where }: any) => {
             const ids: string[] = where.id.in;
             let count = 0;
@@ -115,6 +124,9 @@ describe("LessonPublishService.autoPublishIntoTopic — regeneration (2026-09-19
             return { count };
           },
         },
+        studentProgress: { count: async () => 0 },
+        lessonSession: { findMany: async () => [], update: async () => ({}) },
+        aIConversation: { create: async ({ data }: any) => ({ id: `conv-${lessonCounter}`, ...data }) },
         learningObjective: {
           create: async ({ data }: any) => {
             const objective = { id: `lo-${Object.keys(state.objectives).length + 1}`, ...data };
