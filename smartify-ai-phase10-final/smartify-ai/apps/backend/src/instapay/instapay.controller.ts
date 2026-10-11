@@ -29,6 +29,11 @@ export class InstapayController {
     return this.service.initiateQuestionPack(user.id, subjectId);
   }
 
+  @Post("ai-topup/initiate")
+  initiateAiTopUp(@CurrentUser() user: any) {
+    return this.service.initiateAiTopUp(user.id);
+  }
+
   @Post("submissions")
   @UseInterceptors(FileInterceptor("receipt"))
   submitReceipt(

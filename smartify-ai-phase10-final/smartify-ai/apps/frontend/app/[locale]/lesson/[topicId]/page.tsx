@@ -6,7 +6,8 @@ import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getLessonCopy } from "@/content/lesson";
 import { getMarketingCopy } from "@/content/marketing";
 import { Navbar } from "@/components/Navbar";
-import { ApiError, useApiClient } from "@/lib/api-client";
+import { ApiError, isAiDailyLimitError, useApiClient } from "@/lib/api-client";
+import { AiLimitReachedCard } from "@/components/ai-limit/AiLimitReachedCard";
 import { renderTutorMessage } from "@/lib/render-tutor-message";
 import type { Locale } from "@/content/marketing";
 import type { VisualInstruction } from "@smartify/shared-types";
@@ -110,6 +111,9 @@ export default function InteractiveLessonPage() {
   }, [preparing, copy.waitingQuotes.length]);
   const [slowStart, setSlowStart] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The student's own daily AI allowance is used up — shown as the
+  // "continue now (paid) or tomorrow" card instead of a red error line.
+  const [limitReached, setLimitReached] = useState(false);
   const [notAvailable, setNotAvailable] = useState(false);
   const [visualFailed, setVisualFailed] = useState(false);
 
@@ -168,6 +172,15 @@ export default function InteractiveLessonPage() {
       Object.values(visualUrls).forEach((url) => URL.revokeObjectURL(url));
     };
   }, []);
+
+  function reportError(err: unknown) {
+    if (isAiDailyLimitError(err)) {
+      setError(null);
+      setLimitReached(true);
+      return;
+    }
+    setError(displayableErrorMessage(err, copy.genericError));
+  }
 
   function toggleAutoPlay() {
     setAutoPlay((prev) => {
@@ -347,7 +360,7 @@ export default function InteractiveLessonPage() {
     } catch (err: any) {
       if (mountedRef.current && run === preparationRunRef.current) {
         clearPreparing();
-        setError(displayableErrorMessage(err, copy.genericError));
+        reportError(err);
       }
     }
   }
@@ -424,6 +437,7 @@ export default function InteractiveLessonPage() {
     if (busy) return;
     setBusy(true);
     setError(null);
+    setLimitReached(false);
     try {
       const result = await apiFetch<LessonState>(`/lesson/topics/${topicId}/restart`, { method: "POST" });
       Object.values(audioElements.current).forEach((audio) => audio.pause());
@@ -438,7 +452,7 @@ export default function InteractiveLessonPage() {
       setTurns(result.content ? [{ role: "teacher", content: result.content }] : []);
       if (autoPlay && result.content) playTurn(0, result.content, result.conversationId);
     } catch (err: any) {
-      setError(displayableErrorMessage(err, copy.genericError));
+      reportError(err);
     } finally {
       setBusy(false);
     }
@@ -448,6 +462,7 @@ export default function InteractiveLessonPage() {
     if (preparing || busy) return;
     setBusy(true);
     setError(null);
+    setLimitReached(false);
     // A never-opened Topic can trigger real, first-time content generation
     // (and, for a never-grounded Unit, real-textbook grounding first) —
     // both fully server-side and invisible to the student, but slower than
@@ -470,7 +485,7 @@ export default function InteractiveLessonPage() {
         if (autoPlay) playTurn(0, result.content, result.conversationId);
       }
     } catch (err: any) {
-      setError(displayableErrorMessage(err, copy.genericError));
+      reportError(err);
     } finally {
       clearTimeout(slowStartTimer);
       setSlowStart(false);
@@ -481,6 +496,7 @@ export default function InteractiveLessonPage() {
   async function handleContinue() {
     setBusy(true);
     setError(null);
+    setLimitReached(false);
     try {
       const nextIndex = turns.length;
       const result = await apiFetch<LessonState>(`/lesson/topics/${topicId}/advance`, { method: "POST" });
@@ -490,7 +506,7 @@ export default function InteractiveLessonPage() {
         if (autoPlay) playTurn(nextIndex, result.content, result.conversationId);
       }
     } catch (err: any) {
-      setError(displayableErrorMessage(err, copy.genericError));
+      reportError(err);
     } finally {
       setBusy(false);
     }
@@ -503,6 +519,7 @@ export default function InteractiveLessonPage() {
     setInput("");
     setBusy(true);
     setError(null);
+    setLimitReached(false);
     const studentIndex = turns.length;
     setTurns((prev) => [...prev, { role: "student", content: message }]);
     try {
@@ -517,7 +534,7 @@ export default function InteractiveLessonPage() {
         if (autoPlay) playTurn(teacherIndex, result.content, result.conversationId);
       }
     } catch (err: any) {
-      setError(displayableErrorMessage(err, copy.genericError));
+      reportError(err);
     } finally {
       setBusy(false);
     }
@@ -726,6 +743,11 @@ export default function InteractiveLessonPage() {
           {listening && <p role="status" aria-live="polite" className="mt-3 text-sm font-medium text-sf-purple-600">{copy.listening}</p>}
           {micError && <p className="mt-3 text-sm text-error-500">{micError}</p>}
           {error && <p className="mt-3 text-sm text-error-500">{error}</p>}
+          {limitReached && (
+            <div className="mt-4">
+              <AiLimitReachedCard locale={locale} returnTo={`/${locale}/lesson/${topicId}`} />
+            </div>
+          )}
 
           {started && (
             <div className="mt-4 flex flex-col gap-3">

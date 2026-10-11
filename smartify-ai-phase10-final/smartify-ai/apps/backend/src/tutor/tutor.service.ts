@@ -10,6 +10,7 @@ import { assignedGroundingSliceOrNull } from "../ai/context/topic-grounding-assi
 import type { GroundingNotes } from "../interactive-lesson/unit-grounding/unit-grounding.types";
 import { buildAdaptiveMathTeachingPlan } from "./adaptive-math-teaching.util";
 import { deriveMathVisualWithContext, parseTutorVisual } from "./visual-instruction.util";
+import { aiDailyLimitReachedException } from "../ai/usage/ai-daily-limit";
 
 // Hard cap on a single message's length, checked BEFORE any daily-limit
 // slot is reserved or any provider call is made — an oversized prompt
@@ -315,6 +316,7 @@ export class TutorService {
       });
       const reserveResult = await this.usageService.reserveBudget(userId, estimatedUsd);
       if (!reserveResult.ok) {
+        if (reserveResult.reason === "user_exceeded") throw aiDailyLimitReachedException();
         throw new ServiceUnavailableException(
           reserveResult.reason === "misconfigured"
             ? "The AI Tutor is temporarily unavailable. Please try again later."

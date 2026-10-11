@@ -3,6 +3,7 @@ import { AIProviderFactory } from "../ai/ai-provider.factory";
 import { AIUsageService } from "../ai/usage/ai-usage.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { estimateImageTokens, estimateTextTokens, pngDimensions } from "../ai/vision-request-sizing";
+import { aiDailyLimitReachedException } from "../ai/usage/ai-daily-limit";
 
 export type HomeworkImage = { buffer: Buffer; mimetype: string; size: number };
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -55,7 +56,7 @@ export class HomeworkImageService {
       const estimate = await this.usage.estimateMaxChatCostUsd({ providerKey, inputText: promptText,
         estimatedInputTokens: estimateTextTokens(promptText) + imageTokens, maxOutputTokens: 350 });
       const reserved = await this.usage.reserveBudget(userId, estimate);
-      if (!reserved.ok) throw new ServiceUnavailableException("Homework Help is temporarily unavailable.");
+      if (!reserved.ok) throw reserved.reason === "user_exceeded" ? aiDailyLimitReachedException() : new ServiceUnavailableException("Homework Help is temporarily unavailable.");
       let result;
       try {
         result = await provider.generate({ systemPrompt, messages: [{ role: "user", content: [

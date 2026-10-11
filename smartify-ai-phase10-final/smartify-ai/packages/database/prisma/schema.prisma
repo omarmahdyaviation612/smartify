@@ -98,6 +98,7 @@ model StudentProfile {
   questionPackPurchases TutorQuestionPackPurchase[]
   extraQuestionCredits  TutorExtraQuestionCredit[]
   instapaySubmissions   InstapayPaymentSubmission[]
+  aiDailyTopUps         AIDailyTopUpPurchase[]
   practiceSubmissions   PracticeSubmission[]
 
   // Free Trial + Referral V1 (2026-09-20)
@@ -1070,6 +1071,31 @@ model TutorExtraQuestionCredit {
 enum InstapayPurchaseKind {
   SUBSCRIPTION
   QUESTION_PACK
+  AI_DAILY_TOPUP
+}
+
+// Extra daily AI allowance (2026-10-11): one paid purchase raises the
+// student's per-user daily AI USD budget by one full base allowance for the
+// UTC day it is approved on (grantedUsageDate) — the same UTC day boundary
+// AIUsageService already uses for every daily cap. Only an admin InstaPay
+// confirm activates it; a pending row grants nothing.
+model AIDailyTopUpPurchase {
+  id                String         @id @default(cuid())
+  studentId         String
+  student           StudentProfile @relation(fields: [studentId], references: [id])
+  userId            String
+  amountEGP         Decimal
+  status            String // "pending" | "paid"
+  paymentProvider   String?
+  externalSessionId String?        @unique
+  externalEventId   String?
+  grantedUsageDate  DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@unique([paymentProvider, externalEventId])
+  @@index([userId, status, grantedUsageDate])
+  @@index([studentId, status])
 }
 
 enum InstapaySubmissionStatus {
@@ -1085,6 +1111,7 @@ model InstapayPaymentSubmission {
   kind               InstapayPurchaseKind
   subscriptionId     String? // set when kind = SUBSCRIPTION (informational — activation is looked up by referenceId, not this FK)
   packPurchaseId     String? // set when kind = QUESTION_PACK
+  topUpPurchaseId    String? // set when kind = AI_DAILY_TOPUP
   referenceId        String                   @unique // shown to the student at "initiate" time; the trusted lookup key for linking a submission back to its pending Subscription/Purchase row
   expectedAmountEGP  Decimal
   submittedAmountEGP Decimal

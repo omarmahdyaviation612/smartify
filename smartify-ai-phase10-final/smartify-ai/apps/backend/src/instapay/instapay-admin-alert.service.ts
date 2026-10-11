@@ -5,7 +5,7 @@ import { EmailService } from "../email/email.service";
 
 export interface NewInstapaySubmission {
   submissionId: string;
-  kind: "SUBSCRIPTION" | "QUESTION_PACK";
+  kind: "SUBSCRIPTION" | "QUESTION_PACK" | "AI_DAILY_TOPUP";
   referenceId: string;
   expectedAmountEGP: number;
   submittedAmountEGP: number;

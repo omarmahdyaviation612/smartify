@@ -24,6 +24,7 @@ import { ParentModule } from "./parent/parent.module";
 import { TutorQuestionPacksModule } from "./tutor-question-packs/tutor-question-packs.module";
 import { HealthModule } from "./health/health.module";
 import { InstapayModule } from "./instapay/instapay.module";
+import { AIDailyTopUpModule } from "./ai-daily-topup/ai-daily-topup.module";
 import { AdminInstapayModule } from "./admin/instapay/admin-instapay.module";
 import { InteractiveLessonModule } from "./interactive-lesson/interactive-lesson.module";
 import { QuestionBankModule } from "./question-bank/question-bank.module";
@@ -68,6 +69,7 @@ import { StudentSupportModule } from "./student-support/student-support.module";
     ParentModule,
     TutorQuestionPacksModule,
     InstapayModule,
+    AIDailyTopUpModule,
     AdminInstapayModule,
     InteractiveLessonModule,
     QuestionBankModule,

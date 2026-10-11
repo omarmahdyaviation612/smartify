@@ -17,6 +17,7 @@ import { decideStrategySwitch, getCurrentStrategy, isMathSubject, strategyGuidan
 import { assignedGroundingSliceOrNull } from "../ai/context/topic-grounding-assignment.util";
 import { canServeTopicSteps, evaluateTopicGroundingGate, TOPIC_GATE_INCLUDE } from "../ai/context/topic-content-provenance.util";
 import { getLessonLanguage, isArabicOnlySubject } from "./lesson-language.util";
+import { aiDailyLimitReachedException } from "../ai/usage/ai-daily-limit";
 
 const MAX_HINTS_BEFORE_FORCED_RESOLUTION = 1;
 
@@ -344,6 +345,7 @@ export class InteractiveLessonService {
     });
     const reserveResult = await this.usageService.reserveBudget(params.userId, estimatedUsd);
     if (!reserveResult.ok) {
+      if (reserveResult.reason === "user_exceeded") throw aiDailyLimitReachedException();
       throw new ServiceUnavailableException(
         reserveResult.reason === "misconfigured"
           ? "The AI Tutor is temporarily unavailable. Please try again later."

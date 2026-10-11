@@ -53,6 +53,7 @@ describe("AIUsageService — Phase 9.4C atomic USD budget reservation", () => {
         },
         $queryRaw: queryRaw,
         $executeRaw: executeRaw,
+        aIDailyTopUpPurchase: { count: jest.fn().mockResolvedValue(0) },
         aIBudgetReservation: { create: createReservation },
       },
     } as any;
@@ -360,6 +361,7 @@ describe("AIUsageService — Phase 9.4C atomic USD budget reservation", () => {
         },
         $queryRaw: queryRaw,
         $executeRaw: executeRaw,
+        aIDailyTopUpPurchase: { count: jest.fn().mockResolvedValue(0) },
         aIBudgetReservation: { create: jest.fn().mockImplementation(async ({ data }: any) => ({ id: `reservation-${Math.random()}`, ...data })) },
       },
     } as any;

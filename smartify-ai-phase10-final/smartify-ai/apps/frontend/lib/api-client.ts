@@ -7,10 +7,19 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** Machine-readable error code from the backend body, when it sends one (e.g. "AI_DAILY_LIMIT_REACHED"). */
+    readonly code?: string,
   ) {
     super(message);
     this.name = "ApiError";
   }
+}
+
+export const AI_DAILY_LIMIT_REACHED_CODE = "AI_DAILY_LIMIT_REACHED";
+
+/** True when the student's own daily AI allowance is used up — the case a paid top-up can lift. */
+export function isAiDailyLimitError(err: unknown): boolean {
+  return err instanceof ApiError && err.code === AI_DAILY_LIMIT_REACHED_CODE;
 }
 
 /**
@@ -37,7 +46,7 @@ export function useApiClient() {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new ApiError(body?.message || `Request failed (${res.status})`, res.status);
+      throw new ApiError(body?.message || `Request failed (${res.status})`, res.status, typeof body?.code === "string" ? body.code : undefined);
     }
     return res;
   }

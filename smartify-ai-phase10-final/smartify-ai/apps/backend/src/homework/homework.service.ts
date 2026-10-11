@@ -8,6 +8,7 @@ import { countIncorrectAnswerAttempt } from "./homework-session.util";
 import { HomeworkImageService, type HomeworkImage } from "./homework-image.service";
 import { HomeworkQuotaService } from "./homework-quota.service";
 import { HomeworkTopicMatcher } from "./homework-topic-matcher";
+import { aiDailyLimitReachedException } from "../ai/usage/ai-daily-limit";
 
 const SESSION_INCLUDE = { messages: { orderBy: { createdAt: "asc" as const } }, topic: { select: { id: true, nameAr: true, nameEn: true } }, subject: { select: { id: true, nameAr: true, nameEn: true } } };
 const MAX_TURNS = 20;
@@ -123,7 +124,7 @@ export class HomeworkService {
     const priorMessages = session.messages.map((item: any) => item.content).join("\n");
     const estimate = await this.usage.estimateMaxChatCostUsd({ providerKey, inputText: `${systemPrompt}\n${priorMessages}\n${message}`, maxOutputTokens: 500 });
     const budget = await this.usage.reserveBudget(userId, estimate);
-    if (!budget.ok) throw new ServiceUnavailableException("Homework Help is temporarily unavailable.");
+    if (!budget.ok) throw budget.reason === "user_exceeded" ? aiDailyLimitReachedException() : new ServiceUnavailableException("Homework Help is temporarily unavailable.");
     const turnLockExpiresAt = new Date(Date.now() + 3 * 60 * 1000);
     const turnLockToken = randomUUID();
     let turnLock;

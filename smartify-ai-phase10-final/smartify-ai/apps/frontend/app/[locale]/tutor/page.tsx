@@ -8,7 +8,8 @@ import { getTutorCopy } from "@/content/tutor";
 import { getInstapayCopy } from "@/content/instapay";
 import { getMarketingCopy } from "@/content/marketing";
 import { Navbar } from "@/components/Navbar";
-import { useApiClient } from "@/lib/api-client";
+import { isAiDailyLimitError, useApiClient } from "@/lib/api-client";
+import { AiLimitReachedCard } from "@/components/ai-limit/AiLimitReachedCard";
 import { renderTutorMessage } from "@/lib/render-tutor-message";
 import type { Locale } from "@/content/marketing";
 import { TutorVisual } from "@/components/TutorVisual";
@@ -52,6 +53,7 @@ export default function TutorPage() {
     trialSubjectId?: string | null;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [limitReached, setLimitReached] = useState(false);
   const [sending, setSending] = useState(false);
   const [notOnboarded, setNotOnboarded] = useState(false);
   const trialFinished = Boolean(remaining?.isFreeTrial && remaining.totalRemaining === 0);
@@ -239,6 +241,7 @@ export default function TutorPage() {
     setInput("");
     setSending(true);
     setError(null);
+    setLimitReached(false);
 
     try {
       const res = await apiFetch<{ conversationId: string; reply: string; visual?: VisualInstruction | null }>(
@@ -260,7 +263,8 @@ export default function TutorPage() {
       setRemaining(updated);
     } catch (err: any) {
       const msg = err?.message ?? "";
-      if (msg.includes("free trial")) setError(copy.freeTrialLimitReached);
+      if (isAiDailyLimitError(err)) setLimitReached(true);
+      else if (msg.includes("free trial")) setError(copy.freeTrialLimitReached);
       else if (msg.includes("not configured")) setError(copy.notConfigured);
       else if (msg.includes("used today")) setError(copy.limitReached);
       else setError(copy.genericError);
@@ -416,6 +420,11 @@ export default function TutorPage() {
           {listening && <p role="status" aria-live="polite" className="mt-3 text-sm font-medium text-sf-purple-600">{copy.listening}</p>}
           {micError && <p className="mt-3 text-sm text-error-500">{micError}</p>}
           {error && <p className="mt-3 text-sm text-error-500">{error}</p>}
+          {limitReached && (
+            <div className="mt-4">
+              <AiLimitReachedCard locale={locale} returnTo={`/${locale}/tutor${subjectId ? `?subjectId=${subjectId}` : ""}`} />
+            </div>
+          )}
 
           <form onSubmit={handleSend} className="mt-4 flex gap-3">
             {micSupported && (

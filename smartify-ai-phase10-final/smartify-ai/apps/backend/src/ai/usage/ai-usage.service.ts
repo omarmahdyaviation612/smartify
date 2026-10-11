@@ -3,6 +3,7 @@ import { CONTENT_AUTHORING_ACTOR_ID } from "../content-authoring-actor.const";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AIProviderFactory } from "../ai-provider.factory";
 import { GLOBAL_DAILY_AI_BUDGET_USD_KEY, PER_USER_DAILY_AI_BUDGET_USD_KEY, PLATFORM_CONTENT_AUTHORING_DAILY_AI_BUDGET_USD_KEY, parseBudgetUsd } from "./budget-config.util";
+import { aiDailyLimitReachedException } from "./ai-daily-limit";
 
 // Phase 9.4C: conservative chars-per-token divisor for estimating input
 // cost BEFORE a chat call — real English averages ~4 chars/token, so
@@ -182,6 +183,27 @@ export class AIUsageService {
     return parseBudgetUsd(config?.value);
   }
 
+  /**
+   * Paid AI daily top-ups granted for this UTC day. Each one adds one full
+   * base per-user allowance on top of the configured cap — never touches
+   * the global or platform caps.
+   */
+  async getPaidTopUpsToday(userId: string, usageDate = this.startOfToday()): Promise<number> {
+    return this.prisma.client.aIDailyTopUpPurchase.count({
+      where: { userId, status: "paid", grantedUsageDate: usageDate },
+    });
+  }
+
+  /**
+   * Configured per-user cap multiplied by (1 + paid top-ups today). Only
+   * consulted once the base cap is already exhausted, so the common
+   * under-budget path never pays for the extra query.
+   */
+  private async getToppedUpPerUserDailyBudgetUsd(baseLimit: number, userId: string, usageDate: Date): Promise<number> {
+    const topUps = await this.getPaidTopUpsToday(userId, usageDate);
+    return baseLimit * (1 + topUps);
+  }
+
   /** Independent platform content-authoring cap — see budget-config.util.ts's doc comment. Never confused with the per-user cap above. */
   private async getPlatformContentAuthoringDailyBudgetUsd(): Promise<number | null> {
     const config = await this.prisma.client.systemConfig.findUnique({ where: { key: PLATFORM_CONTENT_AUTHORING_DAILY_AI_BUDGET_USD_KEY } });
@@ -297,8 +319,11 @@ export class AIUsageService {
     }
     const userSpent = await this.getUserSpendToday(userId, usageDate);
     if (userSpent >= userLimit) {
-      this.logger.warn(`Per-user daily AI budget reached for user ${userId}: $${userSpent.toFixed(4)} spent >= $${userLimit} limit.`);
-      throw new ServiceUnavailableException("You've reached today's AI usage limit. Please try again tomorrow.");
+      const toppedUpLimit = await this.getToppedUpPerUserDailyBudgetUsd(userLimit, userId, usageDate);
+      if (userSpent >= toppedUpLimit) {
+        this.logger.warn(`Per-user daily AI budget reached for user ${userId}: $${userSpent.toFixed(4)} spent >= $${toppedUpLimit} limit.`);
+        throw aiDailyLimitReachedException();
+      }
     }
   }
 
@@ -446,7 +471,16 @@ export class AIUsageService {
     // new concurrency mechanism, just a different (scope, scopeKey) pair.
     const tierScope = isPlatformAttribution ? "platform" : "user";
     const tierKey = isPlatformAttribution ? CONTENT_AUTHORING_ACTOR_ID : userId;
-    const tierOk = await this.attemptReservation(tierScope, tierKey, usageDate, estimatedUsd, tierLimit);
+    let tierOk = await this.attemptReservation(tierScope, tierKey, usageDate, estimatedUsd, tierLimit);
+    if (!tierOk && !isPlatformAttribution) {
+      // Base allowance exhausted — retry once against the topped-up cap if
+      // the student bought extra AI time today. Same atomic primitive, just
+      // a higher limit, so concurrency guarantees are unchanged.
+      const toppedUpLimit = await this.getToppedUpPerUserDailyBudgetUsd(tierLimit, userId, usageDate);
+      if (toppedUpLimit > tierLimit) {
+        tierOk = await this.attemptReservation(tierScope, tierKey, usageDate, estimatedUsd, toppedUpLimit);
+      }
+    }
     if (!tierOk) {
       // The global slice was already committed above, but this tier's
       // slice never was (its own WHERE clause is what just failed) — roll

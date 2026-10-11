@@ -7,6 +7,7 @@ import { TtsProviderFactory } from "./tts/tts-provider.factory";
 import { SMARTIFY_TTS_INSTRUCTIONS, SMARTIFY_TTS_INSTRUCTIONS_EN } from "./tts/tts-config.util";
 import { TtsAudioCacheService, computeLessonTtsCacheKey } from "./tts/tts-audio-cache.service";
 import type { TtsProvider } from "./tts/tts-provider.interface";
+import { aiDailyLimitReachedException } from "../ai/usage/ai-daily-limit";
 
 const MAX_INPUT_CHARS = 4000; // generous for a tutor reply; bounds cost/abuse per call
 
@@ -207,6 +208,7 @@ export class TutorSpeechService {
     if (estimatedUsd > 0) {
       const reserveResult = await this.usageService.reserveBudget(userId, estimatedUsd);
       if (!reserveResult.ok) {
+        if (reserveResult.reason === "user_exceeded") throw aiDailyLimitReachedException();
         throw new ServiceUnavailableException(
           reserveResult.reason === "misconfigured"
             ? "The AI Tutor is temporarily unavailable. Please try again later."

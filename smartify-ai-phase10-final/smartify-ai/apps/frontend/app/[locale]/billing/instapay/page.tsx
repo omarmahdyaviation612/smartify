@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getInstapayCopy, type InstapaySubmissionStatus } from "@/content/instapay";
+import { getAiLimitCopy } from "@/content/ai-limit";
 import { getMarketingCopy } from "@/content/marketing";
 import { Navbar } from "@/components/Navbar";
 import { useApiClient } from "@/lib/api-client";
@@ -25,11 +26,16 @@ export default function InstapayCheckoutPage() {
   const { locale } = useParams<{ locale: Locale }>();
   const isAr = locale === "ar";
   const copy = getInstapayCopy(locale);
+  const aiLimitCopy = getAiLimitCopy(locale);
   const navCopy = getMarketingCopy(locale);
   const searchParams = useSearchParams();
   const { apiFetch } = useApiClient();
 
-  const kind = searchParams.get("kind") === "pack" ? "pack" : "subscription";
+  const kindParam = searchParams.get("kind");
+  const kind = kindParam === "pack" ? "pack" : kindParam === "ai-topup" ? "ai-topup" : "subscription";
+  // Only same-site relative paths are honoured, so this can never become an open redirect.
+  const returnToParam = searchParams.get("returnTo") ?? "";
+  const returnTo = returnToParam.startsWith("/") && !returnToParam.startsWith("//") ? returnToParam : null;
   const subjectIdsParam = searchParams.get("subjectIds");
   const homeworkAddon = searchParams.get("homeworkAddon") === "true";
   const homeworkAddonAllowance = Number(searchParams.get("homeworkAddonAllowance")) || undefined;
@@ -52,8 +58,11 @@ export default function InstapayCheckoutPage() {
         const body =
           kind === "pack"
             ? { subjectId }
+            : kind === "ai-topup"
+            ? {}
             : { subjectIds: subjectIdsParam ? subjectIdsParam.split(",").filter(Boolean) : [], homeworkAddon, ...(homeworkAddon ? { homeworkAddonAllowance } : {}) };
-        const path = kind === "pack" ? "/instapay/question-pack/initiate" : "/instapay/subscription/initiate";
+        const path =
+          kind === "pack" ? "/instapay/question-pack/initiate" : kind === "ai-topup" ? "/instapay/ai-topup/initiate" : "/instapay/subscription/initiate";
         const result = await apiFetch<InitiateResult>(path, { method: "POST", body: JSON.stringify(body) });
         setInitiated(result);
         setAmount(String(result.expectedAmountEGP));
@@ -106,7 +115,10 @@ export default function InstapayCheckoutPage() {
       <Navbar locale={locale} copy={navCopy} />
       <main className="flex min-h-[70vh] flex-col items-center py-10">
         <SmartifyContainer className="max-w-lg">
-          <h1 className="text-2xl font-bold text-navy-900">{copy.instructionsTitle}</h1>
+          <h1 className="text-2xl font-bold text-navy-900">{kind === "ai-topup" ? aiLimitCopy.checkoutTitle : copy.instructionsTitle}</h1>
+          {kind === "ai-topup" && (
+            <p className="mt-2 text-sm leading-6 text-neutral-600">{aiLimitCopy.checkoutBody(initiated?.expectedAmountEGP ?? 50)}</p>
+          )}
 
           {loading && <p className="mt-6 text-sm text-neutral-500">{copy.openingInstapay}</p>}
 
@@ -178,8 +190,8 @@ export default function InstapayCheckoutPage() {
             </div>
           )}
 
-          <Link href={`/${locale}/billing`} className="mt-6 inline-block text-sm text-sf-blue-500">
-            {copy.backToBilling}
+          <Link href={kind === "ai-topup" && returnTo ? returnTo : `/${locale}/billing`} className="mt-6 inline-block text-sm text-sf-blue-500">
+            {kind === "ai-topup" ? aiLimitCopy.backToStudying : copy.backToBilling}
           </Link>
         </SmartifyContainer>
       </main>

@@ -7,7 +7,7 @@ import { useApiClient } from "@/lib/api-client";
 
 interface Submission {
   id: string;
-  kind: "SUBSCRIPTION" | "QUESTION_PACK";
+  kind: "SUBSCRIPTION" | "QUESTION_PACK" | "AI_DAILY_TOPUP";
   referenceId: string;
   expectedAmountEGP: string;
   submittedAmountEGP: string;
@@ -72,7 +72,7 @@ function SubmissionRow({ submission, onAction }: { submission: Submission; onAct
     <tr className="border-b border-neutral-100 text-sm">
       <td className="py-2 pr-4 font-mono text-xs">{submission.referenceId}</td>
       <td className="py-2 pr-4">{submission.student.fullName}<br /><span className="text-xs text-neutral-400">{submission.student.user.email}</span></td>
-      <td className="py-2 pr-4">{submission.kind === "SUBSCRIPTION" ? "Subscription" : "Question pack"}</td>
+      <td className="py-2 pr-4">{submission.kind === "SUBSCRIPTION" ? "Subscription" : submission.kind === "AI_DAILY_TOPUP" ? "Extra AI day" : "Question pack"}</td>
       <td className="py-2 pr-4">{submission.expectedAmountEGP} EGP</td>
       <td className="py-2 pr-4">{submission.submittedAmountEGP} EGP{submission.senderName ? ` — ${submission.senderName}` : ""}</td>
       <td className="py-2 pr-4">{new Date(submission.createdAt).toLocaleString()}</td>

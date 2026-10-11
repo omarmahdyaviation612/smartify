@@ -38,6 +38,7 @@ describe("AIUsageService", () => {
 
     const prisma = {
       client: {
+        aIDailyTopUpPurchase: { count: jest.fn().mockResolvedValue(0) },
         systemConfig: {
           findUnique: jest.fn().mockImplementation(({ where: { key } }: any) =>
             Promise.resolve(key in systemConfigValues ? { value: systemConfigValues[key] } : null),

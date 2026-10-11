@@ -4,6 +4,7 @@ import { BillingService } from "../billing/billing.service";
 import { TutorQuestionPacksService } from "../tutor-question-packs/tutor-question-packs.service";
 import { loadBackendEnv } from "@smartify/config";
 import { InstapayAdminAlertService } from "./instapay-admin-alert.service";
+import { AIDailyTopUpService } from "../ai-daily-topup/ai-daily-topup.service";
 
 const MAX_RECEIPT_BYTES = 5 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
@@ -35,6 +36,7 @@ export class InstapayService {
     private readonly questionPacks: TutorQuestionPacksService,
     // Optional so existing unit tests that build the service by hand keep working.
     @Optional() private readonly adminAlert?: InstapayAdminAlertService,
+    @Optional() private readonly aiTopUps?: AIDailyTopUpService,
   ) {}
 
   isConfigured() {
@@ -48,6 +50,11 @@ export class InstapayService {
 
   async initiateQuestionPack(userId: string, subjectId: string) {
     return this.questionPacks.startInstapayPurchase(userId, subjectId);
+  }
+
+  async initiateAiTopUp(userId: string) {
+    if (!this.aiTopUps) throw new BadRequestException("Extra AI time is not available.");
+    return this.aiTopUps.startInstapayPurchase(userId);
   }
 
   /** Own submissions only — never another student's. */
@@ -88,9 +95,10 @@ export class InstapayService {
     // trusts a client-supplied subscription/purchase ID directly, so a
     // student can only submit a receipt against a reference they were
     // actually issued.
-    let kind: "SUBSCRIPTION" | "QUESTION_PACK";
+    let kind: "SUBSCRIPTION" | "QUESTION_PACK" | "AI_DAILY_TOPUP";
     let subscriptionId: string | undefined;
     let packPurchaseId: string | undefined;
+    let topUpPurchaseId: string | undefined;
     let expectedAmountEGP: number;
 
     if (referenceId.startsWith("SMAI-S-")) {
@@ -109,6 +117,14 @@ export class InstapayService {
       kind = "QUESTION_PACK";
       packPurchaseId = purchase.id;
       expectedAmountEGP = Number(purchase.amountEGP);
+    } else if (referenceId.startsWith("SMAI-D-")) {
+      const purchase = await this.prisma.client.aIDailyTopUpPurchase.findFirst({
+        where: { studentId: profile.id, paymentProvider: "instapay", externalSessionId: referenceId },
+      });
+      if (!purchase) throw new ForbiddenException("This payment reference does not belong to your account.");
+      kind = "AI_DAILY_TOPUP";
+      topUpPurchaseId = purchase.id;
+      expectedAmountEGP = Number(purchase.amountEGP);
     } else {
       throw new BadRequestException("Unrecognized payment reference.");
     }
@@ -121,6 +137,7 @@ export class InstapayService {
           kind,
           subscriptionId,
           packPurchaseId,
+          topUpPurchaseId,
           referenceId,
           expectedAmountEGP,
           submittedAmountEGP: input.submittedAmountEGP,

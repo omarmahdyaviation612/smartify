@@ -1,7 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { BillingService } from "../../billing/billing.service";
 import { TutorQuestionPacksService } from "../../tutor-question-packs/tutor-question-packs.service";
+import { AIDailyTopUpService } from "../../ai-daily-topup/ai-daily-topup.service";
 
 const LIST_SELECT = {
   id: true,
@@ -27,6 +28,7 @@ export class AdminInstapayService {
     private readonly prisma: PrismaService,
     private readonly billingService: BillingService,
     private readonly questionPacks: TutorQuestionPacksService,
+    @Optional() private readonly aiTopUps?: AIDailyTopUpService,
   ) {}
 
   listPending() {
@@ -78,6 +80,9 @@ export class AdminInstapayService {
     if (submission.kind === "SUBSCRIPTION") {
       if (!submission.subscriptionId) throw new BadRequestException("Malformed submission: missing subscription.");
       await this.billingService.activateInstapaySubscription(submission.subscriptionId, externalEventId, submission.referenceId);
+    } else if (submission.kind === "AI_DAILY_TOPUP") {
+      if (!submission.topUpPurchaseId || !this.aiTopUps) throw new BadRequestException("Malformed submission: missing AI top-up purchase.");
+      await this.aiTopUps.applyPaidPurchase("instapay", submission.topUpPurchaseId, externalEventId);
     } else {
       if (!submission.packPurchaseId) throw new BadRequestException("Malformed submission: missing pack purchase.");
       await this.questionPacks.applyPaidPurchase("instapay", submission.packPurchaseId, externalEventId);
