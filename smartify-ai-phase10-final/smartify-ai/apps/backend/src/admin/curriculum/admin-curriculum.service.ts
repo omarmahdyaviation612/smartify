@@ -519,8 +519,18 @@ export class AdminCurriculumService {
     return this.prisma.client.grade.findMany({ where: { curriculumId }, orderBy: { level: "asc" } });
   }
 
-  createGrade(curriculumId: string, data: { nameEn: string; nameAr: string; level: number }) {
-    return this.prisma.client.grade.create({ data: { curriculumId, ...data } });
+  /**
+   * Admin "Add grade" (2026-10-13), e.g. Preparatory 1-3 (levels 7-9). Like a
+   * new curriculum, the grade starts HIDDEN (isActive: false): an active grade
+   * with no subjects would show students a dead-end choice in onboarding. The
+   * admin activates it from the Grades list once its subjects are published.
+   */
+  async createGrade(curriculumId: string, data: { nameEn: string; nameAr: string; level: number }) {
+    const curriculum = await this.prisma.client.curriculum.findUnique({ where: { id: curriculumId }, select: { id: true } });
+    if (!curriculum) throw new NotFoundException("Curriculum not found.");
+    const clash = await this.prisma.client.grade.findFirst({ where: { curriculumId, level: data.level }, select: { nameEn: true } });
+    if (clash) throw new ConflictException(`This curriculum already has a level ${data.level} grade (${clash.nameEn}).`);
+    return this.prisma.client.grade.create({ data: { curriculumId, ...data, isActive: false } });
   }
 
   updateGrade(id: string, data: { nameEn?: string; nameAr?: string; level?: number; isActive?: boolean }) {

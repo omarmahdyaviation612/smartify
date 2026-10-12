@@ -5,7 +5,7 @@ import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { UserRole } from "@smartify/shared-types";
 import { AdminCurriculumService } from "./admin-curriculum.service";
-import { assignUnassignedUnitsTermSchema, confirmExtraBookStructureSchema, confirmSubjectStructureSchema, createCurriculumSchema, createSharedSubjectAliasSchema, sharedSubjectContentSchema, updateCurriculumSchema, updateGradeSchema, updatePricingPlanSchema, updateSubjectSchema, updateUnitTermSchema } from "@smartify/validation";
+import { assignUnassignedUnitsTermSchema, confirmExtraBookStructureSchema, confirmSubjectStructureSchema, createCurriculumSchema, createGradeSchema, createSharedSubjectAliasSchema, sharedSubjectContentSchema, updateCurriculumSchema, updateGradeSchema, updatePricingPlanSchema, updateSubjectSchema, updateUnitTermSchema } from "@smartify/validation";
 import { parseBody } from "../../common/validation/parse-body";
 import { uploadOptions, textbookUploadOptions } from "./upload-options";
 
@@ -48,8 +48,9 @@ export class AdminCurriculumController {
   }
 
   @Post("grades")
-  createGrade(@Body() body: { curriculumId: string; nameEn: string; nameAr: string; level: number }) {
-    return this.service.createGrade(body.curriculumId, body);
+  createGrade(@Body() body: unknown) {
+    const { curriculumId, ...data } = parseBody(createGradeSchema, body);
+    return this.service.createGrade(curriculumId, data);
   }
 
   @Patch("grades/:id")

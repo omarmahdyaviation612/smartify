@@ -1394,6 +1394,95 @@ function AddCurriculumForm({ onCreated, onCancel }: { onCreated: (c: Curriculum)
   );
 }
 
+// Admin "Add grade" (2026-10-13). Suggested names follow the Egyptian stages
+// (levels 7-9 = Preparatory, 10-12 = Secondary) and stay editable.
+const AR_ORDINALS = ["الأول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس"];
+function suggestedGradeNames(level: number): { nameEn: string; nameAr: string } {
+  if (level >= 7 && level <= 9) return { nameEn: `Prep ${level - 6}`, nameAr: `الصف ${AR_ORDINALS[level - 7]} الإعدادي` };
+  if (level >= 10 && level <= 12) return { nameEn: `Secondary ${level - 9}`, nameAr: `الصف ${AR_ORDINALS[level - 10]} الثانوي` };
+  if (level >= 1 && level <= 6) return { nameEn: `Grade ${level}`, nameAr: `الصف ${AR_ORDINALS[level - 1]} الابتدائي` };
+  return { nameEn: `Grade ${level}`, nameAr: `الصف ${level}` };
+}
+
+function AddGradeForm({ curriculumId, grades, onCreated, onCancel }: { curriculumId: string; grades: Grade[]; onCreated: (g: Grade) => void; onCancel: () => void }) {
+  const { apiFetch } = useApiClient();
+  const nextLevel = Math.max(0, ...grades.map((g) => g.level)) + 1;
+  const [level, setLevel] = useState(nextLevel);
+  const [nameEn, setNameEn] = useState(suggestedGradeNames(nextLevel).nameEn);
+  const [nameAr, setNameAr] = useState(suggestedGradeNames(nextLevel).nameAr);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  // After each add, move the form on to the next level so Prep 1, 2, 3 are three clicks.
+  useEffect(() => {
+    setLevel(nextLevel);
+    setNameEn(suggestedGradeNames(nextLevel).nameEn);
+    setNameAr(suggestedGradeNames(nextLevel).nameAr);
+  }, [nextLevel]);
+
+  function changeLevel(value: number) {
+    const clamped = Math.max(1, Math.min(20, value || 1));
+    setLevel(clamped);
+    setNameEn(suggestedGradeNames(clamped).nameEn);
+    setNameAr(suggestedGradeNames(clamped).nameAr);
+  }
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!nameEn.trim() || !nameAr.trim()) {
+      setError("English and Arabic names are both required.");
+      return;
+    }
+    if (grades.some((g) => g.level === level)) {
+      setError(`Level ${level} already exists in this curriculum.`);
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const created = await apiFetch<Grade>("/admin/curriculum/grades", {
+        method: "POST",
+        body: JSON.stringify({ curriculumId, nameEn: nameEn.trim(), nameAr: nameAr.trim(), level }),
+      });
+      onCreated(created);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not add the grade.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const inputClass = "w-full rounded-sf border border-neutral-300 px-3 py-2 text-sm";
+  return (
+    <form onSubmit={submit} className="mt-3 space-y-3 rounded-sf border border-neutral-200 bg-[--sf-bg-subtle] p-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <label className="text-sm text-neutral-700">
+          Level
+          <input type="number" min={1} max={20} value={level} onChange={(e) => changeLevel(Number(e.target.value))} className={inputClass} />
+        </label>
+        <label className="text-sm text-neutral-700">
+          Name (English)
+          <input value={nameEn} onChange={(e) => setNameEn(e.target.value)} className={inputClass} />
+        </label>
+        <label className="text-sm text-neutral-700">
+          Name (Arabic)
+          <input value={nameAr} onChange={(e) => setNameAr(e.target.value)} dir="rtl" className={inputClass} />
+        </label>
+      </div>
+      <p className="text-xs text-neutral-500">The grade starts hidden from students. Add and publish its subjects, then click “Activate”.</p>
+      {error && <p className="text-sm text-error-600" role="alert">{error}</p>}
+      <div className="flex gap-2">
+        <button type="submit" disabled={busy} className="rounded-sf bg-sf-blue-500 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
+          {busy ? "Adding…" : "Add grade"}
+        </button>
+        <button type="button" onClick={onCancel} disabled={busy} className="rounded-sf border border-neutral-300 px-3 py-2 text-sm">
+          Done
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function CurriculaSection() {
   const { apiFetch } = useApiClient();
   const [curricula, setCurricula] = useState<Curriculum[]>([]);
@@ -1402,6 +1491,7 @@ function CurriculaSection() {
   const [curriculumActionBusy, setCurriculumActionBusy] = useState(false);
   const [curriculumActionError, setCurriculumActionError] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showAddGrade, setShowAddGrade] = useState(false);
 
   useEffect(() => {
     apiFetch<Curriculum[]>("/admin/curriculum/curricula").then((data) => {
@@ -1477,12 +1567,20 @@ function CurriculaSection() {
       )}
       {curriculumActionError && <p className="mt-2 text-sm text-error-600" role="alert">{curriculumActionError}</p>}
 
-      <h3 className="mb-2 mt-6 text-sm font-semibold uppercase tracking-wide text-neutral-500">Grades</h3>
+      <div className="mb-2 mt-6 flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">Grades</h3>
+        {selectedId && !showAddGrade && (
+          <button onClick={() => setShowAddGrade(true)} className="rounded-sf border border-sf-blue-300 px-3 py-1.5 text-sm font-medium text-sf-blue-700">
+            + Add grade
+          </button>
+        )}
+      </div>
       <ul className="space-y-2 text-sm">
         {grades.map((g) => (
           <li key={g.id} className="flex items-center justify-between rounded-sf border border-neutral-100 px-4 py-2">
             <span className="text-neutral-700">
-              {g.nameEn} (level {g.level})
+              {g.nameEn} · <span dir="rtl">{g.nameAr}</span> (level {g.level}){" "}
+              {!g.isActive && <span className="text-xs text-amber-700">(hidden from students)</span>}
             </span>
             <button onClick={() => toggleGradeActive(g)} className="text-xs text-neutral-500 underline">
               {g.isActive ? "Deactivate" : "Activate"}
@@ -1490,6 +1588,15 @@ function CurriculaSection() {
           </li>
         ))}
       </ul>
+      {showAddGrade && selectedId && (
+        <AddGradeForm
+          key={selectedId}
+          curriculumId={selectedId}
+          grades={grades}
+          onCreated={(g) => setGrades((prev) => [...prev, g].sort((a, b) => a.level - b.level))}
+          onCancel={() => setShowAddGrade(false)}
+        />
+      )}
     </div>
   );
 }

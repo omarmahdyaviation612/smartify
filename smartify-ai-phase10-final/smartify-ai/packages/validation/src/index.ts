@@ -138,6 +138,14 @@ export const createCurriculumSchema = z.object({
   gradeCount: z.number().int().min(0).max(12).optional(),
 }).strict();
 
+// Admin "Add grade" (2026-10-13) — e.g. Preparatory 1-3 (levels 7-9) on an existing curriculum.
+export const createGradeSchema = z.object({
+  curriculumId: z.string().trim().min(1),
+  nameEn: z.string().trim().min(1).max(200),
+  nameAr: z.string().trim().min(1).max(200),
+  level: z.number().int().min(1).max(20),
+}).strict();
+
 export const updateGradeSchema = z.object({
   nameEn: z.string().trim().min(1).max(200).optional(),
   nameAr: z.string().trim().min(1).max(200).optional(),
