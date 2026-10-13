@@ -90,5 +90,9 @@ export function canonicalContentSubjectId(subject: {
   if (!source || source.id !== subject.sharedContentSubjectId || !source.isActive || source.sharedContentSubjectId != null) return null;
   if (!source.grade.isActive || !source.grade.curriculum.isActive || source.grade.curriculum.code !== "EG_NATIONAL" || source.grade.level !== subject.grade?.level) return null;
   const sourceKind = sharedSubjectKind(source.nameEn, source.nameAr);
-  return sourceKind && sourceKind === sharedSubjectKind(subject.nameEn, subject.nameAr) ? source.id : null;
+  const targetKind = sharedSubjectKind(subject.nameEn, subject.nameAr);
+  if (sourceKind) return sourceKind === targetKind ? source.id : null;
+  // Any other MOE subject (e.g. Italian for Prep 2, 2026-10-13) may be linked
+  // by an admin, but only to a subject with exactly the same English name.
+  return !targetKind && normalizedName(source.nameEn) !== "" && normalizedName(source.nameEn) === normalizedName(subject.nameEn) ? source.id : null;
 }
