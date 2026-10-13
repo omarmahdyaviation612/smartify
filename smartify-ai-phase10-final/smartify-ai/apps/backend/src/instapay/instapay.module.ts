@@ -7,9 +7,10 @@ import { InstapayController } from "./instapay.controller";
 import { InstapayService } from "./instapay.service";
 import { InstapayAdminAlertService } from "./instapay-admin-alert.service";
 import { EmailModule } from "../email/email.module";
+import { AdminPushModule } from "../admin/push/admin-push.module";
 
 @Module({
-  imports: [AuthModule, BillingModule, TutorQuestionPacksModule, AIDailyTopUpModule, EmailModule],
+  imports: [AuthModule, BillingModule, TutorQuestionPacksModule, AIDailyTopUpModule, EmailModule, AdminPushModule],
   controllers: [InstapayController],
   providers: [InstapayService, InstapayAdminAlertService],
   exports: [InstapayService],

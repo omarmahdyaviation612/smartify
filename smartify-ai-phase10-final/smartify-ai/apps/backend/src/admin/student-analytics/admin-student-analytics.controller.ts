@@ -1,4 +1,6 @@
-import { Controller, Get, Param, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Query, UseGuards } from "@nestjs/common";
+import { followUpUpdateSchema } from "@smartify/validation";
+import { parseBody } from "../../common/validation/parse-body";
 import { ClerkAuthGuard } from "../../auth/clerk-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
@@ -36,6 +38,17 @@ export class AdminStudentAnalyticsController {
       status: (STATUSES as readonly string[]).includes(status ?? "") ? (status as (typeof STATUSES)[number]) : "all",
       includeTest: includeTest === "true",
     });
+  }
+
+  /** Students worth a follow-up call, with their parent's mobile. */
+  @Get("follow-up")
+  followUp(@Query("includeTest") includeTest?: string) {
+    return this.service.followUpList(includeTest === "true");
+  }
+
+  @Patch("follow-up/:userId")
+  updateFollowUp(@Param("userId") userId: string, @Body() body: unknown) {
+    return this.service.updateFollowUp(userId, parseBody(followUpUpdateSchema, body));
   }
 
   @Get("students/:studentId")

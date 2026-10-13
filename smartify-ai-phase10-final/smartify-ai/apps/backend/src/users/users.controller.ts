@@ -1,10 +1,10 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Patch, Put, UseGuards } from "@nestjs/common";
 import { ClerkAuthGuard } from "../auth/clerk-auth.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
 import { Roles } from "../common/decorators/roles.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { UserRole } from "@smartify/shared-types";
-import { updateUserRoleSchema } from "@smartify/validation";
+import { contactPhoneSchema, updateUserRoleSchema } from "@smartify/validation";
 import { UsersService } from "./users.service";
 
 @Controller("users")
@@ -16,6 +16,14 @@ export class UsersController {
   @Get("me")
   me(@CurrentUser() user: any) {
     return this.usersService.findMe(user.id);
+  }
+
+  /** Any authenticated user saves their own contact mobile (the parent's WhatsApp number). */
+  @Put("me/phone")
+  setMyPhone(@CurrentUser() user: any, @Body() body: unknown) {
+    const parsed = contactPhoneSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException({ statusCode: 400, code: "INVALID_PHONE", message: "Enter a valid mobile number, e.g. 01012345678." });
+    return this.usersService.setMyPhone(user.id, parsed.data.phone);
   }
 
   /** Only admins can list all users — proves RolesGuard end to end. */

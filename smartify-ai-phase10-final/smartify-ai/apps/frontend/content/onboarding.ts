@@ -10,6 +10,11 @@ export interface OnboardingCopy {
     countryLabel: string;
     languageLabel: string;
     continueLabel: string;
+    // Contact phone (2026-10-13)
+    phoneLabel: string;
+    phoneHint: string;
+    phoneInvalid: string;
+    phoneSaveFailed: string;
     // Student school info V1 (2026-09-25)
     governorateLabel: string;
     areaLabel: string;
@@ -73,6 +78,10 @@ const en: OnboardingCopy = {
     countryLabel: "Country",
     languageLabel: "Preferred language",
     continueLabel: "Continue",
+    phoneLabel: "Parent's mobile number (WhatsApp)",
+    phoneHint: "We use it only to follow up on the student's progress and help if anything goes wrong.",
+    phoneInvalid: "Enter a valid mobile number, e.g. 01012345678.",
+    phoneSaveFailed: "Couldn't save the mobile number. Check your connection and try again.",
     governorateLabel: "Governorate",
     areaLabel: "Area / District",
     schoolLabel: "School",
@@ -134,6 +143,10 @@ const ar: OnboardingCopy = {
     countryLabel: "الدولة",
     languageLabel: "اللغة المفضلة",
     continueLabel: "متابعة",
+    phoneLabel: "رقم موبايل ولي الأمر (واتساب)",
+    phoneHint: "بنستخدمه بس عشان نتابع مستوى الطالب ونساعدكم لو حصلت أي مشكلة.",
+    phoneInvalid: "اكتب رقم موبايل صحيح، مثلاً 01012345678.",
+    phoneSaveFailed: "مقدرناش نحفظ الرقم. اتأكد من الاتصال وحاول تاني.",
     governorateLabel: "المحافظة",
     areaLabel: "المنطقة / الإدارة التعليمية",
     schoolLabel: "المدرسة",

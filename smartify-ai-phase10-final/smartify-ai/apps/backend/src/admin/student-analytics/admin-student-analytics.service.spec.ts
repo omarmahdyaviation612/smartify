@@ -92,6 +92,48 @@ describe("AdminStudentAnalyticsService", () => {
     expect(o.breakdowns.governorate[0]).toEqual({ key: "Cairo", count: 2 });
   });
 
+  it("builds the follow-up list and leaves out active paying students", async () => {
+    const prisma = makePrisma();
+    prisma.client.user.findMany = jest.fn().mockResolvedValue([
+      { id: "u4", email: "u4@x.com", createdAt: now, phone: "+201012345678", followUpNote: "call after 6pm", followUpContactedAt: null },
+    ]);
+    const service = new AdminStudentAnalyticsService(prisma as any);
+    const result = await service.followUpList();
+    expect(result.items.map((i) => [i.userId, i.stage])).toEqual(expect.arrayContaining([["u4", "onboarding"], ["u2", "trial"], ["u3", "registered"]]));
+    expect(result.items.find((i) => i.userId === "u1")).toBeUndefined();
+    expect(result.items.find((i) => i.userId === "u4")).toMatchObject({ detail: "curriculum", phone: "+201012345678", note: "call after 6pm" });
+    expect(result.counts).toEqual({ onboarding: 1, registered: 1, trial: 1, paid_inactive: 0 });
+    expect(result.withPhone).toBe(1);
+  });
+
+  it("lists a paying student with no recent activity as paid_inactive", async () => {
+    const prisma = makePrisma();
+    prisma.client.user.findMany = jest.fn().mockResolvedValue([]);
+    const old = daysAgo(30);
+    prisma.client.lessonSession.groupBy = jest.fn().mockImplementation(async ({ where }: any) => where.completedAt ? [] : [{ studentId: "s1", _count: { _all: 1 }, _max: { updatedAt: old } }]);
+    prisma.client.questionAttempt.groupBy = jest.fn().mockResolvedValue([]);
+    prisma.client.quizResult.groupBy = jest.fn().mockResolvedValue([]);
+    prisma.client.aIUsage.groupBy = jest.fn().mockResolvedValue([]);
+    const service = new AdminStudentAnalyticsService(prisma as any);
+    const result = await service.followUpList();
+    expect(result.items.find((i) => i.userId === "u1")).toMatchObject({ stage: "paid_inactive" });
+  });
+
+  it("saves a follow-up note and the contacted flag for student accounts only", async () => {
+    const prisma = makePrisma();
+    prisma.client.user.findUnique = jest.fn().mockResolvedValue({ id: "u2", role: "STUDENT", deletedAt: null });
+    prisma.client.user.update = jest.fn().mockImplementation(async ({ data }: any) => ({ id: "u2", ...data }));
+    const service = new AdminStudentAnalyticsService(prisma as any);
+    const updated = await service.updateFollowUp("u2", { note: "price is high", contacted: true });
+    expect(updated).toMatchObject({ followUpNote: "price is high" });
+    expect(updated.followUpContactedAt).toBeInstanceOf(Date);
+    const cleared = await service.updateFollowUp("u2", { contacted: false });
+    expect(cleared).toEqual({ id: "u2", followUpContactedAt: null });
+
+    prisma.client.user.findUnique = jest.fn().mockResolvedValue({ id: "a1", role: "ADMIN", deletedAt: null });
+    await expect(service.updateFollowUp("a1", { note: "x" })).rejects.toBeInstanceOf(NotFoundException);
+  });
+
   it("returns 404 for an unknown student", async () => {
     const service = new AdminStudentAnalyticsService(makePrisma() as any);
     await expect(service.studentDetail("missing")).rejects.toBeInstanceOf(NotFoundException);

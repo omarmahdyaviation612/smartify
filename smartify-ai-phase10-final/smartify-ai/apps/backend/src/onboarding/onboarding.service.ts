@@ -7,6 +7,7 @@ import { hasArabicQuestionContent, isArabicOnlySubject } from "../interactive-le
 import { DIAGNOSTIC_QUESTION_LIMIT, pickBalancedDiagnostic } from "./diagnostic-balance.util";
 
 export const ONBOARDING_STEP_ACTION = "onboarding.step";
+export const PHONE_REQUIRED_CODE = "PHONE_REQUIRED";
 
 @Injectable()
 export class OnboardingService {
@@ -23,6 +24,12 @@ export class OnboardingService {
    * but submits together once the student confirms their selections.
    */
   async saveProfile(userId: string, input: StudentOnboardingInput) {
+    // Contact phone (2026-10-13): required before the profile is saved. The
+    // profile step stores it via PUT /users/me/phone; the frontend sends the
+    // student back there when it sees PHONE_REQUIRED.
+    const owner = await this.prisma.client.user.findUnique({ where: { id: userId }, select: { phone: true } });
+    if (!owner?.phone) throw new BadRequestException({ statusCode: 400, code: PHONE_REQUIRED_CODE, message: "Add a parent mobile number to continue." });
+
     const curriculum = await this.prisma.client.curriculum.findUnique({
       where: { code: input.curriculumCode },
     });

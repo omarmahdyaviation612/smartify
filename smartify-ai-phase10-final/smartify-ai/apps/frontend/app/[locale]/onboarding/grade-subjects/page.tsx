@@ -154,6 +154,11 @@ export default function OnboardingGradeSubjectsPage() {
 
       router.push(`/${locale}/onboarding/diagnostic`);
     } catch (submitError) {
+      if (submitError instanceof ApiError && submitError.code === "PHONE_REQUIRED") {
+        // The parent's mobile is required before the profile is saved (2026-10-13).
+        router.push(`/${locale}/onboarding/profile`);
+        return;
+      }
       if (submitError instanceof ApiError && submitError.status === 401) {
         setError(isAr ? "انتهت جلسة الدخول أو لم تتم مزامنة الحساب. سجّل الدخول مرة أخرى ثم حاول." : "Your session expired or your account is not synced. Sign in again and retry.");
       } else if (submitError instanceof ApiError && submitError.status === 400 && submitError.message) {

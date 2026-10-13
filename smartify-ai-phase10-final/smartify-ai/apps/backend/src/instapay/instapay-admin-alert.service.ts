@@ -1,7 +1,8 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, Optional } from "@nestjs/common";
 import { loadBackendEnv } from "@smartify/config";
 import { PrismaService } from "../prisma/prisma.service";
 import { EmailService } from "../email/email.service";
+import { AdminPushService, type AdminPushPayload } from "../admin/push/admin-push.service";
 
 export interface NewInstapaySubmission {
   submissionId: string;
@@ -21,8 +22,26 @@ export function parseAlertEmails(raw: string | undefined): string[] {
   return [...new Set((raw ?? "").split(/[,;\s]+/).map((e) => e.trim().toLowerCase()).filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)))];
 }
 
+const KIND_AR: Record<NewInstapaySubmission["kind"], string> = {
+  SUBSCRIPTION: "اشتراك",
+  QUESTION_PACK: "باقة أسئلة",
+  AI_DAILY_TOPUP: "يوم AI إضافي",
+};
+
+/** The pop-up shown on admin devices for a new receipt. */
+export function buildInstapayPushPayload(input: NewInstapaySubmission, adminUrl: string): AdminPushPayload {
+  const mismatch = Math.abs(input.submittedAmountEGP - input.expectedAmountEGP) >= 0.01;
+  const who = input.studentName?.trim() || "طالب";
+  return {
+    title: `💳 دفعة InstaPay جديدة: ${input.submittedAmountEGP} ج.م`,
+    body: `${who} · ${KIND_AR[input.kind]}${mismatch ? ` · ⚠️ المطلوب ${input.expectedAmountEGP} ج.م` : ""}\nاضغط للمراجعة والموافقة`,
+    url: adminUrl,
+    tag: `instapay-${input.submissionId}`,
+  };
+}
+
 export function buildInstapayAlertEmail(input: NewInstapaySubmission, adminUrl: string) {
-  const kindAr = input.kind === "SUBSCRIPTION" ? "اشتراك" : "باقة أسئلة";
+  const kindAr = KIND_AR[input.kind];
   const mismatch = Math.abs(input.submittedAmountEGP - input.expectedAmountEGP) >= 0.01;
   const who = input.studentName?.trim() || "طالب";
   const subject = `💳 دفعة InstaPay جديدة: ${input.submittedAmountEGP} ج.م — ${who}${mismatch ? " ⚠️ المبلغ مختلف" : ""}`;
@@ -56,6 +75,8 @@ export class InstapayAdminAlertService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly email: EmailService,
+    // Optional so tests that build the service by hand keep working.
+    @Optional() private readonly push?: AdminPushService,
   ) {}
 
   async recipients(): Promise<string[]> {
@@ -69,6 +90,21 @@ export class InstapayAdminAlertService {
   }
 
   async notifyNewSubmission(input: NewInstapaySubmission): Promise<void> {
+    await Promise.all([this.sendEmails(input), this.sendPush(input)]);
+  }
+
+  private async sendPush(input: NewInstapaySubmission): Promise<void> {
+    if (!this.push) return;
+    try {
+      const adminUrl = `${loadBackendEnv().FRONTEND_URL.replace(/\/$/, "")}/ar/admin/instapay`;
+      const { sent, total } = await this.push.sendToAdmins(buildInstapayPushPayload(input, adminUrl));
+      if (total) this.logger.log(`InstaPay admin push for ${input.submissionId}: sent ${sent}/${total}.`);
+    } catch {
+      this.logger.warn(`InstaPay admin push for ${input.submissionId} failed.`);
+    }
+  }
+
+  private async sendEmails(input: NewInstapaySubmission): Promise<void> {
     try {
       const to = await this.recipients();
       if (!to.length) {

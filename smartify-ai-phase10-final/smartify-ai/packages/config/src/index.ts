@@ -22,6 +22,11 @@ export const backendEnvSchema = z.object({
   // Optional comma-separated list of addresses that get an email for every new InstaPay
   // receipt; when unset the alert goes to every active SUPER_ADMIN / ADMIN user.
   ADMIN_ALERT_EMAILS: z.string().optional(),
+  // Browser push (pop-up) notifications for admins (2026-10-13). VAPID key
+  // pair from `npx web-push generate-vapid-keys`; push is disabled when unset.
+  WEB_PUSH_PUBLIC_KEY: z.string().optional(),
+  WEB_PUSH_PRIVATE_KEY: z.string().optional(),
+  WEB_PUSH_SUBJECT: z.string().optional(), // e.g. mailto:owner@example.com
 
   // Manual InstaPay payment method: real money-routing details, so these
   // live in deploy-time env vars (not an admin-editable DB config) and are

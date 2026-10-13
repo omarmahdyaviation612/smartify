@@ -8,6 +8,7 @@ import { AdminGuard } from "@/components/AdminGuard";
 import { useApiClient } from "@/lib/api-client";
 import type { Locale } from "@/content/marketing";
 import { StageBadge, fmtDate, pct, usd } from "@/components/admin/AnalyticsCharts";
+import { displayPhone, whatsappUrl } from "@/lib/phone";
 
 // Admin student list (2026-10-11): every onboarded student with school,
 // location, curriculum, subjects, activity and AI cost. Filters, sorting and
@@ -17,6 +18,7 @@ interface StudentRow {
   studentId: string;
   fullName: string;
   email: string;
+  phone?: string | null;
   age: number;
   isTestStudent: boolean;
   joinedAt: string;
@@ -49,13 +51,13 @@ interface StudentRow {
 type SortKey = "joinedAt" | "lastActiveAt" | "fullName" | "lessonsStarted" | "aiCostUsd" | "practiceAttempts";
 
 function toCsv(rows: StudentRow[]): string {
-  const headers = ["Name", "Email", "Age", "Curriculum", "Grade", "School", "Governorate", "Area", "Subjects", "Stage", "Subscription", "Monthly EGP", "Paid EGP", "Trial lessons", "Tutor trial questions", "Lessons started", "Lessons completed", "Quizzes", "Avg quiz score", "Practice answers", "Practice accuracy", "Homework", "Tutor chats", "AI calls", "AI tokens", "AI cost USD", "Joined", "Last active", "Test student"];
+  const headers = ["Name", "Email", "Parent mobile", "Age", "Curriculum", "Grade", "School", "Governorate", "Area", "Subjects", "Stage", "Subscription", "Monthly EGP", "Paid EGP", "Trial lessons", "Tutor trial questions", "Lessons started", "Lessons completed", "Quizzes", "Avg quiz score", "Practice answers", "Practice accuracy", "Homework", "Tutor chats", "AI calls", "AI tokens", "AI cost USD", "Joined", "Last active", "Test student"];
   const esc = (v: unknown) => {
     const s = v == null ? "" : String(v);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = rows.map((r) => [
-    r.fullName, r.email, r.age, r.curriculum.name, r.grade.name, r.school, r.governorate, r.area, r.subjects.join(" | "), r.stage,
+    r.fullName, r.email, displayPhone(r.phone), r.age, r.curriculum.name, r.grade.name, r.school, r.governorate, r.area, r.subjects.join(" | "), r.stage,
     r.subscriptionStatus, r.monthlyTotalEGP, r.paidEGP, r.trialLessonsUsed, r.tutorTrialQuestionsUsed, r.lessonsStarted, r.lessonsCompleted,
     r.quizzes, r.avgQuizScore?.toFixed(1), r.practiceAttempts, r.practiceAccuracy == null ? "" : Math.round(r.practiceAccuracy * 100) + "%",
     r.homeworkSessions, r.tutorChats, r.aiCalls, r.aiTokens, r.aiCostUsd.toFixed(4), r.joinedAt?.slice(0, 10), r.lastActiveAt?.slice(0, 10) ?? "", r.isTestStudent ? "yes" : "",
@@ -185,6 +187,7 @@ function StudentsTable() {
                       <Link href={`/${locale}/admin/students/${r.studentId}`} className="font-medium text-sf-blue-500 hover:underline">{r.fullName}</Link>
                       {r.isTestStudent && <span className="ms-1 rounded bg-neutral-100 px-1 text-[10px] text-neutral-500">test</span>}
                       <div className="text-xs text-neutral-500">{r.email} · {r.age}y</div>
+                      {r.phone && <a href={whatsappUrl(r.phone)} target="_blank" rel="noreferrer" dir="ltr" className="text-xs text-green-700 hover:underline">WhatsApp {displayPhone(r.phone)}</a>}
                     </td>
                     <td className="px-3 py-2 text-neutral-700">{r.curriculum.name}<div className="text-xs text-neutral-500">{r.grade.name}</div></td>
                     <td className="px-3 py-2 text-neutral-700">{r.school ?? "—"}<div className="text-xs text-neutral-500">{[r.area, r.governorate].filter(Boolean).join(", ") || "—"}</div></td>

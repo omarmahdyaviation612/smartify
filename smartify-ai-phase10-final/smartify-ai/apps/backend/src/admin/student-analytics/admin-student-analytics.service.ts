@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
+import { ONBOARDING_TRACKED_STEPS, type FollowUpUpdateInput } from "@smartify/validation";
 
 /**
  * Admin student analytics (2026-10-11). One read-only place to see who the
@@ -46,6 +47,10 @@ function countBy<T>(items: T[], key: (t: T) => string | null | undefined): Array
   return [...m.entries()].map(([k, count]) => ({ key: k, count })).sort((a, b) => b.count - a.count);
 }
 
+/** Paying students with no activity for this many days show up in the follow-up list. */
+export const FOLLOW_UP_INACTIVE_DAYS = 7;
+export type FollowUpStage = "onboarding" | "registered" | "trial" | "paid_inactive";
+
 /** When onboarding step tracking (POST /onboarding/progress) went live. */
 export const ONBOARDING_TRACKING_SINCE = new Date("2026-10-10T23:00:00Z");
 
@@ -62,7 +67,7 @@ export class AdminStudentAnalyticsService {
     const profiles = await this.db.studentProfile.findMany({
       where: { user: { deletedAt: null, ...(includeTest ? {} : { isTestStudent: false }) } },
       include: {
-        user: { select: { id: true, email: true, isTestStudent: true, createdAt: true, isActive: true } },
+        user: { select: { id: true, email: true, isTestStudent: true, createdAt: true, isActive: true, phone: true, followUpNote: true, followUpContactedAt: true } },
         curriculum: { select: { id: true, nameEn: true, code: true } },
         grade: { select: { id: true, nameEn: true, level: true } },
         school: { select: { nameEn: true, nameAr: true, governorate: true, area: true } },
@@ -102,6 +107,9 @@ export class AdminStudentAnalyticsService {
         userId: p.userId,
         fullName: p.fullName,
         email: p.user.email,
+        phone: p.user.phone ?? null,
+        followUpNote: p.user.followUpNote ?? null,
+        followUpContactedAt: p.user.followUpContactedAt ?? null,
         age: p.age,
         isTestStudent: p.user.isTestStudent,
         joinedAt: p.user.createdAt,
@@ -145,6 +153,65 @@ export class AdminStudentAnalyticsService {
     if (filters.governorate) rows = rows.filter((r) => r.governorate === filters.governorate);
     if (filters.status && filters.status !== "all") rows = rows.filter((r) => r.stage === filters.status);
     return { total: rows.length, students: rows };
+  }
+
+  /**
+   * Follow-up list (2026-10-13): every student account worth a call — signed
+   * up but never finished onboarding (with the furthest step opened),
+   * onboarded but never tried a lesson, tried but never paid, and paid but
+   * inactive for FOLLOW_UP_INACTIVE_DAYS. Active paying students are left out.
+   */
+  async followUpList(includeTest = false) {
+    const cutoff = new Date(Date.now() - FOLLOW_UP_INACTIVE_DAYS * 86_400_000);
+    const rows = await this.loadStudentRows(includeTest);
+    const users = await this.db.user.findMany({
+      where: { role: "STUDENT", deletedAt: null, studentProfile: { is: null }, ...(includeTest ? {} : { isTestStudent: false }) },
+      select: { id: true, email: true, createdAt: true, phone: true, followUpNote: true, followUpContactedAt: true },
+    });
+    const stepLogs = users.length
+      ? await this.db.auditLog.findMany({ where: { action: "onboarding.step", userId: { in: users.map((u) => u.id) } }, select: { userId: true, entityId: true } })
+      : [];
+    const furthest = new Map<string, number>();
+    for (const log of stepLogs) {
+      const index = (ONBOARDING_TRACKED_STEPS as readonly string[]).indexOf(log.entityId ?? "");
+      if (log.userId && index > (furthest.get(log.userId) ?? -1)) furthest.set(log.userId, index);
+    }
+
+    const items = [
+      ...users.map((u) => ({
+        userId: u.id, studentId: null as string | null, name: null as string | null, email: u.email, phone: u.phone ?? null,
+        stage: "onboarding" as FollowUpStage,
+        detail: furthest.has(u.id) ? ONBOARDING_TRACKED_STEPS[furthest.get(u.id)!] : null,
+        joinedAt: u.createdAt, lastActiveAt: null as Date | null,
+        note: u.followUpNote ?? null, contactedAt: u.followUpContactedAt ?? null,
+      })),
+      ...rows
+        .filter((r) => !(r.stage === "paid" && r.lastActiveAt && r.lastActiveAt >= cutoff))
+        .map((r) => ({
+          userId: r.userId, studentId: r.studentId as string | null, name: r.fullName as string | null, email: r.email, phone: r.phone,
+          stage: (r.stage === "paid" ? "paid_inactive" : r.stage) as FollowUpStage,
+          detail: `${r.curriculum.name} · ${r.grade.name}` as string | null,
+          joinedAt: r.joinedAt, lastActiveAt: r.lastActiveAt,
+          note: r.followUpNote, contactedAt: r.followUpContactedAt,
+        })),
+    ].sort((a, b) => b.joinedAt.getTime() - a.joinedAt.getTime());
+
+    const counts: Record<FollowUpStage, number> = { onboarding: 0, registered: 0, trial: 0, paid_inactive: 0 };
+    for (const item of items) counts[item.stage]++;
+    return { inactiveDays: FOLLOW_UP_INACTIVE_DAYS, total: items.length, withPhone: items.filter((i) => i.phone).length, counts, items };
+  }
+
+  async updateFollowUp(userId: string, input: FollowUpUpdateInput) {
+    const user = await this.db.user.findUnique({ where: { id: userId }, select: { id: true, role: true, deletedAt: true } });
+    if (!user || user.role !== "STUDENT" || user.deletedAt) throw new NotFoundException("Student account not found.");
+    return this.db.user.update({
+      where: { id: userId },
+      data: {
+        ...(input.note !== undefined ? { followUpNote: input.note || null } : {}),
+        ...(input.contacted !== undefined ? { followUpContactedAt: input.contacted ? new Date() : null } : {}),
+      },
+      select: { id: true, followUpNote: true, followUpContactedAt: true },
+    });
   }
 
   async overview(days = 30, includeTest = false) {

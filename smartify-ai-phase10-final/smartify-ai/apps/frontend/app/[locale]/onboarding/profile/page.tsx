@@ -6,12 +6,14 @@ import { SmartifyButton, SmartifyContainer } from "@smartify/ui";
 import { getOnboardingCopy } from "@/content/onboarding";
 import { OnboardingStepper } from "@/components/OnboardingStepper";
 import { readDraft, trackOnboardingStep, writeDraft } from "@/lib/onboarding-draft";
-import { useApiClient } from "@/lib/api-client";
+import { ApiError, useApiClient } from "@/lib/api-client";
+import { displayPhone, normalizePhoneNumber } from "@/lib/phone";
 import type { Locale } from "@/content/marketing";
 
 /**
- * Step 1 — kept to three quick fields (onboarding drop-off fix,
- * 2026-10-11). Country now defaults to Egypt and, like governorate / area /
+ * Step 1 — kept to a few quick fields (onboarding drop-off fix,
+ * 2026-10-11). The parent's mobile (2026-10-13) is required and saved
+ * right away, so the team can follow up even if the student stops here. Country now defaults to Egypt and, like governorate / area /
  * school, is an optional section on the grade & subjects step, so a new
  * student reaches the curriculum choice in seconds.
  */
@@ -25,14 +27,34 @@ export default function OnboardingProfilePage() {
   const [fullName, setFullName] = useState(existing.fullName ?? "");
   const [age, setAge] = useState(existing.age?.toString() ?? "");
   const [preferredLang, setPreferredLang] = useState<"ar" | "en">(existing.preferredLang ?? locale);
+  const [phone, setPhone] = useState("");
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     trackOnboardingStep(apiFetch, "profile");
+    // Pre-fill a number saved earlier (e.g. coming back from a later step).
+    apiFetch<{ phone?: string | null }>("/users/me")
+      .then((me) => { if (me?.phone) setPhone((current) => current || displayPhone(me.phone)); })
+      .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function handleContinue(e: React.FormEvent) {
+  async function handleContinue(e: React.FormEvent) {
     e.preventDefault();
+    if (!normalizePhoneNumber(phone)) {
+      setPhoneError(copy.profile.phoneInvalid);
+      return;
+    }
+    setSaving(true);
+    setPhoneError(null);
+    try {
+      await apiFetch("/users/me/phone", { method: "PUT", body: JSON.stringify({ phone: phone.trim() }) });
+    } catch (err) {
+      setPhoneError(err instanceof ApiError && err.status === 400 ? copy.profile.phoneInvalid : copy.profile.phoneSaveFailed);
+      setSaving(false);
+      return;
+    }
     writeDraft({ fullName: fullName.trim(), age: Number(age), preferredLang });
     router.push(`/${locale}/onboarding/curriculum`);
   }
@@ -85,7 +107,28 @@ export default function OnboardingProfilePage() {
               </select>
             </label>
 
-            <SmartifyButton type="submit" variant="ai" className="w-full">
+            <label className="block">
+              <span className="mb-2 block text-sm font-medium text-neutral-700">{copy.profile.phoneLabel}</span>
+              <input
+                required
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                dir="ltr"
+                placeholder="01012345678"
+                maxLength={25}
+                value={phone}
+                onChange={(e) => { setPhone(e.target.value); setPhoneError(null); }}
+                aria-invalid={!!phoneError}
+                aria-describedby="phone-hint"
+                className={`w-full rounded-sf border px-4 py-2 text-start ${phoneError ? "border-error-500" : "border-neutral-300"}`}
+              />
+              {phoneError
+                ? <span role="alert" className="mt-1 block text-sm text-error-500">{phoneError}</span>
+                : <span id="phone-hint" className="mt-1 block text-xs text-neutral-500">{copy.profile.phoneHint}</span>}
+            </label>
+
+            <SmartifyButton type="submit" variant="ai" className="w-full" disabled={saving}>
               {copy.profile.continueLabel}
             </SmartifyButton>
           </form>

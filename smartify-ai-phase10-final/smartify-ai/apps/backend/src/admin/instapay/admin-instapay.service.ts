@@ -19,7 +19,7 @@ const LIST_SELECT = {
   rejectedAt: true,
   rejectedByUserId: true,
   rejectionReason: true,
-  student: { select: { id: true, fullName: true, user: { select: { email: true } } } },
+  student: { select: { id: true, fullName: true, user: { select: { email: true, phone: true } } } },
 } as const;
 
 @Injectable()

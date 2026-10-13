@@ -3,6 +3,7 @@ import type { Locale } from "@/content/marketing";
 import { StudentDashboardShortcut } from "@/components/StudentDashboardShortcut";
 import { ParentRouteGuard } from "@/components/ParentRouteGuard";
 import { StudentSupportShortcut } from "@/components/StudentSupportShortcut";
+import { StudentPhoneGate } from "@/components/StudentPhoneGate";
 
 export function generateStaticParams() {
   return [{ locale: "ar" }, { locale: "en" }];
@@ -28,6 +29,7 @@ export default async function LocaleLayout({
         <ParentRouteGuard locale={locale}>{children}</ParentRouteGuard>
         <StudentDashboardShortcut locale={locale} />
         <StudentSupportShortcut locale={locale} />
+        <StudentPhoneGate locale={locale} />
       </body>
     </html>
   );

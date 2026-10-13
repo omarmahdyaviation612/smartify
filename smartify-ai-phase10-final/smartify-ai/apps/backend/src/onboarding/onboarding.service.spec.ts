@@ -18,9 +18,10 @@ describe("OnboardingService", () => {
   const gradeInCurriculumB = { id: "grade-2", curriculumId: "curriculum-B" };
   const subjectInGrade1 = { id: "subject-1", gradeId: "grade-1" };
 
-  function makePrismaMock(overrides: Partial<{ grade: any; subjects: any[]; school: any }> = {}) {
+  function makePrismaMock(overrides: Partial<{ grade: any; subjects: any[]; school: any; phone: string | null }> = {}) {
     return {
       client: {
+        user: { findUnique: jest.fn().mockResolvedValue({ phone: overrides.phone === undefined ? "+201012345678" : overrides.phone }) },
         curriculum: { findUnique: jest.fn().mockResolvedValue(curriculum) },
         grade: { findUnique: jest.fn().mockResolvedValue(overrides.grade ?? gradeInCurriculumA) },
         subject: { findMany: jest.fn().mockResolvedValue(overrides.subjects ?? [subjectInGrade1]) },
@@ -86,6 +87,17 @@ describe("OnboardingService", () => {
    * rather than trusted from the client, matching the same
    * never-trust-the-frontend pattern as curriculum/grade/subject above.
    */
+  describe("saveProfile — contact phone", () => {
+    it("rejects with PHONE_REQUIRED when the account has no mobile number", async () => {
+      const prisma = makePrismaMock({ phone: null });
+      const service = new OnboardingService(prisma, mockQuestionGenerator);
+      const error = await service.saveProfile("user-1", baseInput).catch((e) => e);
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(error.getResponse()).toMatchObject({ code: "PHONE_REQUIRED" });
+      expect(prisma.client.studentProfile.upsert).not.toHaveBeenCalled();
+    });
+  });
+
   describe("saveProfile — school info", () => {
     const activeSchool = { id: "school-1", governorate: "CAIRO", isActive: true };
 

@@ -7,6 +7,7 @@ import { useClerk } from "@clerk/nextjs";
 import { SmartifyContainer } from "@smartify/ui";
 import { AdminGuard } from "@/components/AdminGuard";
 import { useApiClient } from "@/lib/api-client";
+import { AdminPushToggle } from "@/components/admin/AdminPushToggle";
 import type { Locale } from "@/content/marketing";
 
 interface RevenueSummary {
@@ -115,6 +116,8 @@ export default function AdminOverviewPage() {
             </button>
           </div>
 
+          <div className="mt-6"><AdminPushToggle locale={locale} /></div>
+
           {summary && (
             <div className="mt-6 grid gap-4 sm:grid-cols-3">
               <div className="rounded-sf-lg border border-neutral-200 bg-white p-6">
@@ -194,6 +197,7 @@ export default function AdminOverviewPage() {
 
           <div className="mt-10 grid gap-4 sm:grid-cols-3">
             <AdminNavCard href={`/${locale}/admin/analytics`} title={locale === "ar" ? "تحليلات الطلاب" : "Student analytics"} body={locale === "ar" ? "لوحة تحليلية: التسجيل، النشاط، التحويل للدفع، المناهج والمدارس والمحافظات، واستهلاك الـ AI." : "Sign-ups, activity, funnel to paid, curricula, schools, governorates and AI consumption."} />
+            <AdminNavCard href={`/${locale}/admin/follow-up`} title={locale === "ar" ? "متابعة العملاء" : "Customer follow-up"} body={locale === "ar" ? "اللي ما كمّلوش: رقم ولي الأمر وزرار واتساب، وقفوا فين، وملاحظات الفيدباك." : "Who didn't continue: parent's mobile with a WhatsApp button, where they stopped, and feedback notes."} />
             <AdminNavCard href={`/${locale}/admin/students`} title={locale === "ar" ? "الطلاب" : "Students"} body={locale === "ar" ? "كل طالب: مدرسته ومنطقته ومنهجه وموادّه، جرّب إيه وعمل إيه، واستهلك AI قد إيه — مع تصدير CSV." : "Every student: school, location, curriculum, subjects, what they tried and did, and AI cost — with CSV export."} />
             <AdminNavCard href={`/${locale}/admin/users`} title="Users" body="View accounts and manage roles." />
             <AdminNavCard

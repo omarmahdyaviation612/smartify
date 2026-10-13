@@ -89,6 +89,60 @@ export const studentOnboardingSchema = z
   });
 export type StudentOnboardingInput = z.infer<typeof studentOnboardingSchema>;
 
+// Contact phone (2026-10-13): the parent's mobile, required at onboarding so
+// the team can follow up on WhatsApp. Accepts Egyptian mobiles in any common
+// form (01x…, +201x…, 00201x…, Arabic-Indic digits, spaces/dashes) and other
+// international numbers written with + or 00. Returns E.164 (+20XXXXXXXXXX)
+// or null when the input isn't a usable mobile number.
+export function normalizePhoneNumber(raw: string | null | undefined): string | null {
+  if (typeof raw !== "string") return null;
+  const ascii = raw
+    .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[\u06f0-\u06f9]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
+    .trim();
+  if (!/^[+\d\s().-]{8,25}$/.test(ascii)) return null;
+  const international = ascii.startsWith("+") || ascii.startsWith("00");
+  const digits = ascii.replace(/\D/g, "").replace(/^00/, "");
+  const egypt = digits.match(/^(?:20)?0?(1[0125]\d{8})$/);
+  if (egypt && (!international || digits.startsWith("20"))) return `+20${egypt[1]}`;
+  if (international && !digits.startsWith("20") && /^[1-9]\d{7,14}$/.test(digits)) return `+${digits}`;
+  return null;
+}
+
+export const contactPhoneSchema = z
+  .object({ phone: z.string().trim().min(8).max(25) })
+  .strict()
+  .transform((value, ctx) => {
+    const phone = normalizePhoneNumber(value.phone);
+    if (!phone) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["phone"], message: "Enter a valid mobile number, e.g. 01012345678." });
+      return z.NEVER;
+    }
+    return { phone };
+  });
+export type ContactPhoneInput = z.infer<typeof contactPhoneSchema>;
+
+// Admin follow-up (2026-10-13): a free-text note and/or marking the account
+// as contacted (true) or not yet contacted (false).
+export const followUpUpdateSchema = z
+  .object({
+    note: z.string().trim().max(2000).optional(),
+    contacted: z.boolean().optional(),
+  })
+  .strict()
+  .refine((value) => value.note !== undefined || value.contacted !== undefined, "Nothing to update.");
+export type FollowUpUpdateInput = z.infer<typeof followUpUpdateSchema>;
+
+// Admin browser push subscription (PushSubscription.toJSON()).
+export const adminPushSubscriptionSchema = z
+  .object({
+    endpoint: z.string().url().max(1000).refine((u) => u.startsWith("https://"), "Push endpoint must be https."),
+    keys: z.object({ p256dh: z.string().min(16).max(200), auth: z.string().min(8).max(100) }),
+    expirationTime: z.number().nullable().optional(),
+  })
+  .passthrough();
+export type AdminPushSubscriptionInput = z.infer<typeof adminPushSubscriptionSchema>;
+
 // Onboarding drop-off tracking (2026-10-11): the furthest wizard step a
 // signed-in account has opened, recorded before the profile exists.
 export const ONBOARDING_TRACKED_STEPS = ["welcome", "profile", "curriculum", "grade-subjects", "diagnostic", "plan-ready"] as const;

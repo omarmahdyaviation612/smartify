@@ -5,6 +5,11 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: { default: "Smartify AI", template: "%s | Smartify AI" },
+  // Installable web app (2026-10-13) — needed for admin push notifications on iPhone,
+  // which only work once the site is added to the Home Screen.
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, title: "Smartify", statusBarStyle: "default" },
+  icons: { apple: "/brand/icon-192.png" },
 };
 
 // Top-level layout only wraps ClerkProvider — <html>/<body> and lang/dir

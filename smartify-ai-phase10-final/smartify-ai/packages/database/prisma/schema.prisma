@@ -28,6 +28,14 @@ model User {
   // Server-controlled subject testing capability; never an administrative role.
   isTestStudent Boolean   @default(false)
   emailVerified DateTime?
+  // Contact + follow-up (2026-10-13): parent's mobile (WhatsApp), required at
+  // onboarding so the team can follow up with students who stop and ask for
+  // feedback. Stored normalized (+20XXXXXXXXXX). The follow-up fields are
+  // written only by admins from the follow-up list.
+  phone               String?
+  phoneUpdatedAt      DateTime?
+  followUpNote        String?   @db.Text
+  followUpContactedAt DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   deletedAt     DateTime?
@@ -38,6 +46,7 @@ model User {
   auditLogs       AuditLog[]
   linkInvitations ParentLinkInvitation[]
   supportTickets StudentSupportTicket[]
+  pushSubscriptions AdminPushSubscription[]
 
   @@index([role])
   @@index([clerkUserId])
@@ -1726,4 +1735,22 @@ model Referral {
   appliedExpiresAt DateTime? // the resulting StudentSubject.expiresAt after applying — kept here too, purely for audit display
 
   @@index([referrerStudentId])
+}
+
+// Browser push subscriptions for admins (2026-10-13): each device an admin
+// enables gets a pop-up notification when a customer submits an InstaPay
+// receipt, even when the site is closed. Removed automatically when the
+// push service reports the subscription as gone (404/410).
+model AdminPushSubscription {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id])
+  endpoint      String    @unique
+  p256dh        String
+  auth          String
+  userAgent     String?
+  createdAt     DateTime  @default(now())
+  lastSuccessAt DateTime?
+
+  @@index([userId])
 }

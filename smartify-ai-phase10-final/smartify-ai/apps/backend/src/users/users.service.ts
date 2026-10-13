@@ -10,6 +10,16 @@ export class UsersService {
     return this.prisma.client.user.findUnique({ where: { id } });
   }
 
+  /** PUT /users/me/phone — the parent's mobile (already normalized by contactPhoneSchema). */
+  async setMyPhone(id: string, phone: string) {
+    const user = await this.prisma.client.user.update({
+      where: { id },
+      data: { phone, phoneUpdatedAt: new Date() },
+      select: { phone: true, phoneUpdatedAt: true },
+    });
+    return user;
+  }
+
   /** GET /users/me — the user row plus whether a student profile exists yet. */
   async findMe(id: string) {
     const user = await this.prisma.client.user.findUnique({

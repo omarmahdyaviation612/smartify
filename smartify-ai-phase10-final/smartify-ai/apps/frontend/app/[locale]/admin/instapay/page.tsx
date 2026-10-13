@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
 import { SmartifyContainer } from "@smartify/ui";
 import { AdminGuard } from "@/components/AdminGuard";
 import { useApiClient } from "@/lib/api-client";
+import { AdminPushToggle } from "@/components/admin/AdminPushToggle";
+import { displayPhone, whatsappUrl } from "@/lib/phone";
 
 interface Submission {
   id: string;
@@ -18,7 +21,7 @@ interface Submission {
   verifiedAt: string | null;
   rejectedAt: string | null;
   rejectionReason: string | null;
-  student: { id: string; fullName: string; user: { email: string } };
+  student: { id: string; fullName: string; user: { email: string; phone?: string | null } };
 }
 
 function ReceiptViewer({ id, onClose }: { id: string; onClose: () => void }) {
@@ -71,7 +74,7 @@ function SubmissionRow({ submission, onAction }: { submission: Submission; onAct
   return (
     <tr className="border-b border-neutral-100 text-sm">
       <td className="py-2 pr-4 font-mono text-xs">{submission.referenceId}</td>
-      <td className="py-2 pr-4">{submission.student.fullName}<br /><span className="text-xs text-neutral-400">{submission.student.user.email}</span></td>
+      <td className="py-2 pr-4">{submission.student.fullName}<br /><span className="text-xs text-neutral-400">{submission.student.user.email}</span>{submission.student.user.phone && <><br /><a href={whatsappUrl(submission.student.user.phone)} target="_blank" rel="noreferrer" dir="ltr" className="text-xs text-green-700 hover:underline">WhatsApp {displayPhone(submission.student.user.phone)}</a></>}</td>
       <td className="py-2 pr-4">{submission.kind === "SUBSCRIPTION" ? "Subscription" : submission.kind === "AI_DAILY_TOPUP" ? "Extra AI day" : "Question pack"}</td>
       <td className="py-2 pr-4">{submission.expectedAmountEGP} EGP</td>
       <td className="py-2 pr-4">{submission.submittedAmountEGP} EGP{submission.senderName ? ` — ${submission.senderName}` : ""}</td>
@@ -98,6 +101,7 @@ function SubmissionRow({ submission, onAction }: { submission: Submission; onAct
 }
 
 export default function AdminInstapayPage() {
+  const { locale } = useParams<{ locale: string }>();
   const { apiFetch } = useApiClient();
   const [pending, setPending] = useState<Submission[] | null>(null);
   const [history, setHistory] = useState<Submission[] | null>(null);
@@ -110,6 +114,14 @@ export default function AdminInstapayPage() {
   }
 
   useEffect(load, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Refresh when coming back from a push notification and every 30s while open.
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === "visible") load(); };
+    document.addEventListener("visibilitychange", onVisible);
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") load(); }, 30_000);
+    return () => { document.removeEventListener("visibilitychange", onVisible); window.clearInterval(timer); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleAction(id: string, action: "confirm" | "reject", reason?: string) {
     await apiFetch(`/admin/instapay/submissions/${id}/${action}`, {
@@ -125,6 +137,7 @@ export default function AdminInstapayPage() {
         <SmartifyContainer>
           <h1 className="text-2xl font-bold text-navy-900">InstaPay Payments</h1>
           <p className="mt-1 text-sm text-neutral-500">Manual payment submissions awaiting confirmation. Only your confirmation grants entitlement — the receipt image is not treated as proof by itself.</p>
+          <div className="mt-4"><AdminPushToggle locale={locale} /></div>
 
           <div className="mt-6 flex gap-4 border-b border-neutral-200">
             <button type="button" onClick={() => setTab("pending")} className={`pb-2 text-sm font-medium ${tab === "pending" ? "border-b-2 border-sf-blue-500 text-navy-900" : "text-neutral-400"}`}>
