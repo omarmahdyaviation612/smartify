@@ -71,7 +71,7 @@ function makeService(
   const storage = { exists: existsSpy };
   const storageFactory = { get: jest.fn().mockReturnValue(storage) } as any;
 
-  const service = new AdminCurriculumService(prisma, {} as any, sourceUpload, tocExtraction, storageFactory);
+  const service = new AdminCurriculumService(prisma, sourceUpload, tocExtraction, storageFactory);
   return { service, prisma, tx, tocExtraction, sourceUpload, uploadExtraBook, storageFactory, existsSpy, unitCreateCalls, topicCreateManyCalls };
 }
 

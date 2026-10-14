@@ -80,7 +80,6 @@ export class AdminCurriculumController {
   @Post("materials")
   @UseInterceptors(FileInterceptor("file", uploadOptions))
   uploadMaterial(@UploadedFile() file: { originalname: string; mimetype: string; size: number; buffer: Buffer }, @Body("topicId") topicId: string) {
-    if (file?.mimetype === "application/pdf") return this.service.importSubjectMaterial(file as never, file);
     if (!file) throw new BadRequestException("Upload a text material file.");
     const allowed = ["text/plain", "text/markdown", "application/json"];
     if (!allowed.includes(file.mimetype)) throw new BadRequestException("Only TXT, Markdown, or JSON text files are supported; images are ignored.");
@@ -102,7 +101,10 @@ export class AdminCurriculumController {
     if (!file || !subjectId) throw new BadRequestException("Choose a subject and upload a PDF.");
     if (file.mimetype !== "application/pdf") throw new BadRequestException("Only PDF subject materials are supported.");
     if (file.size > 25 * 1024 * 1024) throw new BadRequestException("PDF must be smaller than 25 MB.");
-    return this.service.importSubjectMaterial(subjectId, file);
+    // Keep this legacy Subject-level endpoint on the approved source-upload
+    // path: it stores the textbook only. Structure extraction is a separate
+    // preview, and Units/Topics are persisted only by confirmSubjectStructure.
+    return this.service.uploadSubjectTextbook(subjectId, file);
   }
 
   @Delete("materials/:id")

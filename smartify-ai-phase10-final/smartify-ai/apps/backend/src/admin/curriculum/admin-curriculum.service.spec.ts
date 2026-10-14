@@ -11,7 +11,7 @@ import { AdminCurriculumService } from "./admin-curriculum.service";
 describe("AdminCurriculumService.getCurriculumStatus", () => {
   function makeService(findManyImpl: (...args: any[]) => any) {
     const prisma = { client: { curriculum: { findMany: jest.fn(findManyImpl) } } };
-    return { service: new AdminCurriculumService(prisma as any, {} as any, {} as any, {} as any, {} as any), prisma };
+    return { service: new AdminCurriculumService(prisma as any, {} as any, {} as any, {} as any), prisma };
   }
 
   function fakeCurricula() {

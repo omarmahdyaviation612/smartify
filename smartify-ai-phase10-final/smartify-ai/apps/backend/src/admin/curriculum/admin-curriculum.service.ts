@@ -1,8 +1,6 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
-import { AIProviderFactory } from "../../ai/ai-provider.factory";
 import { BadRequestException } from "@nestjs/common";
-import pdf from "pdf-parse";
 import { deriveTopicStatus } from "./curriculum-status.util";
 import { CurriculumSourceUploadService, type CurriculumSourceUploadResult, type ExtraBookUploadResult, defaultExtraBookObjectKey } from "../../interactive-lesson/unit-grounding/storage/curriculum-source-upload.service";
 import { CurriculumSourceStorageFactory } from "../../interactive-lesson/unit-grounding/storage/curriculum-source-storage.factory";
@@ -15,7 +13,6 @@ import type { ConfirmExtraBookStructureInput, ConfirmSubjectStructureInput } fro
 export class AdminCurriculumService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly ai: AIProviderFactory,
     private readonly sourceUpload: CurriculumSourceUploadService,
     private readonly tocExtraction: TocExtractionService,
     private readonly storageFactory: CurriculumSourceStorageFactory,
@@ -470,26 +467,6 @@ export class AdminCurriculumService {
     return this.prisma.client.learningMaterial.create({
       data: { topicId, subjectId: topic.unit.subjectId, originalName: file.originalname, mimeType: file.mimetype, sizeBytes: file.size, contentText: file.buffer.toString("utf8") },
     });
-  }
-
-  async importSubjectMaterial(subjectId: string, file: { originalname: string; mimetype: string; size: number; buffer: Buffer }) {
-    const subject = await this.prisma.client.subject.findUnique({ where: { id: subjectId } });
-    if (!subject) throw new BadRequestException("Subject not found.");
-    const extracted = file.mimetype === "application/pdf" ? (await pdf(file.buffer)).text : file.buffer.toString("utf8");
-    if (!extracted.trim()) throw new BadRequestException("The material contains no readable text.");
-    const { provider } = await this.ai.getActiveProvider();
-    const result = await provider.generate({
-      systemPrompt: "Divide the provided subject material into 3-12 educational topics. Return JSON only: {\"topics\":[{\"nameEn\":\"...\",\"nameAr\":\"...\",\"summaryEn\":\"...\",\"summaryAr\":\"...\"}]}",
-      messages: [{ role: "user", content: extracted.slice(0, 50000) }],
-      maxOutputTokens: 1800,
-    });
-    let topics: Array<{ nameEn: string; nameAr: string; summaryEn: string; summaryAr: string }>;
-    try { topics = JSON.parse(result.content).topics; } catch { throw new BadRequestException("AI returned an invalid topic structure."); }
-    if (!Array.isArray(topics) || topics.length === 0) throw new BadRequestException("AI did not detect any topics.");
-    const unit = await this.prisma.client.unit.create({ data: { subjectId, nameEn: "Imported material", nameAr: "مادة مستوردة", order: 999 } });
-    const created = await Promise.all(topics.map((t, i) => this.prisma.client.topic.create({ data: { unitId: unit.id, nameEn: t.nameEn, nameAr: t.nameAr, order: i + 1 } })));
-    await this.prisma.client.learningMaterial.create({ data: { subjectId, originalName: file.originalname, mimeType: file.mimetype, sizeBytes: file.size, contentText: extracted } });
-    return { unitId: unit.id, topics: created };
   }
 
   deleteMaterial(id: string) {
