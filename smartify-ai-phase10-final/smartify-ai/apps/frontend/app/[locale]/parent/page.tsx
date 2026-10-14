@@ -23,7 +23,8 @@ export default function ParentDashboardPage() {
   const { apiFetch } = useApiClient();
   const [accessState, setAccessState] = useState<AccessState>("checking");
   const [students, setStudents] = useState<Student[]>([]);
-  const [code, setCode] = useState(() => searchParams.get("code")?.toUpperCase() ?? "");
+  const invitationCode = searchParams.get("code")?.trim().toUpperCase() ?? "";
+  const [code, setCode] = useState(invitationCode);
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
 
@@ -41,12 +42,17 @@ export default function ParentDashboardPage() {
   // The API client is recreated by the auth hook; load once when the page mounts.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    if (!invitationCode) return;
+    setCode(invitationCode);
+    setMessage("");
+  }, [invitationCode]);
   async function bootstrap() {
     try { await apiFetch("/parent/profile", { method: "POST", body: JSON.stringify({ fullName: name }) }); setMessage(isAr ? "تم حفظ الملف" : "Profile saved"); }
     catch (e: any) { setMessage(e instanceof ApiError && e.status === 403 ? parentAccessMessage : e.message); }
   }
   async function accept() {
-    try { await apiFetch("/parent/links/accept", { method: "POST", body: JSON.stringify({ code }) }); setCode(""); setMessage(isAr ? "تم ربط الطالب" : "Student linked"); load(); }
+    try { await apiFetch("/parent/links/accept", { method: "POST", body: JSON.stringify({ code }) }); setCode(""); setMessage(isAr ? "تم ربط الطالب" : "Student linked"); await load(); }
     catch (e: any) { setMessage(e instanceof ApiError && e.status === 403 ? parentAccessMessage : e.message); }
   }
   return <><Navbar locale={locale} copy={getMarketingCopy(locale)} /><main className="py-12"><SmartifyContainer>
@@ -81,7 +87,7 @@ export default function ParentDashboardPage() {
 
     <div className="grid gap-6 md:grid-cols-2">
       <section className="rounded-sf-lg border border-neutral-200 bg-white p-6"><h2 className="mb-3 font-semibold">{isAr ? "ملف ولي الأمر" : "Parent profile"}</h2><input className="mb-3 w-full rounded border p-2" value={name} onChange={(e) => setName(e.target.value)} placeholder={isAr ? "الاسم الكامل" : "Full name"} /><SmartifyButton onClick={bootstrap}>{isAr ? "حفظ" : "Save"}</SmartifyButton></section>
-      <section className="rounded-sf-lg border border-neutral-200 bg-white p-6"><h2 className="mb-3 font-semibold">{isAr ? "ربط طالب" : "Link a student"}</h2><input className="mb-3 w-full rounded border p-2 uppercase" value={code} onChange={(e) => setCode(e.target.value)} placeholder={isAr ? "رمز الربط" : "Link code"} /><SmartifyButton onClick={accept}>{isAr ? "ربط" : "Link"}</SmartifyButton></section>
+      <section className="rounded-sf-lg border border-neutral-200 bg-white p-6"><h2 className="mb-3 font-semibold">{isAr ? (students.length ? "إضافة طفل آخر" : "ربط طالب") : (students.length ? "Link another child" : "Link a student")}</h2><p className="mb-3 text-sm text-neutral-600">{isAr ? "يمكن ربط أكثر من طفل بحساب ولي الأمر نفسه. استخدم رابطًا مستقلًا من حساب كل طفل." : "One parent account can link multiple children. Use a separate invitation from each child's account."}</p><input className="mb-3 w-full rounded border p-2 uppercase" value={code} onChange={(e) => setCode(e.target.value)} placeholder={isAr ? "رمز الربط" : "Link code"} /><SmartifyButton onClick={accept}>{isAr ? "ربط" : "Link"}</SmartifyButton></section>
     </div>
     {message && <p className="mt-4 text-sm text-neutral-600">{message}</p>}
     {accessState === "authorized" && (

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
 import { ClerkAuthGuard } from "../auth/clerk-auth.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
 import { Roles } from "../common/decorators/roles.decorator";
@@ -30,6 +30,19 @@ export class UsersController {
   setTestAccess(@CurrentUser() actor: any, @Param("id") id: string, @Body() body: { enabled?: unknown }) {
     if (typeof body?.enabled !== "boolean") throw new BadRequestException("An explicit boolean enabled value is required.");
     return this.usersService.setTestStudentAccess(actor.id, actor.role, id, body.enabled);
+  }
+
+  @Post(":id/test-preview/start")
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  startStudentPreview(@CurrentUser() actor: any, @Param("id") id: string) {
+    return this.usersService.startStudentPreview(actor.id, actor.role, id);
+  }
+
+  @Post("test-preview/stop")
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  stopStudentPreview(@CurrentUser() actor: any, @Body() body: { studentId?: unknown; sessionId?: unknown }) {
+    if (typeof body?.studentId !== "string" || !body.studentId || typeof body?.sessionId !== "string" || !body.sessionId) throw new BadRequestException("A studentId and preview sessionId are required to end preview mode.");
+    return this.usersService.stopStudentPreview(actor.id, actor.role, body.studentId, body.sessionId);
   }
 
   /** Role changes are an explicit admin action — never inferred from Clerk. */

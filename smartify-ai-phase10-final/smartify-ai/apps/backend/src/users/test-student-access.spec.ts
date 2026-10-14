@@ -17,3 +17,17 @@ test("test access cannot target admin accounts",async()=>{
   const h=harness("ADMIN");await expect(h.service.setTestStudentAccess("owner",UserRole.SUPER_ADMIN,"student",true)).rejects.toThrow(ForbiddenException);
   expect(h.tx.user.update).not.toHaveBeenCalled();
 });
+
+test("student preview is audit-logged and can target only a test-enabled student", async () => {
+  const h = harness();
+  h.tx.user.findUnique.mockResolvedValue({ id: "student", role: "STUDENT", isActive: true, deletedAt: null, isTestStudent: true, studentProfile: { id: "profile" } });
+  const session = await h.service.startStudentPreview("owner", UserRole.SUPER_ADMIN, "student");
+  expect(h.tx.auditLog.create.mock.calls[0][0].data).toMatchObject({ action: "STUDENT_TEST_PREVIEW_STARTED", userId: "owner", entityId: "student" });
+  expect(h.tx.auditLog.create.mock.calls[0][0].data.metadata.sessionId).toBe(session.sessionId);
+});
+
+test("student preview rejects an account without test access", async () => {
+  const h = harness();
+  await expect(h.service.startStudentPreview("owner", UserRole.SUPER_ADMIN, "student")).rejects.toThrow(ForbiddenException);
+  expect(h.tx.auditLog.create).not.toHaveBeenCalled();
+});

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { SmartifyContainer } from "@smartify/ui";
 import { AdminGuard } from "@/components/AdminGuard";
 import { useApiClient } from "@/lib/api-client";
+import { AdminDashboardLink } from "@/components/AdminDashboardLink";
 
 interface Submission {
   id: string;
@@ -121,6 +122,7 @@ export default function AdminInstapayPage() {
 
   return (
     <AdminGuard allowedRoles={["SUPER_ADMIN", "ADMIN"]}>
+      <AdminDashboardLink />
       <main className="py-12">
         <SmartifyContainer>
           <h1 className="text-2xl font-bold text-navy-900">InstaPay Payments</h1>

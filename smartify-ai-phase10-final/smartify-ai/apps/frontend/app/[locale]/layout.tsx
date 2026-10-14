@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Locale } from "@/content/marketing";
+import { StudentPreviewBanner } from "@/components/StudentPreviewBanner";
 
 export function generateStaticParams() {
   return [{ locale: "ar" }, { locale: "en" }];
@@ -22,6 +23,7 @@ export default async function LocaleLayout({
   return (
     <html lang={locale} dir={dir}>
       <body className={`${fontClass} bg-[--sf-bg-page] text-[--sf-text-primary] antialiased`}>
+        <StudentPreviewBanner />
         {children}
       </body>
     </html>

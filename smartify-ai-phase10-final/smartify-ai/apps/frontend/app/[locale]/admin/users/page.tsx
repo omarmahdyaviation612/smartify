@@ -5,6 +5,7 @@ import { SmartifyContainer } from "@smartify/ui";
 import { AdminGuard } from "@/components/AdminGuard";
 import { useApiClient } from "@/lib/api-client";
 import { useCurrentUser } from "@/lib/use-current-user";
+import { AdminDashboardLink } from "@/components/AdminDashboardLink";
 
 interface AdminUser {
   id: string;
@@ -107,6 +108,7 @@ export default function AdminUsersPage() {
   return (
     <AdminGuard allowedRoles={["SUPER_ADMIN", "ADMIN", "SUPPORT"]}>
       <main className="py-12">
+        <AdminDashboardLink />
         <SmartifyContainer>
           <h1 className="text-2xl font-bold text-navy-900">Users</h1>
           <p className="mt-2 text-sm text-neutral-500">

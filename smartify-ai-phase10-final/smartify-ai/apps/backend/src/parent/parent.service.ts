@@ -32,10 +32,17 @@ export class ParentService {
     const code = rawCode?.trim().toUpperCase();
     if (!code) throw new BadRequestException("A link code is required.");
     const invitation = await this.db.parentLinkInvitation.findUnique({ where: { code } });
-    if (!invitation || invitation.usedAt || invitation.expiresAt < new Date()) {
+    if (!invitation || invitation.expiresAt < new Date()) {
       throw new BadRequestException("This link code is invalid or expired.");
     }
     if (invitation.createdByUserId === userId) throw new BadRequestException("You cannot link your own account.");
+    if (invitation.usedAt) {
+      const existing = await this.db.parentStudentRelation.findUnique({
+        where: { parentId_studentId: { parentId: parent.id, studentId: invitation.studentId } },
+      });
+      if (existing) return existing;
+      throw new BadRequestException("This link code is invalid or expired.");
+    }
     const relation = await this.db.parentStudentRelation.upsert({
       where: { parentId_studentId: { parentId: parent.id, studentId: invitation.studentId } },
       update: {},

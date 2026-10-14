@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { SmartifyContainer } from "@smartify/ui";
 import { AdminGuard } from "@/components/AdminGuard";
 import { useApiClient } from "@/lib/api-client";
+import { AdminDashboardLink } from "@/components/AdminDashboardLink";
 
 interface AIProviderConfig {
   providerKey: string;
@@ -371,6 +372,7 @@ function TtsInfoSection() {
 export default function AdminPlatformPage() {
   return (
     <AdminGuard allowedRoles={["SUPER_ADMIN"]}>
+      <AdminDashboardLink />
       <main className="py-12">
         <SmartifyContainer className="mx-auto max-w-2xl">
           <h1 className="text-2xl font-bold text-navy-900">Platform Config</h1>

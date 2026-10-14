@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { UserRole } from "@smartify/shared-types";
+import { randomUUID } from "crypto";
 
 @Injectable()
 export class UsersService {
@@ -27,6 +28,36 @@ export class UsersService {
         metadata: { enabled, previousValue: target.isTestStudent, changedBy: actorId } } });
       return { id: updated.id, isTestStudent: updated.isTestStudent };
     });
+  }
+
+  async startStudentPreview(actorId: string, actorRole: UserRole, targetUserId: string) {
+    if (![UserRole.SUPER_ADMIN, UserRole.ADMIN].includes(actorRole) || actorId === targetUserId) {
+      throw new ForbiddenException("Only an administrator can preview a separate test student account.");
+    }
+    return this.prisma.client.$transaction(async (tx) => {
+      const sessionId = randomUUID();
+      const target = await tx.user.findUnique({ where: { id: targetUserId }, include: { studentProfile: { select: { id: true, fullName: true } } } });
+      if (!target || target.role !== "STUDENT" || !target.isActive || target.deletedAt || !target.isTestStudent || !target.studentProfile) {
+        throw new ForbiddenException("Student preview is limited to active accounts enabled for testing.");
+      }
+      await tx.auditLog.create({ data: { userId: actorId, action: "STUDENT_TEST_PREVIEW_STARTED", entityType: "User", entityId: targetUserId,
+        metadata: { sessionId, targetUserId, targetProfileId: target.studentProfile.id } } });
+      return { sessionId, studentId: target.id, studentName: target.studentProfile.fullName };
+    });
+  }
+
+  async stopStudentPreview(actorId: string, actorRole: UserRole, targetUserId: string, sessionId: string) {
+    if (![UserRole.SUPER_ADMIN, UserRole.ADMIN].includes(actorRole) || actorId === targetUserId) {
+      throw new ForbiddenException("Only an administrator can end a student preview.");
+    }
+    const started = await this.prisma.client.auditLog.findFirst({ where: { userId: actorId, action: "STUDENT_TEST_PREVIEW_STARTED", entityId: targetUserId,
+      metadata: { path: ["sessionId"], equals: sessionId } }, select: { id: true } });
+    const alreadyEnded = await this.prisma.client.auditLog.findFirst({ where: { userId: actorId, action: "STUDENT_TEST_PREVIEW_ENDED",
+      metadata: { path: ["sessionId"], equals: sessionId } }, select: { id: true } });
+    if (!started || alreadyEnded) throw new ForbiddenException("This student preview session is not active.");
+    await this.prisma.client.auditLog.create({ data: { userId: actorId, action: "STUDENT_TEST_PREVIEW_ENDED", entityType: "User", entityId: targetUserId,
+      metadata: { targetUserId, sessionId } } });
+    return { ok: true };
   }
 
   /**

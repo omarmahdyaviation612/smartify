@@ -16,6 +16,11 @@ export class AdminRevenueController {
     return this.service.getRevenueVsCostSummary(days ? Number(days) : undefined);
   }
 
+  @Get("analytics")
+  getAnalytics() {
+    return this.service.getRevenueAnalytics();
+  }
+
   @Get("growth-summary")
   getGrowthSummary() {
     return this.service.getGrowthSummary();

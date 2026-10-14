@@ -5,6 +5,7 @@ import { SmartifyContainer } from "@smartify/ui";
 import { AdminGuard } from "@/components/AdminGuard";
 import { ApiError, useApiClient } from "@/lib/api-client";
 import { useCurrentUser } from "@/lib/use-current-user";
+import { AdminDashboardLink } from "@/components/AdminDashboardLink";
 
 interface Curriculum {
   id: string;
@@ -1089,6 +1090,7 @@ export default function AdminCurriculumPage() {
 
   return (
     <AdminGuard allowedRoles={["SUPER_ADMIN", "ADMIN", "CONTENT_MANAGER"]}>
+      <AdminDashboardLink />
       <main className="py-12">
         <SmartifyContainer className="mx-auto max-w-4xl">
           <h1 className="text-2xl font-bold text-navy-900">Curriculum & Pricing</h1>

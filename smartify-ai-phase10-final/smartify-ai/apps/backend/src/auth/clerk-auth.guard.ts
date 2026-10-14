@@ -1,6 +1,7 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Inject,
   Injectable,
   UnauthorizedException,
@@ -35,7 +36,7 @@ export class ClerkAuthGuard implements CanActivate {
     const token = authHeader.slice("Bearer ".length);
     const identity = await this.authProvider.verifySessionToken(token);
 
-    let user = await this.prisma.client.user.findUnique({
+    let user: any = await this.prisma.client.user.findUnique({
       where: { clerkUserId: identity.externalUserId },
     });
 
@@ -60,6 +61,38 @@ export class ClerkAuthGuard implements CanActivate {
 
     if (!user || !user.isActive || user.deletedAt) {
       throw new UnauthorizedException("No active local account for this session.");
+    }
+
+    const previewStudentId = request.headers["x-admin-student-preview"];
+    if (previewStudentId !== undefined) {
+      if (typeof previewStudentId !== "string" || !["SUPER_ADMIN", "ADMIN"].includes(user.role)) {
+        throw new ForbiddenException("Student preview is available only to administrators.");
+      }
+      const path = request.path ?? "";
+      const isPaymentMutation = ["POST", "PUT", "PATCH", "DELETE"].includes(request.method?.toUpperCase()) &&
+        ["/billing", "/payments", "/instapay", "/tutor/question-pack"].some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+      if (isPaymentMutation) {
+        throw new ForbiddenException("Payments are disabled in student preview mode.");
+      }
+      const started = await this.prisma.client.auditLog.findFirst({
+        where: { userId: user.id, action: "STUDENT_TEST_PREVIEW_STARTED", metadata: { path: ["sessionId"], equals: previewStudentId } },
+        select: { entityId: true },
+      });
+      if (!started?.entityId) throw new ForbiddenException("No active student preview session was started by this administrator.");
+      const ended = await this.prisma.client.auditLog.findFirst({
+        where: { userId: user.id, action: "STUDENT_TEST_PREVIEW_ENDED", metadata: { path: ["sessionId"], equals: previewStudentId } },
+        select: { id: true },
+      });
+      if (ended) throw new ForbiddenException("This student preview session has ended.");
+      const target = await this.prisma.client.user.findUnique({
+        where: { id: started.entityId },
+        include: { studentProfile: { select: { id: true } } },
+      });
+      if (!target || target.role !== "STUDENT" || !target.isActive || target.deletedAt || !target.isTestStudent || !target.studentProfile) {
+        throw new ForbiddenException("Preview is limited to active student accounts explicitly enabled for testing.");
+      }
+      (request as any).adminPreviewActor = user;
+      user = target;
     }
 
     // Attach the LOCAL user record — role/authorization checks downstream

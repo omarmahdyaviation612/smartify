@@ -27,13 +27,18 @@ export function useApiClient() {
     // browser sets its own multipart boundary. Only default to JSON when
     // the caller isn't sending FormData.
     const isFormData = typeof FormData !== "undefined" && opts.body instanceof FormData;
+    const headers = new Headers(opts.headers);
+    if (!isFormData && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const skipPreview = headers.get("X-Skip-Student-Preview") === "true";
+    headers.delete("X-Skip-Student-Preview");
+    const previewStudentId = typeof window !== "undefined" && !skipPreview
+      ? window.sessionStorage.getItem("smartify-admin-student-preview-session")
+      : null;
+    if (previewStudentId) headers.set("X-Admin-Student-Preview", previewStudentId);
     const res = await fetch(`${API_URL}${path}`, {
       ...opts,
-      headers: {
-        ...(isFormData ? {} : { "Content-Type": "application/json" }),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...opts.headers,
-      },
+      headers,
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));

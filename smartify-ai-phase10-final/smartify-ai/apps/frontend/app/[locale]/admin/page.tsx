@@ -8,6 +8,7 @@ import { SmartifyContainer } from "@smartify/ui";
 import { AdminGuard } from "@/components/AdminGuard";
 import { useApiClient } from "@/lib/api-client";
 import type { Locale } from "@/content/marketing";
+import { useCurrentUser } from "@/lib/use-current-user";
 
 interface RevenueSummary {
   windowDays: number;
@@ -53,6 +54,7 @@ export default function AdminOverviewPage() {
   const { locale } = useParams<{ locale: Locale }>();
   const { apiFetch } = useApiClient();
   const { signOut } = useClerk();
+  const { user } = useCurrentUser();
   const [summary, setSummary] = useState<RevenueSummary | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [pendingInstapay, setPendingInstapay] = useState(0);
@@ -197,6 +199,16 @@ export default function AdminOverviewPage() {
               title="Referrals"
               body="Inspect referral/reward records (Super Admin only)."
             />
+            {user?.role === "SUPER_ADMIN" && <AdminNavCard
+              href={`/${locale}/admin/analytics`}
+              title="Revenue Analytics"
+              body="Compare active monthly subscription revenue by area, curriculum, subject, and student age group."
+            />}
+            {(user?.role === "SUPER_ADMIN" || user?.role === "ADMIN") && <AdminNavCard
+              href={`/${locale}/admin/student-preview`}
+              title="Test as a Student"
+              body="Open the student experience with a test-enabled student account."
+            />}
           </div>
         </SmartifyContainer>
       </main>

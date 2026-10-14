@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { SmartifyContainer } from "@smartify/ui";
 import { AdminGuard } from "@/components/AdminGuard";
 import { useApiClient } from "@/lib/api-client";
+import { AdminDashboardLink } from "@/components/AdminDashboardLink";
 
 // Referral V1 (2026-09-20) — read-only inspection of every Referral row
 // via AdminRevenueController's existing /admin/revenue/referrals endpoint
@@ -44,6 +45,7 @@ export default function AdminReferralsPage() {
 
   return (
     <AdminGuard allowedRoles={["SUPER_ADMIN"]}>
+      <AdminDashboardLink />
       <main className="py-12">
         <SmartifyContainer>
           <h1 className="text-2xl font-bold text-navy-900">Referrals</h1>

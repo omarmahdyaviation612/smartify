@@ -6,6 +6,7 @@ import { Fragment, useEffect, useState } from "react";
 import { SmartifyContainer } from "@smartify/ui";
 import { AdminGuard } from "@/components/AdminGuard";
 import { useApiClient } from "@/lib/api-client";
+import { AdminDashboardLink } from "@/components/AdminDashboardLink";
 import type { Locale } from "@/content/marketing";
 
 // Admin AI Cost / Budget Dashboard (2026-09-20) — read-only view over the
@@ -130,6 +131,7 @@ export default function AdminAIUsagePage() {
 
   return (
     <AdminGuard allowedRoles={["SUPER_ADMIN"]}>
+      <AdminDashboardLink />
       <main className="py-12">
         <SmartifyContainer>
           <div className="flex items-center justify-between">

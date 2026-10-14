@@ -1,0 +1,548 @@
+﻿diff --git a/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/interactive-lesson.service.spec.ts b/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/interactive-lesson.service.spec.ts
+index 986727dc..25ea6de8 100644
+--- a/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/interactive-lesson.service.spec.ts
++++ b/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/interactive-lesson.service.spec.ts
+@@ -622,7 +622,7 @@ describe("InteractiveLessonService", () => {
+     const h = makeHarness();
+     h.state.topics["topic-2"] = { id: "topic-2", nameEn: "No Plan", nameAr: "بلا خطة", unitId: "unit-1", teachingStepsJson: null, unit: { subjectId: "subject-1", subject: { nameEn: "Mathematics" } } };
+     const result = await h.service.getState("user-1", "topic-2");
+-    expect(result).toEqual({ started: false });
++    expect(result).toEqual({ started: false, preparation: { status: "READY" } });
+   });
+ 
+   it("getState() on a genuinely unknown topic id still throws NotFoundException", async () => {
+diff --git a/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/interactive-lesson.service.ts b/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/interactive-lesson.service.ts
+index 5e119402..76f3c5b4 100644
+--- a/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/interactive-lesson.service.ts
++++ b/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/interactive-lesson.service.ts
+@@ -90,7 +90,7 @@ export class InteractiveLessonService {
+    * this path — see LessonPublishService.autoPublishIntoTopic's doc
+    * comment for the tradeoff this accepts.
+    */
+-  private async ensureTopicHasSteps(topicId: string, profile: { userId: string; preferredLang?: string; age?: number }) {
++  private async ensureTopicHasSteps(topicId: string, profile: { userId: string; preferredLang?: string; age?: number }): Promise<any> {
+     const existing = await this.prisma.client.topic.findUnique({
+       where: { id: topicId },
+       include: { unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
+@@ -98,6 +98,16 @@ export class InteractiveLessonService {
+     if (!existing) throw new NotFoundException("This lesson is not available as an interactive lesson yet.");
+     if (existing.teachingStepsJson) return existing;
+ 
++    const preparation = typeof (this.draftGenerator as any).prepareTopicGrounding === "function"
++      ? await (this.draftGenerator as any).prepareTopicGrounding(topicId, profile.userId)
++      : { status: "READY" as const };
++    if (preparation.status !== "READY") {
++      if (preparation.status === "CONFIGURATION_ERROR") {
++        throw new ServiceUnavailableException("This lesson is not available yet.");
++      }
++      return { __preparation: true as const, status: "PREPARING" as const, retryAfterMs: preparation.retryAfterMs ?? 1500 };
++    }
++
+     await this.draftGenerator.ensureTopicHasLesson(
+       topicId,
+       { preferredLang: profile.preferredLang === "ar" ? "ar" : "en", studentAgeRange: String(profile.age ?? 7) },
+@@ -313,6 +323,7 @@ export class InteractiveLessonService {
+   async advance(userId: string, topicId: string) {
+     const profile = await this.getProfileOrThrow(userId);
+     const topic = await this.ensureTopicHasSteps(topicId, { userId, preferredLang: (profile as any).preferredLang, age: (profile as any).age });
++    if ((topic as any).__preparation) return topic;
+     const steps = this.getSteps(topic);
+     let session = await this.getOwnSession(profile, topicId);
+ 
+@@ -891,7 +902,12 @@ export class InteractiveLessonService {
+       include: { unit: { include: { subject: { include: { grade: { include: { curriculum: true } } } } } } },
+     });
+     if (!topic) throw new NotFoundException("This lesson is not available as an interactive lesson yet.");
+-    if (!topic.teachingStepsJson) return { started: false };
++    if (!topic.teachingStepsJson) {
++      const preparation = typeof (this.draftGenerator as any).getTopicGroundingPreparationStatus === "function"
++        ? await (this.draftGenerator as any).getTopicGroundingPreparationStatus(topicId)
++        : { status: "READY" as const };
++      return { started: false, preparation };
++    }
+     const steps = this.getSteps(topic);
+     const session = await this.getOwnSession(profile, topicId);
+     if (!session) return { started: false };
+diff --git a/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/lesson-draft-generator/lesson-draft-generator.service.ts b/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/lesson-draft-generator/lesson-draft-generator.service.ts
+index b25692c9..d0e0bf46 100644
+--- a/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/lesson-draft-generator/lesson-draft-generator.service.ts
++++ b/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/lesson-draft-generator/lesson-draft-generator.service.ts
+@@ -430,7 +430,11 @@ export class LessonDraftGeneratorService {
+     if (!topic) throw new NotFoundException(`Topic ${topicId} not found.`);
+     if (topic.teachingStepsJson) return topic;
+ 
+-    await this.unitGrounding.ensureUnitGrounded(topic.unitId, CONTENT_AUTHORING_ACTOR_ID);
++    // Legacy direct callers/tests may provide the pre-Phase-3 grounding stub;
++    // the production service is prepared by InteractiveLessonService first.
++    if (typeof (this.unitGrounding as any).prepareNextGroundingChunk !== "function") {
++      await this.unitGrounding.ensureUnitGrounded(topic.unitId, CONTENT_AUTHORING_ACTOR_ID);
++    }
+ 
+     // Deliberately NOT filtering on teachingStepsJson here — Prisma's
+     // JSON-column null filters need the Prisma.JsonNull sentinel, not a
+@@ -475,6 +479,18 @@ export class LessonDraftGeneratorService {
+     return this.prisma.client.topic.findUniqueOrThrow({ where: { id: topicId } });
+   }
+ 
++  async prepareTopicGrounding(topicId: string, requestingActorId: string) {
++    const topic = await this.prisma.client.topic.findUnique({ where: { id: topicId }, select: { unitId: true } });
++    if (!topic) throw new NotFoundException(`Topic ${topicId} not found.`);
++    return this.unitGrounding.prepareNextGroundingChunk(topic.unitId, requestingActorId);
++  }
++
++  async getTopicGroundingPreparationStatus(topicId: string) {
++    const topic = await this.prisma.client.topic.findUnique({ where: { id: topicId }, select: { unitId: true } });
++    if (!topic) return { status: "CONFIGURATION_ERROR" as const };
++    return this.unitGrounding.getPreparationStatus(topic.unitId);
++  }
++
+   /** Returns the computed costUsd so callers can reconcile the matching USD budget reservation to the exact same figure. */
+   private async logUsage(userId: string, providerKey: string, model: string, inputTokens: number, outputTokens: number): Promise<number> {
+     const rates = await this.providerFactory.getCostRates(providerKey);
+diff --git a/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/unit-grounding/unit-grounding.module.ts b/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/unit-grounding/unit-grounding.module.ts
+index 7b16e706..1033d717 100644
+--- a/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/unit-grounding/unit-grounding.module.ts
++++ b/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/unit-grounding/unit-grounding.module.ts
+@@ -3,6 +3,7 @@ import { AIModule } from "../../ai/ai.module";
+ import { UnitGroundingService } from "./unit-grounding.service";
+ import { CurriculumSourceStorageFactory } from "./storage/curriculum-source-storage.factory";
+ import { CurriculumSourceUploadService } from "./storage/curriculum-source-upload.service";
++import { UnitGroundingProgressService } from "./unit-grounding-progress.service";
+ 
+ /**
+  * UnitGroundingService is resolved both by the offline
+@@ -34,7 +35,7 @@ import { CurriculumSourceUploadService } from "./storage/curriculum-source-uploa
+  */
+ @Module({
+   imports: [AIModule],
+-  providers: [UnitGroundingService, CurriculumSourceStorageFactory, CurriculumSourceUploadService],
+-  exports: [UnitGroundingService, CurriculumSourceUploadService, CurriculumSourceStorageFactory],
++  providers: [UnitGroundingService, UnitGroundingProgressService, CurriculumSourceStorageFactory, CurriculumSourceUploadService],
++  exports: [UnitGroundingService, UnitGroundingProgressService, CurriculumSourceUploadService, CurriculumSourceStorageFactory],
+ })
+ export class UnitGroundingModule {}
+diff --git a/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/unit-grounding/unit-grounding.service.spec.ts b/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/unit-grounding/unit-grounding.service.spec.ts
+index 7afbf8e5..0f63fbdb 100644
+--- a/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/unit-grounding/unit-grounding.service.spec.ts
++++ b/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/unit-grounding/unit-grounding.service.spec.ts
+@@ -128,6 +128,52 @@ function makeHarness(
+   return { service, prisma, contextBuilder, generateSpy, updateCalls, updateManyCalls, usageCreateCalls, reserveBudget, reconcileBudget, releaseBudget, storage, storageFactory };
+ }
+ 
++describe("UnitGroundingService.prepareNextGroundingChunk", () => {
++  function boundedHarness(overrides: any = {}) {
++    const h = makeHarness({ unitOverrides: { sourcePageStart: 8, sourcePageEnd: 11, ...overrides.unitOverrides } });
++    const progress = {
++      initialize: jest.fn().mockResolvedValue({ nextEligibleAt: null }),
++      claimNextChunk: jest.fn().mockResolvedValue({ chunkId: "8-9", pageStart: 8, pageEnd: 9 }),
++      persistChunk: jest.fn().mockResolvedValue(true),
++      get: jest.fn().mockResolvedValue({ completedChunksJson: [{ chunkId: "8-9", pageStart: 8, pageEnd: 9, notes: JSON.parse(VALID_EXTRACTION_JSON) }] }),
++      releaseLease: jest.fn().mockResolvedValue(true),
++      finalize: jest.fn().mockResolvedValue(true),
++      markRetryable: jest.fn().mockResolvedValue(true),
++    };
++    (h.service as any).progressService = progress;
++    jest.spyOn(h.service as any, "extractChunk").mockResolvedValue(JSON.parse(VALID_EXTRACTION_JSON));
++    return { ...h, progress };
++  }
++
++  it("returns READY without progress, source, renderer, or provider work when already grounded", async () => {
++    const h = boundedHarness({ unitOverrides: { groundingNotesJson: JSON.parse(VALID_EXTRACTION_JSON) } });
++    const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
++    expect(result).toEqual({ status: "READY" });
++    expect(h.progress.initialize).not.toHaveBeenCalled();
++    expect(h.storage.fetchToTempFile).not.toHaveBeenCalled();
++    expect((h.service as any).extractChunk).not.toHaveBeenCalled();
++  });
++
++  it("claims and persists exactly one chunk, then returns PREPARING", async () => {
++    const h = boundedHarness();
++    const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
++    expect(result.status).toBe("PREPARING");
++    expect(h.progress.claimNextChunk).toHaveBeenCalledTimes(1);
++    expect((h.service as any).extractChunk).toHaveBeenCalledTimes(1);
++    expect(h.progress.persistChunk).toHaveBeenCalledTimes(1);
++    expect(h.progress.releaseLease).toHaveBeenCalledTimes(1);
++  });
++
++  it("returns a durable retry state without sleeping when the provider is TPM-limited", async () => {
++    const h = boundedHarness();
++    (h.service as any).extractChunk.mockRejectedValueOnce(Object.assign(new Error("429"), { metadata: { remainingTokens: 0, resetTokensMs: 79000, retryAfterMs: 695 } }));
++    const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
++    expect(result.status).toBe("RETRYABLE_FAILURE");
++    expect(result.status === "RETRYABLE_FAILURE" && result.retryAfterMs).toBe(5000);
++    expect(h.progress.markRetryable).toHaveBeenCalledTimes(1);
++  });
++});
++
+ describe("UnitGroundingService.extractUnitGrounding", () => {
+   it("dynamically sends pages 5-28 in order, awaits each request, and persists only once", async () => {
+     const ranges: number[][] = [];
+diff --git a/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/unit-grounding/unit-grounding.service.ts b/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/unit-grounding/unit-grounding.service.ts
+index 41a8a89a..1c01e68a 100644
+--- a/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/unit-grounding/unit-grounding.service.ts
++++ b/smartify-ai-phase10-final/smartify-ai/apps/backend/src/interactive-lesson/unit-grounding/unit-grounding.service.ts
+@@ -4,7 +4,7 @@ import * as fs from "fs";
+ import * as os from "os";
+ import * as path from "path";
+ import * as crypto from "crypto";
+-import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
++import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
+ import { PrismaService } from "../../prisma/prisma.service";
+ import { AIProviderFactory } from "../../ai/ai-provider.factory";
+ import { AIContextBuilderService } from "../../ai/context/ai-context-builder.service";
+@@ -16,6 +16,8 @@ import { resolveEffectiveSourceFile } from "./unit-effective-source.util";
+ import { UnitGroundingTpmPacer, type TokenRateLimitMetadata } from "./tpm-pacing.util";
+ import { isQuotaError, tokenRateLimitMetadata } from "../../ai/providers/openai-request-diagnostics";
+ import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
++import { UnitGroundingProgressService } from "./unit-grounding-progress.service";
++import type { GroundingChunkResult } from "./unit-grounding-progress.service";
+ 
+ 
+ const MAX_ATTEMPTS = 2; // one initial attempt + one corrective retry — same bound as every other AI-generation loop in this codebase
+@@ -39,6 +41,16 @@ const LOCK_STALE_AFTER_MS = 5 * 60 * 1000;
+ const GROUNDING_WAIT_TIMEOUT_MS = 45 * 1000;
+ const GROUNDING_WAIT_POLL_INTERVAL_MS = 2 * 1000;
+ 
++type BoundedGroundingResult =
++  | { status: "READY" }
++  | { status: "PREPARING"; retryAfterMs?: number; nextEligibleAt?: Date }
++  | { status: "RETRYABLE_FAILURE"; retryAfterMs: number; nextEligibleAt: Date; reason: string }
++  | { status: "CONFIGURATION_ERROR"; reason: string };
++
++class BoundedGroundingRetryError extends Error {
++  constructor(readonly metadata: TokenRateLimitMetadata) { super("Grounding provider retry deferred"); }
++}
++
+ export class UnitGroundingExtractionError extends Error {
+   constructor(
+     message: string,
+@@ -112,12 +124,83 @@ export class UnitGroundingService {
+     private readonly contextBuilder: AIContextBuilderService,
+     private readonly usageService: AIUsageService,
+     private readonly storageFactory: CurriculumSourceStorageFactory,
++    @Optional() private readonly progressService?: UnitGroundingProgressService,
+   ) {}
+ 
+   private createTpmPacer() {
+     return new UnitGroundingTpmPacer({ log: entry => this.logger.log(JSON.stringify(entry)) });
+   }
+ 
++  async getPreparationStatus(unitId: string) {
++    const unit = await this.prisma.client.unit.findUnique({ where: { id: unitId }, select: { groundingNotesJson: true } });
++    if (!unit) return { status: "CONFIGURATION_ERROR" as const };
++    if (unit.groundingNotesJson) return { status: "READY" as const };
++    const progress = this.progressService ? await this.progressService.get(unitId) : null;
++    if (progress?.status === "CONFIGURATION_ERROR") return { status: "CONFIGURATION_ERROR" as const };
++    return { status: "PREPARING" as const, retryAfterMs: progress?.nextEligibleAt ? Math.max(0, progress.nextEligibleAt.getTime() - Date.now()) : 1500 };
++  }
++
++  /**
++   * Internal Phase 2 primitive. It deliberately processes one deterministic
++   * page chunk only; public lesson orchestration is wired in a later phase.
++   */
++  async prepareNextGroundingChunk(unitId: string, requestingActorId: string): Promise<BoundedGroundingResult> {
++    const progress = this.progressService;
++    if (!progress) throw new Error("UnitGroundingProgressService is not configured");
++    const unit = await this.prisma.client.unit.findUnique({ where: { id: unitId }, include: { subject: { include: { grade: { include: { curriculum: true } } } } } });
++    if (!unit) return { status: "CONFIGURATION_ERROR", reason: "unit_not_found" };
++    if (unit.groundingNotesJson) return { status: "READY" };
++    const sourceKey = resolveEffectiveSourceFile(unit, unit.subject);
++    if (!sourceKey || unit.sourcePageStart == null || unit.sourcePageEnd == null || unit.sourcePageEnd < unit.sourcePageStart) {
++      return { status: "CONFIGURATION_ERROR", reason: "source_or_page_range_invalid" };
++    }
++    const active = await this.providerFactory.getActiveProvider();
++    const identity = {
++      sourceKey,
++      sourceFingerprint: crypto.createHash("sha256").update(`${sourceKey}|${unit.sourcePageStart}-${unit.sourcePageEnd}`).digest("hex"),
++      sourcePageStart: unit.sourcePageStart,
++      sourcePageEnd: unit.sourcePageEnd,
++      promptVersion: GROUNDING_PROMPT_VERSION,
++      providerModel: active.model,
++      rendererVersion: "pdf-renderer-v1",
++    };
++    const chunkPlan = [];
++    for (let page = unit.sourcePageStart; page <= unit.sourcePageEnd; page += 2) chunkPlan.push({ chunkId: `${page}-${Math.min(page + 1, unit.sourcePageEnd)}`, pageStart: page, pageEnd: Math.min(page + 1, unit.sourcePageEnd) });
++    const current = await progress.initialize(unitId, identity, chunkPlan);
++    if (current.nextEligibleAt && current.nextEligibleAt > new Date()) return { status: "PREPARING", nextEligibleAt: current.nextEligibleAt, retryAfterMs: current.nextEligibleAt.getTime() - Date.now() };
++    const leaseOwner = `${requestingActorId}:${crypto.randomUUID()}`;
++    const chunk = await progress.claimNextChunk(unitId, leaseOwner, 120000);
++    if (!chunk) return { status: "PREPARING", retryAfterMs: 1500 };
++    try {
++      const fetched = await this.storageFactory.get().fetchToTempFile(sourceKey, { curriculumCode: unit.subject.grade.curriculum.code, gradeLevel: unit.subject.grade.level });
++      const tmpDir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "smartify-grounding-chunk-"));
++      try {
++        const { stdout } = await invokePdfRenderer([fetched.localPath, String(chunk.pageStart), String(chunk.pageEnd), tmpDir]);
++        const imagePaths = stdout.split("\n").map(p => p.trim()).filter(Boolean);
++        const pages: SizedPage[] = imagePaths.map((imagePath, index) => { const d = pngDimensions(fs.readFileSync(imagePath)); return { page: chunk.pageStart + index, imagePath, imageTokens: estimateImageTokens(active.model, d.width, d.height, groundingSizingConfig().detail) }; });
++        const textTokens = estimateTextTokens(this.contextBuilder.buildUnitGroundingExtractionPrompt({ curriculumNameEn: unit.subject.grade.curriculum.nameEn, gradeNameEn: unit.subject.grade.nameEn, subjectNameEn: unit.subject.nameEn, unitNameEn: unit.nameEn, pageRangeStart: chunk.pageStart, pageRangeEnd: chunk.pageEnd }) + "Extract the curriculum grounding now.");
++        const notes = await this.extractChunk(pages, { curriculumNameEn: unit.subject.grade.curriculum.nameEn, gradeNameEn: unit.subject.grade.nameEn, subjectNameEn: unit.subject.nameEn, unitNameEn: unit.nameEn }, requestingActorId, unitId, groundingSizingConfig().detail, active, textTokens, this.createTpmPacer(), true);
++        await progress.persistChunk(unitId, leaseOwner, { chunkId: chunk.chunkId, pageStart: chunk.pageStart, pageEnd: chunk.pageEnd, notes } as GroundingChunkResult, false);
++        const after = await progress.get(unitId);
++        const done = Array.isArray(after?.completedChunksJson) ? after.completedChunksJson : [];
++        if (after && done.length === chunkPlan.length) {
++          const merged = mergeGroundingNotes(done.sort((a: any, b: any) => a.pageStart - b.pageStart).map((x: any) => x.notes));
++          await progress.finalize(unitId, leaseOwner, { groundingNotesJson: merged as any, groundingVersion: CURRENT_GROUNDING_VERSION, groundingModel: active.model, groundingPromptVersion: GROUNDING_PROMPT_VERSION, groundingSourceFingerprint: identity.sourceFingerprint });
++          return { status: "READY" };
++        }
++        await progress.releaseLease(unitId, leaseOwner);
++        return { status: "PREPARING", retryAfterMs: 0 };
++      } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); if (fetched.isTemporary) fs.rmSync(path.dirname(fetched.localPath), { recursive: true, force: true }); }
++    } catch (err) {
++      const metadata = err instanceof BoundedGroundingRetryError ? err.metadata : undefined;
++      const retryAfterMs = Math.min(120000, Math.max(5000, metadata?.resetTokensMs ?? metadata?.retryAfterMs ?? 5000));
++      const nextEligibleAt = new Date(Date.now() + retryAfterMs);
++      const reason = metadata ? "provider_rate_limited" : (err instanceof Error ? err.name : "grounding_error");
++      await progress.markRetryable(unitId, leaseOwner, nextEligibleAt, reason);
++      return { status: "RETRYABLE_FAILURE", retryAfterMs, nextEligibleAt, reason };
++    }
++  }
++
+   async extractUnitGrounding(
+     unitId: string,
+     opts: { pdfOverride?: string; pageRangeOverride?: [number, number] },
+@@ -311,6 +394,7 @@ export class UnitGroundingService {
+     active: Awaited<ReturnType<AIProviderFactory["getActiveProvider"]>>,
+     textTokens: number,
+     pacer: UnitGroundingTpmPacer,
++    deferRateLimitWait = false,
+   ): Promise<GroundingNotes> {
+     const pageStart = pages[0].page, pageEnd = pages[pages.length - 1].page;
+     const imagePaths = pages.map(p => p.imagePath);
+@@ -360,6 +444,7 @@ export class UnitGroundingService {
+             const rawHeaders = (err as { headers?: Headers | Record<string, string> }).headers;
+             const headers = rawHeaders && typeof (rawHeaders as Headers).get === "function" ? rawHeaders as Headers : new Headers(rawHeaders);
+             const metadata = tokenRateLimitMetadata(headers) as TokenRateLimitMetadata;
++            if (deferRateLimitWait) throw new BoundedGroundingRetryError(metadata);
+             await pacer.waitAfterTpm429({ model, unitId, pageStart, pageEnd, estimatedTokens: estimatedInputTokens }, metadata, transportAttempt);
+           }
+         }
+diff --git a/smartify-ai-phase10-final/smartify-ai/apps/frontend/app/[locale]/lesson/[topicId]/page.tsx b/smartify-ai-phase10-final/smartify-ai/apps/frontend/app/[locale]/lesson/[topicId]/page.tsx
+index 574481b2..7ac61afb 100644
+--- a/smartify-ai-phase10-final/smartify-ai/apps/frontend/app/[locale]/lesson/[topicId]/page.tsx
++++ b/smartify-ai-phase10-final/smartify-ai/apps/frontend/app/[locale]/lesson/[topicId]/page.tsx
+@@ -18,12 +18,14 @@ interface LessonTurn {
+ }
+ 
+ interface LessonState {
+-  started: boolean;
++  started?: boolean;
++  status?: "PREPARING" | string;
++  retryAfterMs?: number;
++  preparation?: { status: "PREPARING" | "READY" | "CONFIGURATION_ERROR"; retryAfterMs?: number };
+   sessionId?: string;
+   conversationId?: string;
+   topicId?: string;
+   subjectId?: string;
+-  status?: string;
+   currentStepIndex?: number;
+   totalSteps?: number;
+   stepType?: string;
+@@ -62,6 +64,7 @@ export default function InteractiveLessonPage() {
+   const [resumed, setResumed] = useState(false);
+   const [input, setInput] = useState("");
+   const [busy, setBusy] = useState(false);
++  const [preparing, setPreparing] = useState(false);
+   const [slowStart, setSlowStart] = useState(false);
+   const [error, setError] = useState<string | null>(null);
+   const [notAvailable, setNotAvailable] = useState(false);
+@@ -98,6 +101,9 @@ export default function InteractiveLessonPage() {
+   // visual.
+   const visualBlobUrls = useRef<Record<string, string>>({});
+   const [visualObjectUrl, setVisualObjectUrl] = useState<string | null>(null);
++  const preparationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
++  const preparationRunRef = useRef(0);
++  const mountedRef = useRef(true);
+ 
+   useEffect(() => {
+     const SpeechRecognitionCtor = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
+@@ -109,7 +115,11 @@ export default function InteractiveLessonPage() {
+     const elements = audioElements.current;
+     const urls = audioUrls.current;
+     const visualUrls = visualBlobUrls.current;
++    mountedRef.current = true;
+     return () => {
++      mountedRef.current = false;
++      preparationRunRef.current += 1;
++      if (preparationTimerRef.current) clearTimeout(preparationTimerRef.current);
+       Object.values(elements).forEach((audio) => audio.pause());
+       Object.values(urls).forEach((url) => URL.revokeObjectURL(url));
+       Object.values(visualUrls).forEach((url) => URL.revokeObjectURL(url));
+@@ -188,19 +198,61 @@ export default function InteractiveLessonPage() {
+   }
+ 
+   useEffect(() => {
++    const run = ++preparationRunRef.current;
+     apiFetch<LessonState>(`/lesson/topics/${topicId}/state`)
+       .then((data) => {
++        if (!mountedRef.current || run !== preparationRunRef.current) return;
+         setState(data);
++        if (!data.started && data.preparation?.status === "PREPARING") {
++          setPreparing(true);
++          schedulePreparation(run, data.preparation.retryAfterMs);
++          return;
++        }
++        if (!data.started && data.preparation?.status === "READY") {
++          setPreparing(true);
++          schedulePreparation(run, 0);
++          return;
++        }
+         if (data.started && data.content) {
+           setResumed(!data.completed);
+           setTurns([{ role: "teacher", content: data.content }]);
+           if (autoPlay && !data.completed) playTurn(0, data.content, data.conversationId);
+         }
+       })
+-      .catch(() => setNotAvailable(true));
++      .catch(() => { if (mountedRef.current && run === preparationRunRef.current) setNotAvailable(true); });
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [topicId]);
+ 
++  function schedulePreparation(run: number, retryAfterMs = 1500) {
++    if (preparationTimerRef.current) clearTimeout(preparationTimerRef.current);
++    const delay = Math.min(30_000, Math.max(500, Number.isFinite(retryAfterMs) ? retryAfterMs : 1500));
++    preparationTimerRef.current = setTimeout(() => { void advancePreparation(run); }, delay);
++  }
++
++  async function advancePreparation(run: number) {
++    if (!mountedRef.current || run !== preparationRunRef.current) return;
++    try {
++      const result = await apiFetch<LessonState>(`/lesson/topics/${topicId}/advance`, { method: "POST" });
++      if (!mountedRef.current || run !== preparationRunRef.current) return;
++      if (result.status === "PREPARING") {
++        setPreparing(true);
++        schedulePreparation(run, result.retryAfterMs);
++        return;
++      }
++      setPreparing(false);
++      setState(result);
++      if (result.content) {
++        setTurns([{ role: "teacher", content: result.content }]);
++        if (autoPlay) playTurn(0, result.content, result.conversationId);
++      }
++    } catch (err: any) {
++      if (mountedRef.current && run === preparationRunRef.current) {
++        setPreparing(false);
++        setError(err?.message ?? copy.genericError);
++      }
++    }
++  }
++
+   // A load failure on one step's visual must not silently hide a later
+   // step's own (different) visual — reset per-visual state whenever the
+   // visual actually changes, then fetch it (as an authenticated blob) once
+@@ -268,6 +320,7 @@ export default function InteractiveLessonPage() {
+   }
+ 
+   async function handleStart() {
++    if (preparing || busy) return;
+     setBusy(true);
+     setError(null);
+     // A never-opened Topic can trigger real, first-time content generation
+@@ -280,6 +333,12 @@ export default function InteractiveLessonPage() {
+     const slowStartTimer = setTimeout(() => setSlowStart(true), 6000);
+     try {
+       const result = await apiFetch<LessonState>(`/lesson/topics/${topicId}/advance`, { method: "POST" });
++      if (result.status === "PREPARING") {
++        const run = ++preparationRunRef.current;
++        setPreparing(true);
++        schedulePreparation(run, result.retryAfterMs);
++        return;
++      }
+       setState(result);
+       if (result.content) {
+         setTurns([{ role: "teacher", content: result.content }]);
+@@ -388,9 +447,13 @@ export default function InteractiveLessonPage() {
+           <div className="flex-1 space-y-4 overflow-y-auto rounded-sf-lg border border-neutral-200 bg-white p-6">
+             {turns.length === 0 && !started && (
+               <div className="flex h-full flex-col items-center justify-center gap-4">
+-                <SmartifyButton type="button" variant="ai" onClick={handleStart} disabled={busy}>
+-                  {busy ? (slowStart ? copy.startingFirstTime : copy.starting) : copy.startLesson}
+-                </SmartifyButton>
++                {preparing ? (
++                  <p role="status" aria-live="polite" className="text-sm text-neutral-500">{copy.preparing}</p>
++                ) : (
++                  <SmartifyButton type="button" variant="ai" onClick={handleStart} disabled={busy}>
++                    {busy ? (slowStart ? copy.startingFirstTime : copy.starting) : copy.startLesson}
++                  </SmartifyButton>
++                )}
+               </div>
+             )}
+             {turns.map((t, i) => {
+diff --git a/smartify-ai-phase10-final/smartify-ai/apps/frontend/content/lesson.ts b/smartify-ai-phase10-final/smartify-ai/apps/frontend/content/lesson.ts
+index d7afb0f1..a18116c4 100644
+--- a/smartify-ai-phase10-final/smartify-ai/apps/frontend/content/lesson.ts
++++ b/smartify-ai-phase10-final/smartify-ai/apps/frontend/content/lesson.ts
+@@ -4,6 +4,7 @@ export interface LessonCopy {
+   startLesson: string;
+   starting: string;
+   startingFirstTime: string;
++  preparing: string;
+   continueLabel: string;
+   answerPlaceholder: string;
+   askPlaceholder: string;
+@@ -41,6 +42,7 @@ export interface LessonCopy {
+ }
+ 
+ const en: LessonCopy = {
++  preparing: "Preparing your lesson...",
+   startLesson: "Start Lesson",
+   starting: "Starting...",
+   startingFirstTime: "Getting your lesson ready for the first time — almost there!",
+@@ -81,6 +83,7 @@ const en: LessonCopy = {
+ };
+ 
+ const ar: LessonCopy = {
++  preparing: "بنجهز لك الدرس...",
+   startLesson: "ابدأ الدرس",
+   starting: "جاري البدء...",
+   startingFirstTime: "بنجهز درسك لأول مرة — تقريبًا خلصنا!",
+diff --git a/smartify-ai-phase10-final/smartify-ai/packages/database/prisma/schema.prisma b/smartify-ai-phase10-final/smartify-ai/packages/database/prisma/schema.prisma
+index 6080a068..f974137f 100644
+--- a/smartify-ai-phase10-final/smartify-ai/packages/database/prisma/schema.prisma
++++ b/smartify-ai-phase10-final/smartify-ai/packages/database/prisma/schema.prisma
+@@ -309,10 +309,44 @@ model Unit {
+ 
+   topics Topic[]
+   lessonDrafts LessonDraft[]
++  groundingProgress UnitGroundingProgress?
+ 
+   @@index([subjectId])
+ }
+ 
++enum UnitGroundingProgressStatus {
++  IN_PROGRESS
++  RETRYABLE_FAILURE
++  CONFIGURATION_ERROR
++  READY
++}
++
++model UnitGroundingProgress {
++  id String @id @default(cuid())
++  unitId String @unique
++  unit Unit @relation(fields: [unitId], references: [id], onDelete: Cascade)
++  status UnitGroundingProgressStatus @default(IN_PROGRESS)
++  sourceKey String
++  sourceFingerprint String
++  sourcePageStart Int
++  sourcePageEnd Int
++  promptVersion String
++  providerModel String
++  rendererVersion String
++  chunkPlanJson Json
++  completedChunksJson Json
++  nextEligibleAt DateTime?
++  retryCount Int @default(0)
++  lastErrorCode String?
++  leaseOwner String?
++  leaseExpiresAt DateTime?
++  createdAt DateTime @default(now())
++  updatedAt DateTime @updatedAt
++
++  @@index([status, nextEligibleAt])
++  @@index([leaseExpiresAt])
++}
++
+ model Topic {
+   id     String @id @default(cuid())
+   unitId String
