@@ -128,6 +128,52 @@ function makeHarness(
   return { service, prisma, contextBuilder, generateSpy, updateCalls, updateManyCalls, usageCreateCalls, reserveBudget, reconcileBudget, releaseBudget, storage, storageFactory };
 }
 
+describe("UnitGroundingService.prepareNextGroundingChunk", () => {
+  function boundedHarness(overrides: any = {}) {
+    const h = makeHarness({ unitOverrides: { sourcePageStart: 8, sourcePageEnd: 11, ...overrides.unitOverrides } });
+    const progress = {
+      initialize: jest.fn().mockResolvedValue({ nextEligibleAt: null }),
+      claimNextChunk: jest.fn().mockResolvedValue({ chunkId: "8-9", pageStart: 8, pageEnd: 9 }),
+      persistChunk: jest.fn().mockResolvedValue(true),
+      get: jest.fn().mockResolvedValue({ completedChunksJson: [{ chunkId: "8-9", pageStart: 8, pageEnd: 9, notes: JSON.parse(VALID_EXTRACTION_JSON) }] }),
+      releaseLease: jest.fn().mockResolvedValue(true),
+      finalize: jest.fn().mockResolvedValue(true),
+      markRetryable: jest.fn().mockResolvedValue(true),
+    };
+    (h.service as any).progressService = progress;
+    jest.spyOn(h.service as any, "extractChunk").mockResolvedValue(JSON.parse(VALID_EXTRACTION_JSON));
+    return { ...h, progress };
+  }
+
+  it("returns READY without progress, source, renderer, or provider work when already grounded", async () => {
+    const h = boundedHarness({ unitOverrides: { groundingNotesJson: JSON.parse(VALID_EXTRACTION_JSON) } });
+    const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+    expect(result).toEqual({ status: "READY" });
+    expect(h.progress.initialize).not.toHaveBeenCalled();
+    expect(h.storage.fetchToTempFile).not.toHaveBeenCalled();
+    expect((h.service as any).extractChunk).not.toHaveBeenCalled();
+  });
+
+  it("claims and persists exactly one chunk, then returns PREPARING", async () => {
+    const h = boundedHarness();
+    const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+    expect(result.status).toBe("PREPARING");
+    expect(h.progress.claimNextChunk).toHaveBeenCalledTimes(1);
+    expect((h.service as any).extractChunk).toHaveBeenCalledTimes(1);
+    expect(h.progress.persistChunk).toHaveBeenCalledTimes(1);
+    expect(h.progress.releaseLease).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a durable retry state without sleeping when the provider is TPM-limited", async () => {
+    const h = boundedHarness();
+    (h.service as any).extractChunk.mockRejectedValueOnce(Object.assign(new Error("429"), { metadata: { remainingTokens: 0, resetTokensMs: 79000, retryAfterMs: 695 } }));
+    const result = await h.service.prepareNextGroundingChunk("unit-1", "actor-1");
+    expect(result.status).toBe("RETRYABLE_FAILURE");
+    expect(result.status === "RETRYABLE_FAILURE" && result.retryAfterMs).toBe(5000);
+    expect(h.progress.markRetryable).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("UnitGroundingService.extractUnitGrounding", () => {
   it("dynamically sends pages 5-28 in order, awaits each request, and persists only once", async () => {
     const ranges: number[][] = [];

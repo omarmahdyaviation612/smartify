@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as crypto from "crypto";
-import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AIProviderFactory } from "../../ai/ai-provider.factory";
 import { AIContextBuilderService } from "../../ai/context/ai-context-builder.service";
@@ -16,6 +16,8 @@ import { resolveEffectiveSourceFile } from "./unit-effective-source.util";
 import { UnitGroundingTpmPacer, type TokenRateLimitMetadata } from "./tpm-pacing.util";
 import { isQuotaError, tokenRateLimitMetadata } from "../../ai/providers/openai-request-diagnostics";
 import { CONTENT_AUTHORING_ACTOR_ID } from "../../ai/content-authoring-actor.const";
+import { UnitGroundingProgressService } from "./unit-grounding-progress.service";
+import type { GroundingChunkResult } from "./unit-grounding-progress.service";
 
 
 const MAX_ATTEMPTS = 2; // one initial attempt + one corrective retry — same bound as every other AI-generation loop in this codebase
@@ -38,6 +40,16 @@ const LOCK_STALE_AFTER_MS = 5 * 60 * 1000;
 // loser's own request to hang past what infra will tolerate.
 const GROUNDING_WAIT_TIMEOUT_MS = 45 * 1000;
 const GROUNDING_WAIT_POLL_INTERVAL_MS = 2 * 1000;
+
+type BoundedGroundingResult =
+  | { status: "READY" }
+  | { status: "PREPARING"; retryAfterMs?: number; nextEligibleAt?: Date }
+  | { status: "RETRYABLE_FAILURE"; retryAfterMs: number; nextEligibleAt: Date; reason: string }
+  | { status: "CONFIGURATION_ERROR"; reason: string };
+
+class BoundedGroundingRetryError extends Error {
+  constructor(readonly metadata: TokenRateLimitMetadata) { super("Grounding provider retry deferred"); }
+}
 
 export class UnitGroundingExtractionError extends Error {
   constructor(
@@ -112,10 +124,81 @@ export class UnitGroundingService {
     private readonly contextBuilder: AIContextBuilderService,
     private readonly usageService: AIUsageService,
     private readonly storageFactory: CurriculumSourceStorageFactory,
+    @Optional() private readonly progressService?: UnitGroundingProgressService,
   ) {}
 
   private createTpmPacer() {
     return new UnitGroundingTpmPacer({ log: entry => this.logger.log(JSON.stringify(entry)) });
+  }
+
+  async getPreparationStatus(unitId: string) {
+    const unit = await this.prisma.client.unit.findUnique({ where: { id: unitId }, select: { groundingNotesJson: true } });
+    if (!unit) return { status: "CONFIGURATION_ERROR" as const };
+    if (unit.groundingNotesJson) return { status: "READY" as const };
+    const progress = this.progressService ? await this.progressService.get(unitId) : null;
+    if (progress?.status === "CONFIGURATION_ERROR") return { status: "CONFIGURATION_ERROR" as const };
+    return { status: "PREPARING" as const, retryAfterMs: progress?.nextEligibleAt ? Math.max(0, progress.nextEligibleAt.getTime() - Date.now()) : 1500 };
+  }
+
+  /**
+   * Internal Phase 2 primitive. It deliberately processes one deterministic
+   * page chunk only; public lesson orchestration is wired in a later phase.
+   */
+  async prepareNextGroundingChunk(unitId: string, requestingActorId: string): Promise<BoundedGroundingResult> {
+    const progress = this.progressService;
+    if (!progress) throw new Error("UnitGroundingProgressService is not configured");
+    const unit = await this.prisma.client.unit.findUnique({ where: { id: unitId }, include: { subject: { include: { grade: { include: { curriculum: true } } } } } });
+    if (!unit) return { status: "CONFIGURATION_ERROR", reason: "unit_not_found" };
+    if (unit.groundingNotesJson) return { status: "READY" };
+    const sourceKey = resolveEffectiveSourceFile(unit, unit.subject);
+    if (!sourceKey || unit.sourcePageStart == null || unit.sourcePageEnd == null || unit.sourcePageEnd < unit.sourcePageStart) {
+      return { status: "CONFIGURATION_ERROR", reason: "source_or_page_range_invalid" };
+    }
+    const active = await this.providerFactory.getActiveProvider();
+    const identity = {
+      sourceKey,
+      sourceFingerprint: crypto.createHash("sha256").update(`${sourceKey}|${unit.sourcePageStart}-${unit.sourcePageEnd}`).digest("hex"),
+      sourcePageStart: unit.sourcePageStart,
+      sourcePageEnd: unit.sourcePageEnd,
+      promptVersion: GROUNDING_PROMPT_VERSION,
+      providerModel: active.model,
+      rendererVersion: "pdf-renderer-v1",
+    };
+    const chunkPlan = [];
+    for (let page = unit.sourcePageStart; page <= unit.sourcePageEnd; page += 2) chunkPlan.push({ chunkId: `${page}-${Math.min(page + 1, unit.sourcePageEnd)}`, pageStart: page, pageEnd: Math.min(page + 1, unit.sourcePageEnd) });
+    const current = await progress.initialize(unitId, identity, chunkPlan);
+    if (current.nextEligibleAt && current.nextEligibleAt > new Date()) return { status: "PREPARING", nextEligibleAt: current.nextEligibleAt, retryAfterMs: current.nextEligibleAt.getTime() - Date.now() };
+    const leaseOwner = `${requestingActorId}:${crypto.randomUUID()}`;
+    const chunk = await progress.claimNextChunk(unitId, leaseOwner, 120000);
+    if (!chunk) return { status: "PREPARING", retryAfterMs: 1500 };
+    try {
+      const fetched = await this.storageFactory.get().fetchToTempFile(sourceKey, { curriculumCode: unit.subject.grade.curriculum.code, gradeLevel: unit.subject.grade.level });
+      const tmpDir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "smartify-grounding-chunk-"));
+      try {
+        const { stdout } = await invokePdfRenderer([fetched.localPath, String(chunk.pageStart), String(chunk.pageEnd), tmpDir]);
+        const imagePaths = stdout.split("\n").map(p => p.trim()).filter(Boolean);
+        const pages: SizedPage[] = imagePaths.map((imagePath, index) => { const d = pngDimensions(fs.readFileSync(imagePath)); return { page: chunk.pageStart + index, imagePath, imageTokens: estimateImageTokens(active.model, d.width, d.height, groundingSizingConfig().detail) }; });
+        const textTokens = estimateTextTokens(this.contextBuilder.buildUnitGroundingExtractionPrompt({ curriculumNameEn: unit.subject.grade.curriculum.nameEn, gradeNameEn: unit.subject.grade.nameEn, subjectNameEn: unit.subject.nameEn, unitNameEn: unit.nameEn, pageRangeStart: chunk.pageStart, pageRangeEnd: chunk.pageEnd }) + "Extract the curriculum grounding now.");
+        const notes = await this.extractChunk(pages, { curriculumNameEn: unit.subject.grade.curriculum.nameEn, gradeNameEn: unit.subject.grade.nameEn, subjectNameEn: unit.subject.nameEn, unitNameEn: unit.nameEn }, requestingActorId, unitId, groundingSizingConfig().detail, active, textTokens, this.createTpmPacer(), true);
+        await progress.persistChunk(unitId, leaseOwner, { chunkId: chunk.chunkId, pageStart: chunk.pageStart, pageEnd: chunk.pageEnd, notes } as GroundingChunkResult, false);
+        const after = await progress.get(unitId);
+        const done = Array.isArray(after?.completedChunksJson) ? after.completedChunksJson : [];
+        if (after && done.length === chunkPlan.length) {
+          const merged = mergeGroundingNotes(done.sort((a: any, b: any) => a.pageStart - b.pageStart).map((x: any) => x.notes));
+          await progress.finalize(unitId, leaseOwner, { groundingNotesJson: merged as any, groundingVersion: CURRENT_GROUNDING_VERSION, groundingModel: active.model, groundingPromptVersion: GROUNDING_PROMPT_VERSION, groundingSourceFingerprint: identity.sourceFingerprint });
+          return { status: "READY" };
+        }
+        await progress.releaseLease(unitId, leaseOwner);
+        return { status: "PREPARING", retryAfterMs: 0 };
+      } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); if (fetched.isTemporary) fs.rmSync(path.dirname(fetched.localPath), { recursive: true, force: true }); }
+    } catch (err) {
+      const metadata = err instanceof BoundedGroundingRetryError ? err.metadata : undefined;
+      const retryAfterMs = Math.min(120000, Math.max(5000, metadata?.resetTokensMs ?? metadata?.retryAfterMs ?? 5000));
+      const nextEligibleAt = new Date(Date.now() + retryAfterMs);
+      const reason = metadata ? "provider_rate_limited" : (err instanceof Error ? err.name : "grounding_error");
+      await progress.markRetryable(unitId, leaseOwner, nextEligibleAt, reason);
+      return { status: "RETRYABLE_FAILURE", retryAfterMs, nextEligibleAt, reason };
+    }
   }
 
   async extractUnitGrounding(
@@ -311,6 +394,7 @@ export class UnitGroundingService {
     active: Awaited<ReturnType<AIProviderFactory["getActiveProvider"]>>,
     textTokens: number,
     pacer: UnitGroundingTpmPacer,
+    deferRateLimitWait = false,
   ): Promise<GroundingNotes> {
     const pageStart = pages[0].page, pageEnd = pages[pages.length - 1].page;
     const imagePaths = pages.map(p => p.imagePath);
@@ -360,6 +444,7 @@ export class UnitGroundingService {
             const rawHeaders = (err as { headers?: Headers | Record<string, string> }).headers;
             const headers = rawHeaders && typeof (rawHeaders as Headers).get === "function" ? rawHeaders as Headers : new Headers(rawHeaders);
             const metadata = tokenRateLimitMetadata(headers) as TokenRateLimitMetadata;
+            if (deferRateLimitWait) throw new BoundedGroundingRetryError(metadata);
             await pacer.waitAfterTpm429({ model, unitId, pageStart, pageEnd, estimatedTokens: estimatedInputTokens }, metadata, transportAttempt);
           }
         }

@@ -309,8 +309,42 @@ model Unit {
 
   topics Topic[]
   lessonDrafts LessonDraft[]
+  groundingProgress UnitGroundingProgress?
 
   @@index([subjectId])
+}
+
+enum UnitGroundingProgressStatus {
+  IN_PROGRESS
+  RETRYABLE_FAILURE
+  CONFIGURATION_ERROR
+  READY
+}
+
+model UnitGroundingProgress {
+  id String @id @default(cuid())
+  unitId String @unique
+  unit Unit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  status UnitGroundingProgressStatus @default(IN_PROGRESS)
+  sourceKey String
+  sourceFingerprint String
+  sourcePageStart Int
+  sourcePageEnd Int
+  promptVersion String
+  providerModel String
+  rendererVersion String
+  chunkPlanJson Json
+  completedChunksJson Json
+  nextEligibleAt DateTime?
+  retryCount Int @default(0)
+  lastErrorCode String?
+  leaseOwner String?
+  leaseExpiresAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, nextEligibleAt])
+  @@index([leaseExpiresAt])
 }
 
 model Topic {

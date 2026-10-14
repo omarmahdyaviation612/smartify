@@ -4,6 +4,7 @@ export interface LessonCopy {
   startLesson: string;
   starting: string;
   startingFirstTime: string;
+  preparing: string;
   continueLabel: string;
   answerPlaceholder: string;
   askPlaceholder: string;
@@ -41,6 +42,7 @@ export interface LessonCopy {
 }
 
 const en: LessonCopy = {
+  preparing: "Preparing your lesson...",
   startLesson: "Start Lesson",
   starting: "Starting...",
   startingFirstTime: "Getting your lesson ready for the first time — almost there!",
@@ -81,6 +83,7 @@ const en: LessonCopy = {
 };
 
 const ar: LessonCopy = {
+  preparing: "بنجهز لك الدرس...",
   startLesson: "ابدأ الدرس",
   starting: "جاري البدء...",
   startingFirstTime: "بنجهز درسك لأول مرة — تقريبًا خلصنا!",

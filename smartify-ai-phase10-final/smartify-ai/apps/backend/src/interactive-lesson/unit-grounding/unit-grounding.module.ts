@@ -3,6 +3,7 @@ import { AIModule } from "../../ai/ai.module";
 import { UnitGroundingService } from "./unit-grounding.service";
 import { CurriculumSourceStorageFactory } from "./storage/curriculum-source-storage.factory";
 import { CurriculumSourceUploadService } from "./storage/curriculum-source-upload.service";
+import { UnitGroundingProgressService } from "./unit-grounding-progress.service";
 
 /**
  * UnitGroundingService is resolved both by the offline
@@ -34,7 +35,7 @@ import { CurriculumSourceUploadService } from "./storage/curriculum-source-uploa
  */
 @Module({
   imports: [AIModule],
-  providers: [UnitGroundingService, CurriculumSourceStorageFactory, CurriculumSourceUploadService],
-  exports: [UnitGroundingService, CurriculumSourceUploadService, CurriculumSourceStorageFactory],
+  providers: [UnitGroundingService, UnitGroundingProgressService, CurriculumSourceStorageFactory, CurriculumSourceUploadService],
+  exports: [UnitGroundingService, UnitGroundingProgressService, CurriculumSourceUploadService, CurriculumSourceStorageFactory],
 })
 export class UnitGroundingModule {}
