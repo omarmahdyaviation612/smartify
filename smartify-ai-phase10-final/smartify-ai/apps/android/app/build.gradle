@@ -1,0 +1,80 @@
+plugins {
+    id 'com.android.application'
+}
+
+// ---- App identity -------------------------------------------------------
+// The package name is PERMANENT once uploaded to Google Play. Change it here
+// before the first upload if you want something else.
+def appId        = 'com.smartifyai.app'
+def hostName     = 'smartify-ai.com'
+def launchPath   = '/ar'          // Arabic-first, same as the web start_url
+def themeColor   = '#0B1530'
+def bgColor      = '#FFFFFF'
+
+// Bump versionCode for every Play upload (CI can override with -PversionCode=N)
+def vCode = (project.findProperty('versionCode') ?: '1').toInteger()
+def vName = (project.findProperty('versionName') ?: '1.0.0')
+
+// ---- Signing (env vars in CI, or keystore.properties locally) ------------
+def ksProps = new Properties()
+def ksFile = rootProject.file('keystore.properties')
+if (ksFile.exists()) ksFile.withInputStream { ksProps.load(it) }
+def ksPath  = System.getenv('SMARTIFY_KEYSTORE_PATH')     ?: ksProps['storeFile']
+def ksPass  = System.getenv('SMARTIFY_KEYSTORE_PASSWORD') ?: ksProps['storePassword']
+def ksAlias = System.getenv('SMARTIFY_KEY_ALIAS')         ?: ksProps['keyAlias']
+def ksKeyPw = System.getenv('SMARTIFY_KEY_PASSWORD')      ?: ksProps['keyPassword']
+def hasSigning = ksPath && new File(ksPath.toString()).exists()
+
+android {
+    namespace 'com.smartifyai.app'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId appId
+        minSdk 24
+        targetSdk 36
+        versionCode vCode
+        versionName vName
+
+        resValue 'string', 'appName', 'Smartify'
+        resValue 'string', 'launcherName', 'Smartify'
+        resValue 'string', 'hostName', hostName
+        resValue 'string', 'launchUrl', "https://${hostName}${launchPath}"
+        resValue 'color', 'colorPrimary', themeColor
+        resValue 'color', 'navigationColor', bgColor
+        resValue 'color', 'backgroundColor', bgColor
+
+        // Digital Asset Links: tells Chrome this app is allowed to open
+        // smartify-ai.com full-screen (the site must serve the matching
+        // /.well-known/assetlinks.json — see apps/frontend/public).
+        resValue 'string', 'assetStatements',
+            "[{\\\"relation\\\": [\\\"delegate_permission/common.handle_all_urls\\\"], \\\"target\\\": {\\\"namespace\\\": \\\"web\\\", \\\"site\\\": \\\"https://${hostName}\\\"}}]"
+    }
+
+    signingConfigs {
+        if (hasSigning) {
+            release {
+                storeFile file(ksPath)
+                storePassword ksPass
+                keyAlias ksAlias
+                keyPassword ksKeyPw
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (hasSigning) signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.7.3'
+}

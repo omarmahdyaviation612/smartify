@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.smartifyai.app",
+      "sha256_cert_fingerprints": [
+        "63:A6:C3:39:D0:D7:7E:09:86:91:8B:D9:D0:23:CA:D5:CF:9F:8F:C8:97:B4:16:9D:46:E7:39:67:58:BB:A1:03"
+      ]
+    }
+  }
+]
