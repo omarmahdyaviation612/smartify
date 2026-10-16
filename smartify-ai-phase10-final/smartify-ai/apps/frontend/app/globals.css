@@ -3,3 +3,69 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ------------------------------------------------------------------ */
+/* Kids layer: mascot moods, guide pulses, celebration pops.           */
+/* Everything is off for prefers-reduced-motion and html.sf-fx-calm.   */
+/* ------------------------------------------------------------------ */
+.sf-kid-mascot g { transform-box: fill-box; }
+.sf-kid-bob { transform-origin: 50% 100%; animation: sf-kid-bob 3.2s ease-in-out infinite; }
+.sf-kid-eyes { transform-origin: 50% 50%; animation: sf-kid-blink 4.5s infinite; }
+.sf-kid-eyes-look { animation: sf-kid-look 2.4s ease-in-out infinite; }
+.sf-kid-tassel { transform-origin: 0% 0%; animation: sf-kid-tassel 2.6s ease-in-out infinite; }
+.sf-kid-arm-left { transform-origin: 100% 50%; }
+.sf-kid-arm-right { transform-origin: 0% 50%; }
+
+.sf-kid-mood-wave .sf-kid-arm-right { animation: sf-kid-wave 1s ease-in-out infinite; }
+.sf-kid-mood-point .sf-kid-arm-right { transform: rotate(35deg); animation: sf-kid-point 1.2s ease-in-out infinite; }
+.sf-kid-mood-think .sf-kid-head { transform-origin: 50% 100%; animation: sf-kid-tilt 2.4s ease-in-out infinite; }
+.sf-kid-mood-think .sf-kid-think-dots circle { animation: sf-kid-dot 1.2s ease-in-out infinite; }
+.sf-kid-mood-think .sf-kid-think-dots circle:nth-child(2) { animation-delay: 0.2s; }
+.sf-kid-mood-think .sf-kid-think-dots circle:nth-child(3) { animation-delay: 0.4s; }
+.sf-kid-mood-happy .sf-kid-bob { animation: sf-kid-hop 1.4s ease-in-out infinite; }
+.sf-kid-mood-cheer .sf-kid-bob { animation: sf-kid-jump 0.7s ease-in-out infinite; }
+.sf-kid-mood-cheer .sf-kid-arm-left { animation: sf-kid-cheer-l 0.7s ease-in-out infinite; }
+.sf-kid-mood-cheer .sf-kid-arm-right { animation: sf-kid-cheer-r 0.7s ease-in-out infinite; }
+.sf-kid-mood-clap .sf-kid-arm-left { animation: sf-kid-clap-l 0.32s ease-in-out infinite; }
+.sf-kid-mood-clap .sf-kid-arm-right { animation: sf-kid-clap-r 0.32s ease-in-out infinite; }
+.sf-kid-mood-encourage .sf-kid-arm-right { transform: rotate(-60deg); }
+.sf-kid-mood-encourage .sf-kid-bob { animation: sf-kid-nod 2s ease-in-out infinite; }
+.sf-kid-mood-sleep .sf-kid-bob { animation: sf-kid-bob 5s ease-in-out infinite; }
+.sf-kid-zz text { animation: sf-kid-zz 2.4s ease-in infinite; }
+.sf-kid-zz text:nth-child(2) { animation-delay: 1.2s; }
+.sf-kid-cap-toss .sf-kid-cap { transform-origin: 50% 50%; animation: sf-kid-cap-toss 1.6s ease-in-out 0.3s 2; }
+
+.sf-kid-bubble { animation: sf-kid-pop-in 0.35s cubic-bezier(.2,1.6,.4,1) both; }
+.sf-kid-pop { animation: sf-kid-pop-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }
+.sf-kid-star-in { animation: sf-kid-star 0.5s cubic-bezier(.2,1.8,.4,1) both; }
+.sf-kid-pulse { position: relative; animation: sf-kid-pulse 1.6s ease-out infinite; }
+.sf-kid-choice { transition: transform .15s ease, background-color .15s ease, border-color .15s ease; }
+.sf-kid-choice:active { transform: scale(.97); }
+.sf-kid-choice[data-selected="true"] { animation: sf-kid-pop-in 0.3s cubic-bezier(.2,1.6,.4,1); }
+
+@keyframes sf-kid-bob { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-5px) } }
+@keyframes sf-kid-blink { 0%,92%,100% { transform: scaleY(1) } 95% { transform: scaleY(0.1) } }
+@keyframes sf-kid-look { 0%,100% { transform: translate(0,0) } 50% { transform: translate(6px,-5px) } }
+@keyframes sf-kid-tassel { 0%,100% { transform: rotate(0) } 50% { transform: rotate(8deg) } }
+@keyframes sf-kid-wave { 0%,100% { transform: rotate(-20deg) } 50% { transform: rotate(-70deg) } }
+@keyframes sf-kid-point { 0%,100% { transform: rotate(35deg) translateY(0) } 50% { transform: rotate(35deg) translateY(4px) } }
+@keyframes sf-kid-tilt { 0%,100% { transform: rotate(-4deg) } 50% { transform: rotate(4deg) } }
+@keyframes sf-kid-dot { 0%,100% { opacity: .25 } 50% { opacity: 1 } }
+@keyframes sf-kid-hop { 0%,100% { transform: translateY(0) } 40% { transform: translateY(-10px) } }
+@keyframes sf-kid-jump { 0%,100% { transform: translateY(0) scale(1,1) } 30% { transform: translateY(-16px) scale(.97,1.03) } 60% { transform: translateY(0) scale(1.04,.96) } }
+@keyframes sf-kid-cheer-l { 0%,100% { transform: rotate(40deg) } 50% { transform: rotate(70deg) } }
+@keyframes sf-kid-cheer-r { 0%,100% { transform: rotate(-40deg) } 50% { transform: rotate(-70deg) } }
+@keyframes sf-kid-clap-l { 0%,100% { transform: rotate(-10deg) translateX(0) } 50% { transform: rotate(-35deg) translateX(26px) } }
+@keyframes sf-kid-clap-r { 0%,100% { transform: rotate(10deg) translateX(0) } 50% { transform: rotate(35deg) translateX(-26px) } }
+@keyframes sf-kid-nod { 0%,100% { transform: translateY(0) rotate(0) } 50% { transform: translateY(2px) rotate(-3deg) } }
+@keyframes sf-kid-zz { 0% { opacity: 0; transform: translate(0,0) } 30% { opacity: 1 } 100% { opacity: 0; transform: translate(8px,-14px) } }
+@keyframes sf-kid-cap-toss { 0%,100% { transform: translateY(0) rotate(0) } 45% { transform: translateY(-60px) rotate(200deg) } 70% { transform: translateY(-20px) rotate(330deg) } }
+@keyframes sf-kid-pop-in { 0% { opacity: 0; transform: scale(.7) } 100% { opacity: 1; transform: scale(1) } }
+@keyframes sf-kid-star { 0% { opacity: 0; transform: scale(0) rotate(-40deg) } 100% { opacity: 1; transform: scale(1) rotate(0) } }
+@keyframes sf-kid-pulse { 0% { box-shadow: 0 0 0 0 rgba(124,58,237,.45) } 70% { box-shadow: 0 0 0 16px rgba(124,58,237,0) } 100% { box-shadow: 0 0 0 0 rgba(124,58,237,0) } }
+
+@media (prefers-reduced-motion: reduce) {
+  .sf-kid-mascot *, .sf-kid-bubble, .sf-kid-pop, .sf-kid-star-in, .sf-kid-pulse, .sf-kid-choice { animation: none !important; }
+}
+html.sf-fx-calm .sf-kid-mascot *, html.sf-fx-calm .sf-kid-bubble, html.sf-fx-calm .sf-kid-pop,
+html.sf-fx-calm .sf-kid-star-in, html.sf-fx-calm .sf-kid-pulse, html.sf-fx-calm .sf-kid-choice { animation: none !important; }

@@ -11,6 +11,10 @@ import { renderTutorMessage } from "@/lib/render-tutor-message";
 import type { Locale } from "@/content/marketing";
 import type { VisualInstruction } from "@smartify/shared-types";
 import { TutorVisual } from "@/components/TutorVisual";
+import { Mascot } from "@/components/kids/Mascot";
+import { CelebrationCard, FxToggle, MascotGuide } from "@/components/kids/Celebration";
+import { burst } from "@/components/kids/particles";
+import { playSound, unlockSounds } from "@/components/kids/sounds";
 
 // Production hotfix (2026-09-25): a raw browser-level transport failure
 // (fetch() rejecting before any HTTP response exists — offline, DNS, CORS,
@@ -94,6 +98,9 @@ export default function InteractiveLessonPage() {
   const [error, setError] = useState<string | null>(null);
   const [notAvailable, setNotAvailable] = useState(false);
   const [visualFailed, setVisualFailed] = useState(false);
+  // Celebrate the moment a lesson is finished live — not when an already
+  // completed lesson is re-opened for review.
+  const wasCompletedRef = useRef<boolean | null>(null);
 
   // Post-lesson understanding check — a short (3-question) quiz offered
   // once the lesson itself is complete; submitting it is what triggers a
@@ -339,6 +346,16 @@ export default function InteractiveLessonPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.visual?.url, state?.visual?.status]);
 
+  useEffect(() => {
+    if (!state) return;
+    const now = Boolean(state.completed);
+    if (wasCompletedRef.current === false && now) {
+      burst("confetti");
+      playSound("fanfare");
+    }
+    wasCompletedRef.current = now;
+  }, [state]);
+
   // Fetched exactly once, the first time the lesson reaches `completed` —
   // never re-fetched on later re-renders (checkQuestions !== null guards
   // that), so resuming an already-completed lesson doesn't silently
@@ -356,6 +373,7 @@ export default function InteractiveLessonPage() {
   async function handleCheckSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!checkQuestions || !state?.subjectId) return;
+    unlockSounds();
     setCheckSubmitting(true);
     setCheckError(null);
     try {
@@ -374,6 +392,7 @@ export default function InteractiveLessonPage() {
 
   async function handleStart() {
     if (preparing || busy) return;
+    unlockSounds();
     setBusy(true);
     setError(null);
     // A never-opened Topic can trigger real, first-time content generation
@@ -407,6 +426,7 @@ export default function InteractiveLessonPage() {
   }
 
   async function handleContinue() {
+    unlockSounds();
     setBusy(true);
     setError(null);
     try {
@@ -427,6 +447,7 @@ export default function InteractiveLessonPage() {
   async function handleRespond(e: React.FormEvent) {
     e.preventDefault();
     if (!input.trim() || busy) return;
+    unlockSounds();
     const message = input.trim();
     setInput("");
     setBusy(true);
@@ -486,6 +507,8 @@ export default function InteractiveLessonPage() {
                 </div>
               )}
             </div>
+            <div className="flex flex-wrap items-center gap-2">
+            <FxToggle locale={locale} />
             <button
               type="button"
               onClick={toggleAutoPlay}
@@ -493,6 +516,7 @@ export default function InteractiveLessonPage() {
             >
               {autoPlay ? copy.autoPlayOn : copy.autoPlayOff}
             </button>
+            </div>
           </div>
 
           {resumed && !completed && <p className="mb-3 text-xs text-neutral-400">{copy.resumedNotice}</p>}
@@ -501,11 +525,21 @@ export default function InteractiveLessonPage() {
             {turns.length === 0 && !started && (
               <div className="flex h-full flex-col items-center justify-center gap-4">
                 {preparing ? (
-                  <p role="status" aria-live="polite" className="text-sm text-neutral-500">{preparingMessage()}</p>
+                  <div className="flex flex-col items-center gap-2">
+                    <Mascot mood="think" size={110} />
+                    <p role="status" aria-live="polite" className="text-sm text-neutral-500">{preparingMessage()}</p>
+                  </div>
                 ) : (
-                  <SmartifyButton type="button" variant="ai" onClick={handleStart} disabled={busy}>
-                    {busy ? (slowStart ? copy.startingFirstTime : copy.starting) : copy.startLesson}
-                  </SmartifyButton>
+                  <>
+                    <MascotGuide
+                      mood={busy ? "think" : "wave"}
+                      size={110}
+                      message={busy ? (isAr ? "ثانية واحدة، بجهّزلك الدرس… 🤓" : "One sec, getting your lesson ready… 🤓") : (isAr ? "أهلًا يا بطل! أنا سمارتي 👋 دوس على الزرار ده عشان نبدأ الدرس 👇" : "Hi champ! I'm Smarty 👋 Tap the button below to start the lesson 👇")}
+                    />
+                    <SmartifyButton type="button" variant="ai" onClick={handleStart} disabled={busy} className={`rounded-full px-10 py-4 text-lg ${busy ? "" : "sf-kid-pulse"}`}>
+                      {busy ? (slowStart ? copy.startingFirstTime : copy.starting) : copy.startLesson}
+                    </SmartifyButton>
+                  </>
                 )}
               </div>
             )}
@@ -552,6 +586,12 @@ export default function InteractiveLessonPage() {
                 </div>
               );
             })}
+            {busy && started && !completed && (
+              <div className="flex items-center gap-2 text-sm text-sf-purple-600">
+                <Mascot mood="think" size={48} />
+                <span>{isAr ? "سمارتي بيفكّر…" : "Smarty is thinking…"}</span>
+              </div>
+            )}
             {state?.responseVisual && <TutorVisual visual={state.responseVisual} />}
             {state?.visual && (
               <div className="flex justify-start">
@@ -574,6 +614,7 @@ export default function InteractiveLessonPage() {
             )}
             {completed && (
               <div className="rounded-sf-lg bg-[--sf-bg-subtle] p-5 text-center">
+                <div className="flex justify-center"><Mascot mood={checkResult ? "happy" : "cheer"} size={96} /></div>
                 <p className="font-semibold text-navy-900">{copy.completedTitle}</p>
                 <p className="mt-1 text-sm text-neutral-600">{copy.completedBody}</p>
               </div>
@@ -581,14 +622,27 @@ export default function InteractiveLessonPage() {
 
             {completed && checkQuestions && checkQuestions.length > 0 && (
               <div className="rounded-sf-lg border border-neutral-200 bg-white p-5">
+                {!checkResult && (
+                  <MascotGuide
+                    mood="point"
+                    size={72}
+                    className="mb-3"
+                    message={isAr ? "يلا نشوف فهمت إيه! اختار الإجابة الصح لكل سؤال 👇" : "Let's see what you learned! Pick the right answer for each question 👇"}
+                  />
+                )}
                 <p className="mb-4 font-semibold text-navy-900">{copy.checkTitle}</p>
                 {checkResult ? (
-                  <div className="text-center text-sm">
-                    <p className="font-medium text-navy-900">{copy.checkResult(checkResult.correctCount, checkResult.total)}</p>
-                    <p className="mt-1 text-neutral-500">
-                      {checkResult.parentsNotified > 0 ? copy.checkParentNotified(checkResult.parentsNotified) : copy.checkNoParentLinked}
-                    </p>
-                  </div>
+                  <CelebrationCard
+                    correct={checkResult.correctCount}
+                    total={checkResult.total}
+                    scope={`lesson:${topicId}`}
+                    locale={locale}
+                    extra={
+                      <p className="mt-2 text-sm text-neutral-500">
+                        {checkResult.parentsNotified > 0 ? copy.checkParentNotified(checkResult.parentsNotified) : copy.checkNoParentLinked}
+                      </p>
+                    }
+                  />
                 ) : (
                   <form onSubmit={handleCheckSubmit} className="space-y-5">
                     {checkQuestions.map((q, qi) => (
@@ -596,19 +650,29 @@ export default function InteractiveLessonPage() {
                         <legend className="mb-2 text-sm text-neutral-700">
                           {qi + 1}. {isAr && q.promptAr ? q.promptAr : q.promptEn}
                         </legend>
-                        <div className="space-y-1">
-                          {(q.optionsJson ?? []).map((option) => (
-                            <label key={option} className="flex items-center gap-2 text-sm text-neutral-600">
-                              <input
-                                type="radio"
-                                name={q.id}
-                                value={option}
-                                checked={checkAnswers[q.id] === option}
-                                onChange={() => setCheckAnswers((prev) => ({ ...prev, [q.id]: option }))}
-                              />
-                              {option}
-                            </label>
-                          ))}
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {(q.optionsJson ?? []).map((option) => {
+                            const selected = checkAnswers[q.id] === option;
+                            return (
+                              <label
+                                key={option}
+                                data-selected={selected}
+                                className={`sf-kid-choice flex cursor-pointer items-center gap-3 rounded-2xl border-2 px-4 py-3 text-base ${
+                                  selected ? "border-sf-purple-600 bg-sf-purple-50 font-semibold text-navy-900" : "border-neutral-200 bg-white text-neutral-700 hover:border-sf-purple-100"
+                                }`}
+                              >
+                                <input
+                                  type="radio"
+                                  name={q.id}
+                                  value={option}
+                                  checked={selected}
+                                  onChange={() => { playSound("pop"); setCheckAnswers((prev) => ({ ...prev, [q.id]: option })); }}
+                                  className="h-5 w-5 accent-sf-purple-600"
+                                />
+                                {option}
+                              </label>
+                            );
+                          })}
                         </div>
                       </fieldset>
                     ))}
@@ -634,9 +698,18 @@ export default function InteractiveLessonPage() {
           {started && !completed && (
             <div className="mt-4 flex flex-col gap-3">
               {state?.readyToContinue && (
-                <SmartifyButton type="button" variant="ai" className="w-full" onClick={handleContinue} disabled={busy}>
-                  {copy.continueLabel}
-                </SmartifyButton>
+                <>
+                  {!busy && currentStepIndex < 2 && (
+                    <MascotGuide
+                      mood="point"
+                      size={64}
+                      message={isAr ? "فهمت الجزء ده؟ دوس «كمّل» عشان نروح للي بعده 👇" : "Got it? Tap Continue for the next part 👇"}
+                    />
+                  )}
+                  <SmartifyButton type="button" variant="ai" className={`w-full rounded-full py-4 text-lg ${busy ? "" : "sf-kid-pulse"}`} onClick={handleContinue} disabled={busy}>
+                    {copy.continueLabel}
+                  </SmartifyButton>
+                </>
               )}
               {/* Always available, not just while a check is pending — a
                   student can ask a mid-step question (an interruption)

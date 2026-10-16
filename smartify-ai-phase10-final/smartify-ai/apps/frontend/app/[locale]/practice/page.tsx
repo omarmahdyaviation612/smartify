@@ -12,6 +12,8 @@ import { getLocalizedExplanation } from "@/lib/localized-explanation";
 import type { Locale } from "@/content/marketing";
 import Link from "next/link";
 import { getLearningFeedback } from "@/content/learning-feedback";
+import { CelebrationCard } from "@/components/kids/Celebration";
+import { unlockSounds } from "@/components/kids/sounds";
 
 interface Subject {
   entitlement?: "ACTIVE" | "LOCKED";
@@ -123,6 +125,7 @@ export default function PracticePage() {
 
   async function submitPractice() {
     if (!questions?.length || busy) return;
+    unlockSounds();
     setBusy(true);
     setError(null);
     try {
@@ -236,12 +239,13 @@ export default function PracticePage() {
 
           {results && questions && (
             <div className="mt-8 space-y-6">
-              <div className="rounded-sf-lg bg-[--sf-bg-subtle] p-6 text-center">
-                <h2 className="text-lg font-semibold text-navy-900">{copy.resultsTitle}</h2>
-                <p className="mt-1 text-3xl font-bold text-navy-900">
-                  {results.correctCount}/{results.total}
-                </p>
-              </div>
+              <CelebrationCard
+                correct={results.correctCount}
+                total={results.total}
+                scope={`practice:${subjectId}:${topicId || "all"}`}
+                locale={locale}
+                extra={<p className="mt-1 text-sm text-neutral-500">{copy.resultsTitle}</p>}
+              />
 
               {results.feedback.map((f) => {
                 const q = questions.find((qq) => qq.id === f.questionId);
