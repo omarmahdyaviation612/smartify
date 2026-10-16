@@ -12,6 +12,8 @@ import { getLocalizedExplanation } from "@/lib/localized-explanation";
 import type { Locale } from "@/content/marketing";
 import Link from "next/link";
 import { getLearningFeedback } from "@/content/learning-feedback";
+import { CelebrationCard } from "@/components/kids/Celebration";
+import { unlockSounds } from "@/components/kids/sounds";
 
 interface Subject {
   entitlement?: "ACTIVE" | "LOCKED";
@@ -154,6 +156,7 @@ export default function QuizzesPage() {
 
   async function submitQuiz() {
     if (!questions?.length || busy) return;
+    unlockSounds();
     setBusy(true);
     setError(null);
     try {
@@ -290,13 +293,13 @@ export default function QuizzesPage() {
 
           {result && (
             <div className="mt-8 space-y-6">
-              <div className="rounded-sf-lg bg-[--sf-bg-subtle] p-6 text-center">
-                <h2 className="text-lg font-semibold text-navy-900">{copy.scoreLabel}</h2>
-                <p className="mt-1 text-3xl font-bold text-navy-900">{result.score}%</p>
-                <p className="mt-1 text-sm text-neutral-500">
-                  {result.correctCount}/{result.total}
-                </p>
-              </div>
+              <CelebrationCard
+                correct={result.correctCount}
+                total={result.total}
+                scope={`quiz:${subjectId}:${quizType}:${quizType === "topic_assessment" ? topicId : "all"}`}
+                locale={locale}
+                extra={<p className="mt-1 text-sm text-neutral-500">{copy.scoreLabel}: {result.score}%</p>}
+              />
 
               <div className="rounded-sf-lg border border-neutral-200 bg-white p-6">
                 <h3 className="mb-3 font-semibold text-navy-900">{copy.weakTopicsTitle}</h3>
