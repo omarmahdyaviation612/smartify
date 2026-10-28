@@ -8,7 +8,7 @@ import { getInstapayCopy, type InstapaySubmissionStatus } from "@/content/instap
 import { getAiLimitCopy } from "@/content/ai-limit";
 import { getMarketingCopy } from "@/content/marketing";
 import { Navbar } from "@/components/Navbar";
-import { useApiClient } from "@/lib/api-client";
+import { ApiError, useApiClient } from "@/lib/api-client";
 import type { Locale } from "@/content/marketing";
 
 interface InitiateResult {
@@ -21,6 +21,18 @@ interface InitiateResult {
 }
 
 const MAX_RECEIPT_BYTES = 5 * 1024 * 1024;
+
+// 4xx responses carry a specific, student-safe reason from the backend
+// ("A subscription change is already awaiting payment", "Complete onboarding
+// before subscribing", ...). Showing it instead of a blanket "Something went
+// wrong" lets a parent fix the problem themselves. 5xx / network failures keep
+// the generic copy so no internal detail leaks.
+function initiateErrorMessage(err: unknown, generic: string): string {
+  if (err instanceof ApiError && err.status >= 400 && err.status < 500 && err.message && !err.message.startsWith("Request failed")) {
+    return err.message;
+  }
+  return generic;
+}
 
 export default function InstapayCheckoutPage() {
   const { locale } = useParams<{ locale: Locale }>();
@@ -67,7 +79,7 @@ export default function InstapayCheckoutPage() {
         setInitiated(result);
         setAmount(String(result.expectedAmountEGP));
       } catch (err: any) {
-        setError(err?.status === 503 ? copy.notConfigured : copy.genericError);
+        setError(err?.status === 503 ? copy.notConfigured : initiateErrorMessage(err, copy.genericError));
       } finally {
         setLoading(false);
       }
