@@ -29,6 +29,10 @@ export function Navbar({ locale, copy }: { locale: Locale; copy: MarketingCopy }
           <Link href={`${base}/#how-it-works`}>{copy.nav.howItWorks}</Link>
           <Link href={`${base}/curricula`}>{copy.nav.curricula}</Link>
           <Link href={`${base}/pricing`}>{copy.nav.pricing}</Link>
+          {/* Signed-in students manage their subscription here; parents have their own payments page. */}
+          <SignedIn>
+            {user && user.role !== "PARENT" && <Link href={`${base}/billing`}>{copy.nav.billing}</Link>}
+          </SignedIn>
           <Link href={`${base}/for-parents`}>{copy.nav.forParents}</Link>
         </nav>
 

@@ -171,14 +171,16 @@ export default function BillingPage() {
                   {copy.statusLabel}: <span className="font-medium text-navy-900">{subscription.status}</span>
                 </p>
                 {subscription.pendingSubjectChange && (
-                  <a className="inline-block font-medium text-ai-600 underline" href={subscription.pendingSubjectChange.checkoutUrl ?? `/${locale}/billing/instapay?kind=subscription&subjectIds=${encodeURIComponent(subscription.pendingSubjectChange.subjectIds.join(","))}&homeworkAddon=${subscription.pendingSubjectChange.homeworkAddonActive === true}&homeworkAddonAllowance=${subscription.pendingSubjectChange.homeworkAddonAllowance ?? ""}`}>
+                  <a className="block font-medium text-ai-600 underline" href={subscription.pendingSubjectChange.checkoutUrl ?? `/${locale}/billing/instapay?kind=subscription&subjectIds=${encodeURIComponent(subscription.pendingSubjectChange.subjectIds.join(","))}&homeworkAddon=${subscription.pendingSubjectChange.homeworkAddonActive === true}&homeworkAddonAllowance=${subscription.pendingSubjectChange.homeworkAddonAllowance ?? ""}`}>
                     {isAr ? "متابعة الدفع لإضافة المادة" : "Continue payment to add your subject"}
                   </a>
                 )}
                 {subscription.status === "active" && (
-                  <SmartifyButton variant="secondary" onClick={handleCancel} className="mt-2">
-                    {copy.cancelLabel}
-                  </SmartifyButton>
+                  <div className="pt-2">
+                    <SmartifyButton variant="secondary" onClick={handleCancel}>
+                      {copy.cancelLabel}
+                    </SmartifyButton>
+                  </div>
                 )}
               </div>
             ) : (

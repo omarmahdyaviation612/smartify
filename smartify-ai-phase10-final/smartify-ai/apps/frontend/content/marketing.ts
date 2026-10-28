@@ -16,6 +16,7 @@ export interface MarketingCopy {
     howItWorks: string;
     curricula: string;
     pricing: string;
+    billing: string;
     forParents: string;
     login: string;
     getStarted: string;
@@ -90,6 +91,7 @@ const en: MarketingCopy = {
     howItWorks: "How It Works",
     curricula: "Curricula",
     pricing: "Pricing",
+    billing: "Billing",
     forParents: "For Parents",
     login: "Log In",
     getStarted: "Get Started",
@@ -185,6 +187,7 @@ const ar: MarketingCopy = {
     howItWorks: "كيف تعمل المنصة",
     curricula: "المناهج",
     pricing: "الأسعار",
+    billing: "الاشتراك والدفع",
     forParents: "لأولياء الأمور",
     login: "تسجيل الدخول",
     getStarted: "ابدأ الآن",
