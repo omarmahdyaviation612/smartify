@@ -234,6 +234,74 @@ describe("BillingService", () => {
     });
   });
 
+  describe("abandoned InstaPay subscription change", () => {
+    const activeWithPendingInstapayChange = {
+      id: "sub-1", studentId: "student-1", status: "active", selectedSubjectIds: ["math"], monthlyTotalEGP: 150,
+      homeworkAddonActive: false, homeworkAddonMonthlyAllowance: null, paymentProvider: "instapay", externalSubscriptionId: "SMAI-S-OLD00001",
+      pendingSubjectChange: { subjectIds: ["math", "science"], monthlyTotalEGP: 300, homeworkAddonActive: false, homeworkAddonAllowance: null },
+    };
+    const subjects = [
+      { id: "math", nameEn: "Math", priceEGP: 150 },
+      { id: "arabic", nameEn: "Arabic", priceEGP: 200 },
+    ];
+
+    async function withInstapayEnv<T>(fn: () => Promise<T>) {
+      const name = process.env.INSTAPAY_RECIPIENT_NAME;
+      const handle = process.env.INSTAPAY_RECIPIENT_HANDLE;
+      process.env.INSTAPAY_RECIPIENT_NAME = "Test Recipient";
+      process.env.INSTAPAY_RECIPIENT_HANDLE = "test-handle";
+      try { return await fn(); } finally {
+        if (name === undefined) delete process.env.INSTAPAY_RECIPIENT_NAME; else process.env.INSTAPAY_RECIPIENT_NAME = name;
+        if (handle === undefined) delete process.env.INSTAPAY_RECIPIENT_HANDLE; else process.env.INSTAPAY_RECIPIENT_HANDLE = handle;
+      }
+    }
+
+    it("replaces an unpaid pending change with the new selection and issues a fresh reference", async () => {
+      const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+      const prisma = makePrismaMock({ subjects, subscriptionUpdateMany: updateMany, subscriptionFindUnique: activeWithPendingInstapayChange });
+      prisma.client.instapayPaymentSubmission = { findFirst: jest.fn().mockResolvedValue(null) };
+      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
+
+      const result = await withInstapayEnv(() => service.startInstapayCheckout("user-1", { subjectIds: ["math", "arabic"] }));
+
+      expect(prisma.client.instapayPaymentSubmission.findFirst.mock.calls[0][0].where).toMatchObject({ referenceId: "SMAI-S-OLD00001" });
+      // 1) the abandoned change is cleared, guarded on its exact old value
+      expect(updateMany.mock.calls[0][0]).toMatchObject({
+        where: { id: "sub-1", pendingSubjectChange: { equals: activeWithPendingInstapayChange.pendingSubjectChange } },
+        data: { homeworkAddonPendingActive: null },
+      });
+      // 2) the new change is claimed
+      expect(updateMany.mock.calls[1][0].data.pendingSubjectChange).toMatchObject({ subjectIds: ["math", "arabic"], monthlyTotalEGP: 350 });
+      expect(result.expectedAmountEGP).toBe(350);
+      expect(result.referenceId).toMatch(/^SMAI-S-/);
+      expect(result.referenceId).not.toBe("SMAI-S-OLD00001");
+    });
+
+    it("keeps blocking while a receipt for the pending change is awaiting review", async () => {
+      const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+      const prisma = makePrismaMock({ subjects, subscriptionUpdateMany: updateMany, subscriptionFindUnique: activeWithPendingInstapayChange });
+      prisma.client.instapayPaymentSubmission = { findFirst: jest.fn().mockResolvedValue({ id: "submission-1" }) };
+      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
+
+      await expect(withInstapayEnv(() => service.startInstapayCheckout("user-1", { subjectIds: ["math", "arabic"] })))
+        .rejects.toThrow(/still being reviewed/);
+      expect(updateMany).not.toHaveBeenCalled();
+    });
+
+    it("still resumes the same reference when the student repeats the identical selection", async () => {
+      const prisma = makePrismaMock({ subjects: [{ id: "math", nameEn: "Math", priceEGP: 150 }, { id: "science", nameEn: "Science", priceEGP: 150 }],
+        subscriptionFindUnique: activeWithPendingInstapayChange });
+      prisma.client.instapayPaymentSubmission = { findFirst: jest.fn() };
+      const service = new BillingService(prisma, makeProviderFactoryMock(), { applyPaidPurchase: jest.fn() } as any, referralServiceMock);
+
+      const result = await withInstapayEnv(() => service.startInstapayCheckout("user-1", { subjectIds: ["math", "science"] }));
+
+      expect(result.referenceId).toBe("SMAI-S-OLD00001");
+      expect(result.expectedAmountEGP).toBe(300);
+      expect(prisma.client.instapayPaymentSubmission.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
   describe("cancelSubscription", () => {
     function makeCancelPrisma(subscription: any) {
       const prisma = makePrismaMock();

@@ -62,6 +62,16 @@ export class BillingService {
     });
   }
 
+  /** A receipt awaiting review (or already accepted) for this InstaPay reference. */
+  private async hasOpenInstapaySubmission(referenceId: string | null | undefined) {
+    if (!referenceId) return false;
+    const submission = await this.prisma.client.instapayPaymentSubmission.findFirst({
+      where: { referenceId, status: { in: ["PENDING_VERIFICATION", "VERIFIED"] } },
+      select: { id: true },
+    });
+    return submission != null;
+  }
+
   private async getProfileOrThrow(userId: string) {
     const profile = await this.prisma.client.studentProfile.findUnique({ where: { userId }, include: { subjects: true, user: { select: { role: true, isTestStudent: true } }, grade: true, curriculum: true } });
     if (!profile) throw new NotFoundException("Complete onboarding before subscribing.");
@@ -219,14 +229,35 @@ export class BillingService {
       const hasSubjectAddition = selectedSubjectIds.some(id => !previousIds.includes(id));
       const addonChanged = requestedHomeworkAddon !== currentlyHasHomeworkAddon || requestedHomeworkAddonAllowance !== currentAllowance;
       if (!hasSubjectAddition && !addonChanged) throw new BadRequestException("Select an additional subject or change the Homework Helper add-on.");
-      const pending = pendingChange(existing);
+      let pending = pendingChange(existing);
       if (pending) {
-        if (pending.subjectIds.length !== selectedSubjectIds.length
+        const differs = pending.subjectIds.length !== selectedSubjectIds.length
           || pending.subjectIds.some(id => !selectedSubjectIds.includes(id))
           || (pending.homeworkAddonActive ?? currentlyHasHomeworkAddon) !== requestedHomeworkAddon
-          || (pending.homeworkAddonAllowance ?? currentAllowance) !== requestedHomeworkAddonAllowance) {
-          throw new BadRequestException("A subscription change is already awaiting payment. Complete it before starting another.");
+          || (pending.homeworkAddonAllowance ?? currentAllowance) !== requestedHomeworkAddonAllowance;
+        if (differs) {
+          // An abandoned InstaPay change (reference issued, nothing paid)
+          // used to lock the student out of ever changing their selection.
+          // It is safe to replace as long as no receipt was submitted
+          // against its reference: activation only accepts a receipt whose
+          // reference equals the subscription's CURRENT reference, so the
+          // old reference can never activate the new selection.
+          const replaceable = existing.paymentProvider === "instapay"
+            && !(await this.hasOpenInstapaySubmission(existing.externalSubscriptionId));
+          if (!replaceable) {
+            throw new BadRequestException(existing.paymentProvider === "instapay"
+              ? "Your previous InstaPay receipt is still being reviewed. You can change your subjects once it's confirmed."
+              : "A subscription change is already awaiting payment. Complete it before starting another.");
+          }
+          const cleared = await this.prisma.client.subscription.updateMany({
+            where: { id: existing.id, pendingSubjectChange: { equals: pending } },
+            data: { pendingSubjectChange: Prisma.DbNull, homeworkAddonPendingActive: null, homeworkAddonPendingAmountEGP: null, homeworkAddonPendingAllowance: null },
+          });
+          if (cleared.count !== 1) throw new BadRequestException("A subscription change is already awaiting payment.");
+          pending = null;
         }
+      }
+      if (pending) {
         return {
           subjects,
           monthlyTotalEGP: pending.monthlyTotalEGP,
